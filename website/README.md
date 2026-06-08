@@ -11,6 +11,24 @@ python3 -m http.server 4173
 
 打开 `http://localhost:4173` 即可预览。
 
+## 自动发布
+
+官网通过 GitHub Actions 自动发布到 GitHub Pages。修改 `website/` 目录或
+`.github/workflows/website.yml` 后推送到 `main` / `master`，会触发 `Website`
+workflow，把 `website/` 作为静态站点发布。
+
+首次启用时，需要在 GitHub 仓库中打开：
+
+```text
+Settings -> Pages -> Build and deployment -> Source -> GitHub Actions
+```
+
+发布地址沿用页面中的 canonical URL：
+
+```text
+https://mio888888.github.io/OpsBatch/
+```
+
 ## 下载链接
 
 当前下载按钮指向：

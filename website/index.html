@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="author" content="Mio" />
+    <meta
+      name="keywords"
+      content="OpsBatch, 运维工具, SSH 终端, SFTP, 批量命令, 自动化工作流, SRE, DevOps, 本地桌面应用, Tauri"
+    />
+    <meta
+      name="description"
+      content="OpsBatch 是面向运维工程师、SRE 与平台团队的本地桌面工作台，把 SSH 终端、批量命令、SFTP、工作流和 AI 辅助收进一个本地应用。"
+    />
+    <meta name="theme-color" content="#fff1e8" />
+    <meta name="application-name" content="OpsBatch" />
+    <meta name="apple-mobile-web-app-title" content="OpsBatch" />
+    <link rel="canonical" href="https://mio888888.github.io/OpsBatch/" />
+    <link rel="manifest" href="./site.webmanifest" />
+    <link rel="apple-touch-icon" href="./assets/app-icon.png" />
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+    <link rel="preconnect" href="https://api.github.com" crossorigin />
+    <link rel="preconnect" href="https://github.com" crossorigin />
+    <meta property="og:title" content="OpsBatch - 本地运维工作台" />
+    <meta
+      property="og:description"
+      content="服务器、命令、文件传输与自动化流程，集中在一个更顺手的本地工作台里。"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://mio888888.github.io/OpsBatch/" />
+    <meta property="og:site_name" content="OpsBatch" />
+    <meta property="og:locale" content="zh_CN" />
+    <meta property="og:image" content="https://mio888888.github.io/OpsBatch/assets/app-icon.png" />
+    <meta property="og:image:alt" content="OpsBatch 应用图标" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="OpsBatch - 本地运维工作台" />
+    <meta
+      name="twitter:description"
+      content="本地管理 SSH 终端、批量命令、SFTP、工作流和 AI 运维辅助。"
+    />
+    <meta name="twitter:image" content="https://mio888888.github.io/OpsBatch/assets/app-icon.png" />
+    <title>OpsBatch - 本地 SSH / SFTP / 批量运维工作台</title>
+    <link rel="icon" href="./assets/app-icon.png" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "OpsBatch",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS, Windows, Linux",
+        "softwareVersion": "0.1.0",
+        "description": "OpsBatch 是面向运维工程师、SRE 与平台团队的本地桌面工作台，用于集中管理 SSH 终端、批量命令、SFTP 文件传输、自动化工作流与 AI 运维辅助。",
+        "url": "https://mio888888.github.io/OpsBatch/",
+        "downloadUrl": "https://github.com/Mio888888/OpsBatch/releases/latest",
+        "image": "https://mio888888.github.io/OpsBatch/assets/app-icon.png",
+        "author": {
+          "@type": "Organization",
+          "name": "Mio"
+        },
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "sameAs": ["https://github.com/Mio888888/OpsBatch"]
+      }
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">跳到主要内容</a>
+    <div class="site-shell">
+      <header class="topbar" aria-label="主导航">
+        <a class="brand" href="#hero" aria-label="OpsBatch 首页">
+          <span class="brand-mark" aria-hidden="true">
+            <img src="./assets/app-icon.png" alt="OpsBatch 应用图标" />
+          </span>
+          <span class="brand-copy">
+            <strong>OpsBatch</strong>
+            <small>local-first ops</small>
+          </span>
+        </a>
+
+        <nav class="nav-links" aria-label="页面区块">
+          <a href="#features">能力</a>
+          <a href="#workflow">流程</a>
+          <a href="#security">安全</a>
+          <a href="#download">下载</a>
+        </nav>
+
+        <a class="nav-cta clay-button" href="#download">
+          软件下载
+        </a>
+      </header>
+
+      <main id="main-content">
+        <section id="hero" class="hero-section" aria-labelledby="hero-title">
+          <div class="hero-copy">
+            <p class="eyebrow">SSH / SFTP / Workflow / AI</p>
+            <h1 id="hero-title" class="hero-title">
+              <span>把运维操作</span>
+              <span>收进一个 <em>本地</em></span>
+              <span class="title-chip">工作台</span>
+            </h1>
+            <p class="hero-subtitle">
+              主机、终端、批量命令、文件传输和自动化流程集中管理。数据留在本机，执行过程更清楚。
+            </p>
+            <div class="hero-actions" aria-label="主要操作">
+              <a class="clay-button clay-button-primary" href="#download">立即下载</a>
+              <a class="text-link" href="#features">查看能力</a>
+            </div>
+            <div class="trust-strip" aria-label="产品特点">
+              <span>本地数据</span>
+              <span>批量执行</span>
+              <span>可追踪回放</span>
+            </div>
+            <a class="release-link" href="https://github.com/Mio888888/OpsBatch/releases/latest" target="_blank" rel="noreferrer">
+              查看最新 Release
+            </a>
+          </div>
+
+          <div class="hero-visual" aria-label="OpsBatch 产品界面示意">
+            <div class="clay-window product-window">
+              <div class="window-toolbar">
+                <div class="traffic-lights" aria-hidden="true">
+                  <span></span><span></span><span></span>
+                </div>
+                <div class="mode-pill">
+                  <span class="pill-active">终端</span>
+                  <span>编排</span>
+                  <span>仓库</span>
+                </div>
+              </div>
+              <div class="product-grid">
+                <div class="terminal-panel clay-recessed">
+                  <div class="terminal-tabs">
+                    <span class="online-dot"></span>
+                    <strong>测试</strong>
+                    <span>178.236.46.50</span>
+                  </div>
+                  <pre><code>Last login: Mon Jun 8 23:53:21
+root@opsbatch:~# run health-check --group prod
+CPU ok    MEM ok    SSH 16/16
+root@opsbatch:~# _</code></pre>
+                </div>
+                <aside class="monitor-card clay-card">
+                  <div class="monitor-head">
+                    <span>IP 178.236.46.50</span>
+                    <button type="button" aria-label="复制 IP">复制</button>
+                  </div>
+                  <div class="metric">
+                    <span>CPU</span>
+                    <i style="--value: 34%"></i>
+                    <b>34%</b>
+                  </div>
+                  <div class="metric">
+                    <span>内存</span>
+                    <i style="--value: 28%"></i>
+                    <b>0.4G/1.9G</b>
+                  </div>
+                  <div class="process-list">
+                    <div><b>139.0M</b><span>1panel</span></div>
+                    <div><b>82.7M</b><span>dockerd</span></div>
+                    <div><b>53.3M</b><span>systemd</span></div>
+                  </div>
+                </aside>
+                <div class="sftp-card clay-card">
+                  <div class="split-title"><span>本机</span><span>远程</span></div>
+                  <div class="file-row"><span class="folder-icon"></span>.codex</div>
+                  <div class="file-row"><span class="folder-icon"></span>.ssh</div>
+                  <div class="file-row"><span class="file-icon"></span>test_result.txt</div>
+                </div>
+              </div>
+            </div>
+            <div class="floating-badge badge-a">16 台广播终端</div>
+            <div class="floating-badge badge-b">AI 风险解释</div>
+          </div>
+        </section>
+
+        <section id="features" class="section-block" aria-labelledby="features-title">
+          <div class="section-heading">
+            <div class="section-kicker">
+              <p class="eyebrow">All the busy parts, softened</p>
+              <h2 id="features-title">常用运维能力，放在同一个可触摸的界面里。</h2>
+              <p class="section-note">从一次 SSH 登录到一组批量任务，OpsBatch 让重复操作有入口、有记录、有复用方式。</p>
+            </div>
+          </div>
+          <div class="feature-grid">
+            <article class="feature-card clay-card">
+              <div class="feature-meta"><span class="feature-icon">SSH</span><small>01</small></div>
+              <h3>主机与终端</h3>
+              <p>管理主机、分组、标签与跳板链路，一处打开本地或远程 SSH 终端。</p>
+            </article>
+            <article class="feature-card clay-card">
+              <div class="feature-meta"><span class="feature-icon">RUN</span><small>02</small></div>
+              <h3>批量执行</h3>
+              <p>对选中主机并发运行命令，保留结果、失败重试和终端回放。</p>
+            </article>
+            <article class="feature-card clay-card">
+              <div class="feature-meta"><span class="feature-icon">SFTP</span><small>03</small></div>
+              <h3>文件与编辑</h3>
+              <p>本地/远程双栏浏览，上传下载、预览、书签和远程编辑都在同一处。</p>
+            </article>
+            <article class="feature-card clay-card">
+              <div class="feature-meta"><span class="feature-icon">AI</span><small>04</small></div>
+              <h3>AI 辅助判断</h3>
+              <p>基于终端上下文生成命令、分析输出、解释风险，确认后再执行。</p>
+            </article>
+          </div>
+        </section>
+
+        <section id="workflow" class="workflow-section" aria-labelledby="workflow-title">
+          <div class="workflow-copy">
+            <p class="eyebrow">From command to routine</p>
+            <h2 id="workflow-title">从临时命令，到团队资产。</h2>
+            <p>
+              命令库、脚本库、快捷动作和工作流串成一条路径：先解决一次问题，再把它保存成可重复执行的流程。
+            </p>
+          </div>
+          <div class="workflow-board clay-window">
+            <div class="workflow-node node-start">选择主机</div>
+            <div class="workflow-line"></div>
+            <div class="workflow-node node-command">执行脚本</div>
+            <div class="workflow-line"></div>
+            <div class="workflow-node node-check">人工确认</div>
+            <div class="workflow-line"></div>
+            <div class="workflow-node node-done">记录结果</div>
+          </div>
+        </section>
+
+        <section id="security" class="section-block security-section" aria-labelledby="security-title">
+          <div class="security-shell clay-window">
+            <div class="security-copy">
+              <p class="eyebrow">Local-first by design</p>
+              <h2 id="security-title">风险不靠记忆管理，靠流程提前暴露。</h2>
+              <p>危险命令、执行结果和操作记录都留在可检查的位置，方便复盘，也方便交接。</p>
+            </div>
+            <aside class="security-status clay-recessed" aria-label="安全状态">
+              <span>Audit</span>
+              <strong>Records on</strong>
+              <small>rules / replay</small>
+            </aside>
+          </div>
+          <div class="risk-track" aria-label="安全流程">
+            <article class="risk-step">
+              <span>01</span>
+              <div>
+                <strong>本地数据</strong>
+                <p>主机、命令库、执行记录与设置优先保存在本机，减少中心服务依赖。</p>
+              </div>
+            </article>
+            <article class="risk-step">
+              <span>02</span>
+              <div>
+                <strong>危险命令防护</strong>
+                <p>高风险规则会在执行前拦截确认，也可以结合 AI 解释潜在影响。</p>
+              </div>
+            </article>
+            <article class="risk-step">
+              <span>03</span>
+              <div>
+                <strong>可追踪执行</strong>
+                <p>批量任务保留主机维度结果、时间线与回放，复盘时不用猜。</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="download" class="download-section clay-window" aria-labelledby="download-title">
+          <div class="download-copy">
+            <p class="eyebrow">Download OpsBatch</p>
+            <h2 id="download-title">下载适合你系统的桌面版。</h2>
+            <p>
+              页面会自动识别 macOS、Windows 或 Linux，并推荐对应安装包。所有版本从 GitHub Releases 获取。
+            </p>
+            <div class="detected-system clay-recessed" aria-live="polite">
+              <span>当前识别</span>
+              <strong id="detected-os">正在识别系统...</strong>
+            </div>
+            <p id="download-status" class="download-status" aria-live="polite">正在读取最新安装包列表...</p>
+          </div>
+          <div class="download-panel" aria-label="软件下载">
+            <a
+              id="primary-download"
+              class="download-primary clay-button clay-button-primary"
+              href="https://github.com/Mio888888/OpsBatch/releases/latest"
+              target="_blank"
+              rel="noreferrer"
+            >
+              打开下载页
+            </a>
+            <div class="download-options">
+              <a class="download-option" data-os="mac" href="https://github.com/Mio888888/OpsBatch/releases/latest" target="_blank" rel="noreferrer">
+                <span>macOS</span>
+                <strong>.dmg / .app.tar.gz</strong>
+              </a>
+              <a class="download-option" data-os="windows" href="https://github.com/Mio888888/OpsBatch/releases/latest" target="_blank" rel="noreferrer">
+                <span>Windows</span>
+                <strong>.exe / .msi</strong>
+              </a>
+              <a class="download-option" data-os="linux" href="https://github.com/Mio888888/OpsBatch/releases/latest" target="_blank" rel="noreferrer">
+                <span>Linux</span>
+                <strong>.AppImage / .deb / .rpm</strong>
+              </a>
+            </div>
+            <p class="download-note">如果自动识别不准确，可以直接选择下面的系统版本。</p>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <div>
+          <strong>OpsBatch</strong>
+          <span>Local ops, softer surface.</span>
+        </div>
+        <nav aria-label="页脚链接">
+          <a href="#download">下载</a>
+          <a href="https://github.com/Mio888888/OpsBatch/releases/latest" target="_blank" rel="noreferrer">Release</a>
+          <a href="https://github.com/Mio888888/OpsBatch" target="_blank" rel="noreferrer">源码</a>
+          <a href="https://github.com/Mio888888/OpsBatch/blob/master/README.md" target="_blank" rel="noreferrer">说明</a>
+        </nav>
+      </footer>
+    </div>
+
+    <script src="./script.js"></script>
+  </body>
+</html>

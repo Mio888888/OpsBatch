@@ -1,0 +1,18 @@
+{
+  "name": "OpsBatch",
+  "short_name": "OpsBatch",
+  "description": "本地 SSH、SFTP、批量命令与自动化工作流运维工作台。",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#fff1e8",
+  "theme_color": "#fff1e8",
+  "icons": [
+    {
+      "src": "./assets/app-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

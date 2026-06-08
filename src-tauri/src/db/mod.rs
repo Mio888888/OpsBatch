@@ -1,0 +1,651 @@
+use rusqlite::Connection;
+
+use std::sync::{Arc, Mutex};
+
+pub struct Database {
+    pub conn: Arc<Mutex<Connection>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Database;
+
+    fn temp_db_path(name: &str) -> std::path::PathBuf {
+        let unique = format!(
+            "opsbatch-{}-{}.db",
+            name,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        );
+        std::env::temp_dir().join(unique)
+    }
+
+    #[test]
+    fn init_tables_migrates_scheduled_pull_strategy_to_startup_update() {
+        let db_path = temp_db_path("startup-update-migration");
+        {
+            let conn = rusqlite::Connection::open(&db_path).expect("open fixture db");
+            conn.execute_batch(
+                "
+                CREATE TABLE github_repos (
+                    id TEXT PRIMARY KEY,
+                    url TEXT NOT NULL,
+                    branch TEXT DEFAULT 'main',
+                    token TEXT,
+                    pull_strategy TEXT DEFAULT 'manual',
+                    last_pulled_at TEXT,
+                    enabled INTEGER DEFAULT 1
+                );
+                INSERT INTO github_repos (id, url, pull_strategy) VALUES
+                    ('manual-repo', 'https://example.com/manual.git', 'manual'),
+                    ('daily-repo', 'https://example.com/daily.git', 'daily'),
+                    ('weekly-repo', 'https://example.com/weekly.git', 'weekly');
+                ",
+            )
+            .expect("seed fixture db");
+        }
+
+        let database = Database::new(&db_path).expect("open db");
+        database.init_tables().expect("init tables");
+
+        let conn = database.conn.lock().expect("lock db");
+        let manual: i32 = conn
+            .query_row(
+                "SELECT update_on_startup FROM github_repos WHERE id='manual-repo'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("manual repo");
+        let daily: i32 = conn
+            .query_row(
+                "SELECT update_on_startup FROM github_repos WHERE id='daily-repo'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("daily repo");
+        let weekly: i32 = conn
+            .query_row(
+                "SELECT update_on_startup FROM github_repos WHERE id='weekly-repo'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("weekly repo");
+
+        assert_eq!(0, manual);
+        assert_eq!(1, daily);
+        assert_eq!(1, weekly);
+
+        drop(conn);
+        let _ = std::fs::remove_file(db_path);
+    }
+}
+
+impl Database {
+    pub fn new(db_path: &std::path::PathBuf) -> Result<Self, String> {
+        let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
+        conn.execute_batch(
+            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+        })
+    }
+
+    pub fn init_tables(&self) -> Result<(), String> {
+        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS hosts (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                ip TEXT NOT NULL,
+                port INTEGER DEFAULT 22,
+                auth_type TEXT DEFAULT 'password',
+                username TEXT DEFAULT 'root',
+                password TEXT,
+                private_key TEXT,
+                os TEXT DEFAULT 'linux',
+                tags TEXT DEFAULT '[]',
+                group_id TEXT,
+                remark TEXT DEFAULT '',
+                status TEXT DEFAULT 'unknown',
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+
+            CREATE TABLE IF NOT EXISTS host_groups (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                parent_id TEXT,
+                sort_order INTEGER DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS tags (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL UNIQUE,
+                color TEXT DEFAULT '#1677ff',
+                icon TEXT DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS execution_history (
+                id TEXT PRIMARY KEY,
+                command TEXT NOT NULL,
+                host_ids TEXT NOT NULL,
+                host_count INTEGER,
+                success_count INTEGER DEFAULT 0,
+                fail_count INTEGER DEFAULT 0,
+                started_at TEXT,
+                completed_at TEXT,
+                duration INTEGER DEFAULT 0,
+                quick_action_id TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS commands (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                command TEXT NOT NULL,
+                category TEXT DEFAULT '',
+                tags TEXT DEFAULT '[]',
+                risk TEXT DEFAULT 'low',
+                description TEXT DEFAULT '',
+                platform TEXT DEFAULT 'linux',
+                starred INTEGER DEFAULT 0,
+                is_builtin INTEGER DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS scripts (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                language TEXT DEFAULT 'shell',
+                category TEXT DEFAULT '',
+                tags TEXT DEFAULT '[]',
+                risk TEXT DEFAULT 'low',
+                description TEXT DEFAULT '',
+                content TEXT DEFAULT '',
+                parameters TEXT DEFAULT '[]',
+                platform TEXT DEFAULT 'linux',
+                starred INTEGER DEFAULT 0,
+                is_builtin INTEGER DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS quick_actions (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                command TEXT NOT NULL,
+                category TEXT DEFAULT '',
+                shortcut TEXT,
+                parameters TEXT DEFAULT '[]',
+                sort_order INTEGER DEFAULT 0,
+                starred INTEGER DEFAULT 0,
+                description TEXT DEFAULT '',
+                tags TEXT DEFAULT '[]',
+                language TEXT DEFAULT 'shell',
+                last_run_at TEXT DEFAULT '',
+                last_status TEXT DEFAULT ''
+            );
+
+            CREATE TABLE IF NOT EXISTS github_repos (
+                id TEXT PRIMARY KEY,
+                url TEXT NOT NULL,
+                branch TEXT DEFAULT 'main',
+                token TEXT,
+                last_pulled_at TEXT,
+                update_on_startup INTEGER DEFAULT 0,
+                enabled INTEGER DEFAULT 1
+            );
+
+            CREATE TABLE IF NOT EXISTS danger_rules (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                pattern TEXT NOT NULL,
+                enabled INTEGER DEFAULT 1,
+                is_builtin INTEGER DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS execution_details (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                history_id TEXT NOT NULL,
+                host_id TEXT NOT NULL,
+                host_name TEXT DEFAULT '',
+                status TEXT DEFAULT 'pending',
+                output TEXT DEFAULT '',
+                exit_code INTEGER DEFAULT 0,
+                duration INTEGER DEFAULT 0
+            );
+
+            CREATE TABLE IF NOT EXISTS execution_cancellations (
+                task_id TEXT PRIMARY KEY,
+                cancelled_at TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+
+            CREATE TABLE IF NOT EXISTS script_versions (
+                id TEXT PRIMARY KEY,
+                script_id TEXT NOT NULL,
+                content TEXT NOT NULL,
+                label TEXT NOT NULL,
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+
+            CREATE TABLE IF NOT EXISTS workflows (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                nodes TEXT DEFAULT '[]',
+                connections TEXT DEFAULT '[]',
+                status TEXT DEFAULT 'draft',
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+
+            CREATE TABLE IF NOT EXISTS general_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS workflow_templates (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                nodes TEXT DEFAULT '[]',
+                connections TEXT DEFAULT '[]',
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+
+            CREATE TABLE IF NOT EXISTS scheduled_tasks (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                cron TEXT NOT NULL,
+                workflow_id TEXT NOT NULL,
+                enabled INTEGER DEFAULT 1,
+                last_run_at TEXT,
+                next_run_at TEXT,
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+
+            -- Migration: drop credential_id from hosts table (if exists)
+            -- SQLite doesn't support DROP COLUMN before 3.35.0, so use table rebuild
+
+            CREATE TABLE IF NOT EXISTS ai_conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL DEFAULT '',
+                scope TEXT NOT NULL DEFAULT 'global',
+                scope_id TEXT DEFAULT '',
+                model TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_messages (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                model TEXT DEFAULT '',
+                tokens_used INTEGER DEFAULT 0,
+                created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                FOREIGN KEY (conversation_id) REFERENCES ai_conversations(id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_ai_messages_conversation ON ai_messages(conversation_id, created_at);
+
+            CREATE TABLE IF NOT EXISTS ai_action_audit (
+                id TEXT PRIMARY KEY,
+                conversation_id TEXT DEFAULT '',
+                session_id TEXT DEFAULT '',
+                action_id TEXT NOT NULL,
+                event TEXT NOT NULL,
+                command TEXT NOT NULL,
+                decision TEXT NOT NULL,
+                risk_level TEXT NOT NULL,
+                risk_score INTEGER NOT NULL,
+                matched_rule TEXT DEFAULT '',
+                reason TEXT DEFAULT '',
+                host TEXT DEFAULT '',
+                created_at TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_ai_action_audit_action ON ai_action_audit(action_id, created_at);
+            ",
+        )
+        .map_err(|e| e.to_string())?;
+
+        // Migrate: remove credential_id column from hosts if it still exists
+        let has_credential_id: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('hosts') WHERE name='credential_id'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+
+        if has_credential_id {
+            conn.execute_batch(
+                "
+                CREATE TABLE hosts_new (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    ip TEXT NOT NULL,
+                    port INTEGER DEFAULT 22,
+                    auth_type TEXT DEFAULT 'password',
+                    username TEXT DEFAULT 'root',
+                    password TEXT,
+                    private_key TEXT,
+                    os TEXT DEFAULT 'linux',
+                    tags TEXT DEFAULT '[]',
+                    group_id TEXT,
+                    remark TEXT DEFAULT '',
+                    status TEXT DEFAULT 'unknown',
+                    created_at TEXT DEFAULT (datetime('now', 'localtime')),
+                    updated_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
+                INSERT INTO hosts_new SELECT id, name, ip, port, auth_type, 'root' as username, NULL as password, NULL as private_key, os, tags, group_id, remark, status, created_at, updated_at FROM hosts;
+                DROP TABLE hosts;
+                ALTER TABLE hosts_new RENAME TO hosts;
+                "
+            ).map_err(|e| format!("migration failed: {}", e))?;
+        }
+
+        // Drop credentials table if it exists
+        conn.execute_batch("DROP TABLE IF EXISTS credentials;")
+            .map_err(|e| e.to_string())?;
+
+        // Add icon column to tags if missing
+        let has_icon: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('tags') WHERE name='icon'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_icon {
+            conn.execute_batch("ALTER TABLE tags ADD COLUMN icon TEXT DEFAULT '';")
+                .map_err(|e| e.to_string())?;
+        }
+
+        // Migrate: add username/password/private_key columns to hosts if missing
+        let has_username: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('hosts') WHERE name='username'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_username {
+            conn.execute_batch("ALTER TABLE hosts ADD COLUMN username TEXT DEFAULT 'root';")
+                .map_err(|e| e.to_string())?;
+        }
+
+        let has_password: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('hosts') WHERE name='password'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_password {
+            conn.execute_batch("ALTER TABLE hosts ADD COLUMN password TEXT;")
+                .map_err(|e| e.to_string())?;
+        }
+
+        let has_private_key: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('hosts') WHERE name='private_key'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_private_key {
+            conn.execute_batch("ALTER TABLE hosts ADD COLUMN private_key TEXT;")
+                .map_err(|e| e.to_string())?;
+        }
+
+        // Add jump_chain column to hosts if missing
+        let has_jump_chain: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('hosts') WHERE name='jump_chain'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_jump_chain {
+            conn.execute_batch("ALTER TABLE hosts ADD COLUMN jump_chain TEXT DEFAULT '[]';")
+                .map_err(|e| e.to_string())?;
+        }
+
+        // Migrate: add new columns to quick_actions if missing
+        let has_qa_starred: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('quick_actions') WHERE name='starred'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_qa_starred {
+            conn.execute_batch("ALTER TABLE quick_actions ADD COLUMN starred INTEGER DEFAULT 0;")
+                .map_err(|e| e.to_string())?;
+        }
+
+        let has_qa_description: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('quick_actions') WHERE name='description'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_qa_description {
+            conn.execute_batch("ALTER TABLE quick_actions ADD COLUMN description TEXT DEFAULT '';")
+                .map_err(|e| e.to_string())?;
+        }
+
+        let has_qa_tags: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('quick_actions') WHERE name='tags'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_qa_tags {
+            conn.execute_batch("ALTER TABLE quick_actions ADD COLUMN tags TEXT DEFAULT '[]';")
+                .map_err(|e| e.to_string())?;
+        }
+
+        let has_qa_language: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('quick_actions') WHERE name='language'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_qa_language {
+            conn.execute_batch(
+                "ALTER TABLE quick_actions ADD COLUMN language TEXT DEFAULT 'shell';",
+            )
+            .map_err(|e| e.to_string())?;
+        }
+
+        let has_qa_last_run_at: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('quick_actions') WHERE name='last_run_at'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_qa_last_run_at {
+            conn.execute_batch("ALTER TABLE quick_actions ADD COLUMN last_run_at TEXT DEFAULT '';")
+                .map_err(|e| e.to_string())?;
+        }
+
+        let has_qa_last_status: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('quick_actions') WHERE name='last_status'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_qa_last_status {
+            conn.execute_batch("ALTER TABLE quick_actions ADD COLUMN last_status TEXT DEFAULT '';")
+                .map_err(|e| e.to_string())?;
+        }
+
+        // Migrate: add quick_action_id column to execution_history if missing
+        let has_eh_qa_id: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('execution_history') WHERE name='quick_action_id'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_eh_qa_id {
+            conn.execute_batch("ALTER TABLE execution_history ADD COLUMN quick_action_id TEXT;")
+                .map_err(|e| e.to_string())?;
+        }
+
+        // Migrate repository sync startup-update flag from the legacy pull_strategy column.
+        let has_repo_update_on_startup: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('github_repos') WHERE name='update_on_startup'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_repo_update_on_startup {
+            conn.execute_batch(
+                "ALTER TABLE github_repos ADD COLUMN update_on_startup INTEGER DEFAULT 0;",
+            )
+            .map_err(|e| e.to_string())?;
+
+            let has_legacy_pull_strategy: bool = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('github_repos') WHERE name='pull_strategy'",
+                    [],
+                    |row| row.get::<_, i32>(0),
+                )
+                .unwrap_or(0)
+                > 0;
+            if has_legacy_pull_strategy {
+                conn.execute_batch(
+                    "UPDATE github_repos SET update_on_startup = CASE
+                        WHEN pull_strategy IN ('daily', 'weekly') THEN 1
+                        ELSE 0
+                    END;",
+                )
+                .map_err(|e| e.to_string())?;
+            }
+        }
+
+        // RAG tables
+        crate::commands::rag::init_rag_tables(&conn)?;
+
+        // MCP tables
+        crate::commands::mcp::init_mcp_tables(&conn)?;
+
+        // source_repo_id column for repo sync tracking
+        let has_cmd_source: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('commands') WHERE name='source_repo_id'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_cmd_source {
+            conn.execute_batch("ALTER TABLE commands ADD COLUMN source_repo_id TEXT;")
+                .map_err(|e| e.to_string())?;
+        }
+
+        // Add parameters column to commands if missing
+        let has_cmd_params: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('commands') WHERE name='parameters'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_cmd_params {
+            conn.execute_batch("ALTER TABLE commands ADD COLUMN parameters TEXT DEFAULT '[]';")
+                .map_err(|e| e.to_string())?;
+        }
+
+        // Add url column to commands for remote script execution
+        let has_cmd_url: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('commands') WHERE name='url'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_cmd_url {
+            conn.execute_batch("ALTER TABLE commands ADD COLUMN url TEXT DEFAULT '';")
+                .map_err(|e| e.to_string())?;
+        }
+
+        let has_script_source: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('scripts') WHERE name='source_repo_id'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_script_source {
+            conn.execute_batch("ALTER TABLE scripts ADD COLUMN source_repo_id TEXT;")
+                .map_err(|e| e.to_string())?;
+        }
+
+        // Add url column to scripts for remote script execution
+        let has_script_url: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('scripts') WHERE name='url'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_script_url {
+            conn.execute_batch("ALTER TABLE scripts ADD COLUMN url TEXT DEFAULT '';")
+                .map_err(|e| e.to_string())?;
+        }
+
+        let has_qa_source: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('quick_actions') WHERE name='source_repo_id'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_qa_source {
+            conn.execute_batch("ALTER TABLE quick_actions ADD COLUMN source_repo_id TEXT;")
+                .map_err(|e| e.to_string())?;
+        }
+
+        // App logs table
+        crate::commands::app_log::init_app_logs_table(&conn)?;
+
+        Ok(())
+    }
+}

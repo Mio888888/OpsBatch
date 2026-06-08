@@ -1,0 +1,222 @@
+# OpsBatch
+
+[简体中文](README_CN.md) | [English](README_EN.md)
+
+OpsBatch 是一个面向运维场景的本地桌面工作台，用于集中管理服务器资产、SSH 终端、批量命令、脚本库、文件传输、自动化工作流与运维知识同步。项目当前版本为 `0.1.0`，桌面端基于 Tauri v2、React 19、TypeScript/Vite 与 Rust 后端构建，核心数据持久化在本机 SQLite 数据库中。
+
+
+## 产品定位
+
+OpsBatch 旨在为需要频繁连接、检查和批量操作多台服务器的人员提供一个无需部署中心服务的桌面客户端。
+
+适用人群包括：
+
+- 运维工程师、SRE、应用运维人员
+- DBA、数据库运维人员
+- DevOps / 平台工程师
+- 安全运维、应急响应和值班人员
+- 需要维护命令、脚本、主机资产和执行记录的团队
+
+核心目标：
+
+- 在本地统一管理主机资产、分组、SSH 连接和跳板机链路。
+- 将常用命令、脚本、快捷动作和工作流沉淀为可复用资产。
+- 支持多主机批量执行、文件分发、交互式广播终端和执行历史追踪。
+- 通过本地数据库保存配置和操作数据，减少对中心服务的依赖。
+
+## 功能概览
+
+### 资产与连接管理
+
+- 主机资产管理：支持主机名称、IP、端口、认证方式、操作系统、分组、标签字段和跳板机链路等信息。
+- 分组与选择：支持嵌套分组、资产搜索、主机选择和基于所选主机发起终端/命令/传输操作。
+- 导入导出：支持主机 CSV 导入导出。
+- 云主机导入：支持阿里云、AWS、腾讯云实例拉取与导入。
+- SSH 配置/跳板机：支持解析 `~/.ssh/config` 中的主机与 `ProxyJump` 信息，并构建跳板链路。
+
+### 终端、监控与远程文件
+
+- 终端工作区：支持本地终端和远程 SSH 终端标签页。
+- 主机监控：远程连接后可查看 CPU、内存、磁盘、网络、进程等快照信息；当前采集逻辑主要面向 Linux/procfs 环境。
+- SFTP 文件面板：支持本地/远程双栏浏览、上传、下载、预览、重命名、删除、新建目录、书签、解压和传输队列。
+- 远程编辑器：可从 SFTP 面板打开远程文件/目录，使用 CodeMirror 编辑并通过 SFTP 保存。
+- 端口转发：终端底部面板包含端口转发入口。
+
+### 批量执行与文件分发
+
+- 批量命令执行：对选中主机执行命令，支持并发数、超时、实时结果、失败主机重试和历史记录。
+- 危险命令防护：内置和自定义危险命令规则，在执行高风险命令前触发确认；也可结合 AI 做风险说明。
+- 执行回放：批量执行后端支持记录历史与 asciinema 形式的终端回放数据。
+- 广播终端：可打开独立批量终端窗口，对多台已连接主机广播输入；当前窗口最多处理 16 台选中主机。
+- 批量文件传输：支持选择本地文件或目录上传到多台主机，远程路径支持 `{host}` 与 `{firstdir:path}` 变量。当前 UI 主要面向批量上传。
+
+### 命令库、脚本库与快捷动作
+
+- 命令库：支持搜索、分类筛选、自定义命令、风险等级、平台字段、远程 URL 命令、复制和加入快捷动作。
+- 脚本库：支持语言/分类/搜索筛选，自定义脚本，查看、编辑、版本历史、恢复版本和加入快捷动作。
+- 快捷动作：支持 CRUD、分类/星标/语言筛选、JSON 导入导出、参数占位符提示，并可对选中主机执行。
+- Git 仓库同步：支持配置仓库地址、分支、Token、拉取策略、启用状态、手动同步和定时检查，将仓库中的命令/脚本/快捷动作导入本地库。
+
+### 工作流编排
+
+- 可视化工作流：基于 React Flow 的工作流列表、编辑器、模板和执行入口。
+- 节点类型：包含开始/结束、选择主机、命令、脚本、快捷动作、传输、条件、分支、延迟、人工确认和回滚等节点。
+- 工作流执行：前端执行器按节点依赖运行，支持结果变量、条件/分支路径和人工确认。
+- 定时任务：后端保存工作流定时任务；当前调度解析以简单 `every:N` 间隔为主，不是完整 Cron 表达式实现。
+
+### AI、日志与设置
+
+- AI 配置：支持 OpenAI、本地 Ollama 和自定义 OpenAI-compatible 服务配置。
+- AI 能力：包含聊天、流式聊天、脚本生成、命令/结果分析、错误诊断和风险评估等后端能力。
+- 终端 AI 面板：可从终端上下文发起 AI 对话、生成命令并在用户确认后执行。
+- 全局日志：后端日志和前端 console/window error 会进入全局日志窗口并持久化。
+- 设置：包含通用、外观、快捷动作、命令库、脚本库、AI、危险规则和数据备份等页面。
+- 国际化：应用内支持 `zh-CN` 与 `en-US`，可跟随系统语言。
+
+## 架构与技术栈
+
+### 高层数据流
+
+```text
+React/Vite UI
+  -> Zustand stores
+  -> Tauri invoke() commands and Tauri events
+  -> Rust command modules
+  -> SQLite / SSH / SFTP / local PTY / Git / HTTP / OS keychain
+```
+
+### 技术栈
+
+| 层级 | 技术 |
+| --- | --- |
+| 桌面容器 | Tauri v2 |
+| 前端构建 | Vite 7、TypeScript 5.8 |
+| UI 框架 | React 19、React Router 7 |
+| 状态管理 | Zustand 5 |
+| UI 基础 | Radix UI primitives、项目自有 `src/components/ui` 封装、`App.css` 变量/样式 |
+| 图标 | `lucide-react` |
+| 终端 | xterm.js |
+| 编辑器 | CodeMirror / `@uiw/react-codemirror` |
+| 工作流画布 | React Flow / `@xyflow/react` |
+| 拖拽/动效 | dnd-kit、GSAP |
+| 后端语言 | Rust |
+| 后端能力 | Tauri commands、SQLite (`rusqlite`)、SSH/SFTP (`russh`, `russh-sftp`)、本地 PTY、Git (`git2`)、HTTP (`reqwest`) |
+| 本地数据 | Tauri app data 目录下的 SQLite 数据库 `opsbatch.db` |
+
+## 仓库结构
+
+```text
+.
+├── README.md                 # 中文 README（默认入口）
+├── README_CN.md              # 中文 README 副本/命名版本
+├── README_EN.md              # English README
+├── PRD.MD                    # 产品需求与长期规划资料
+├── package.json              # 桌面/Web 前端与 Tauri CLI 脚本
+├── src/                      # React 桌面端前端源码
+│   ├── components/           # 布局、SFTP、AI、UI 封装等组件
+│   ├── pages/                # Terminal、Commands、Libraries、Workflow、Settings 等页面
+│   ├── stores/               # Zustand 领域状态与 Tauri invoke 封装
+│   ├── types/                # 前端领域类型
+│   └── i18n/                 # zh-CN / en-US 字典与语言解析
+├── src-tauri/                # Tauri v2 Rust 后端
+│   ├── src/commands/         # hosts、terminal、execution、sftp、workflow、ai 等命令模块
+│   ├── src/db/               # SQLite schema 与迁移
+│   ├── Cargo.toml            # Rust 依赖
+│   └── tauri.conf.json       # Tauri 应用与打包配置
+└── .trellis/                 # 项目工作流、规格与任务资料
+```
+
+## 环境要求
+
+建议准备以下环境：
+
+- Node.js 与 npm（项目使用 npm 脚本）。
+- Rust toolchain（`cargo`、`rustc`）。
+- Tauri v2 所需的系统依赖。不同平台要求不同，请参考 [Tauri 官方 prerequisites](https://v2.tauri.app/start/prerequisites/)。
+- Git（用于仓库同步功能和常规开发）。
+- 可访问的 SSH 主机、云厂商凭据或 AI 服务凭据是可选的运行时配置，不是启动开发环境的必要条件。
+
+## 快速开始
+
+### 1. 安装依赖
+
+```bash
+npm install
+```
+
+### 2. 启动桌面端开发模式
+
+```bash
+npm run tauri -- dev
+```
+
+该命令会按照 `src-tauri/tauri.conf.json` 中的配置先运行 Vite 开发服务，再启动 Tauri 桌面窗口。
+
+如果只需要启动前端 Vite 开发服务：
+
+```bash
+npm run dev
+```
+
+## 常用命令
+
+| 命令 | 说明 |
+| --- | --- |
+| `npm run dev` | 启动桌面前端 Vite 开发服务 |
+| `npm run tauri -- dev` | 启动 Tauri 桌面开发模式 |
+| `npm run build` | 执行 `tsc && vite build`，构建桌面前端产物 |
+| `npm run tauri -- build` | 构建 Tauri 桌面应用/安装包 |
+| `npm run preview` | 预览 Vite 构建产物 |
+| `npm run build:all` | 桌面前端构建别名，等价于 `npm run build` |
+| `cargo check --manifest-path src-tauri/Cargo.toml` | 检查 Rust/Tauri 后端类型与编译问题 |
+| `npx tsc --noEmit` | 只运行 TypeScript 类型检查 |
+
+> 当前仓库没有单独的 `lint` npm 脚本；前端验证主要依赖 TypeScript 检查和 Vite 构建，后端验证可运行 `cargo check`。
+
+## 本地数据与安全说明
+
+OpsBatch 的核心设计是本地桌面客户端，数据主要保存在本机：
+
+- Tauri 启动时会在系统 app data 目录下打开/创建 SQLite 数据库 `opsbatch.db`。
+- 数据库包含主机、分组、标签、执行历史、命令库、脚本库、快捷动作、Git 仓库配置、危险规则、通用设置、工作流、AI 会话、RAG/MCP 表和全局日志等表。
+- 设置页面提供数据库备份功能，会将当前 `opsbatch.db` 复制到用户选择的位置。
+
+请注意以下安全现状，避免过度假设：
+
+- 主机密码、私钥字段、云厂商凭据和部分 AI 配置会写入本地 SQLite/settings 数据；当前实现不能简单宣称这些敏感信息已经完整加密保护。
+- AI API Key 有尽力写入系统 keychain 的逻辑，但配置保存路径中也存在写入本地设置 JSON 的实现。
+- SSH 客户端当前对服务端公钥校验较宽松，连接前请确认目标网络和主机可信。
+- Tauri 配置中的 CSP 当前为 `null`。如果要在生产环境强化安全策略，应结合具体窗口和资源加载方式重新评估。
+- 建议不要在不可信设备上保存高权限凭据；对团队环境，建议配合最小权限账号、临时凭据、跳板机审计和系统磁盘加密使用。
+
+## 当前状态与已知限制
+
+- README 语言映射：`README.md` 与 `README_CN.md` 均为中文完整文档，`README_EN.md` 为英文文档；后续维护时请保持中文两份同步。
+- 工作流定时：定时任务当前以简单 `every:N` 间隔解析为主，尚不是完整 Cron 表达式调度器。
+- RAG/MCP：后端已存在 RAG collection/import/search 与 MCP server/tool 命令及数据表，但当前桌面路由中没有独立的顶层 RAG 或 MCP 页面。
+- 监控采集：主机监控命令主要面向 Linux/procfs 场景，其他系统的指标完整性可能不同。
+- 批量终端：广播终端窗口当前限制最多 16 台选中主机。
+- 批量传输：当前 UI 主要呈现批量上传；传输并发输入尚未完整传递到后端请求。
+- Git 仓库同步：当前实现使用语言相关元数据/文件约定（如 `library_cn.json`、`library_en.json` 和对应后缀），请按当前实现准备仓库内容。
+
+## 开发与贡献说明
+
+- 修改功能前建议先阅读 `PRD.MD`、相关源码和 `.trellis/spec/` 下的项目规范。
+- 前端类型集中在 `src/types/index.ts`，页面位于 `src/pages/`，共享组件位于 `src/components/`，状态与后端调用封装位于 `src/stores/`。
+- 前端通过 Zustand store 调用 Tauri `invoke()`，后端命令通常使用 snake_case 字段，前端 store 负责转换为 camelCase 类型。
+- UI 优先使用项目自有 `src/components/ui` 封装和 `App.css` 变量/类；应用内文案已支持中文和英文语言模式。
+- 新增持久化后端能力时，应同步考虑 SQLite schema/迁移、Tauri command 注册、前端类型、store 调用和验证命令。
+- 文档或代码变更后可按影响范围运行：
+
+```bash
+npm run build
+cargo check --manifest-path src-tauri/Cargo.toml
+```
+
+文档类改动通常不需要运行完整构建，但 README 中的命令和功能描述应与仓库实际实现保持一致。
+
+## 相关文档
+
+- [PRD.MD](PRD.MD) — 产品需求、用户场景与长期规划。
+- [README_CN.md](README_CN.md) — 中文 README。
+- [README_EN.md](README_EN.md) — English README.

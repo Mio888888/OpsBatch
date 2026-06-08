@@ -1,0 +1,701 @@
+/* Workflow page styles */
+
+/* Editor layout */
+.workflow-editor {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.workflow-editor-header {
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-surface);
+  padding: 8px 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.workflow-editor-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* Node palette sidebar */
+.wf-palette {
+  width: 200px;
+  min-width: 200px;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-surface-soft);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.wf-palette-header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.wf-palette-search {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.wf-palette-list {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.wf-palette-group {
+  margin-bottom: 4px;
+}
+
+.wf-palette-group-label {
+  font-size: 11px;
+  color: var(--color-text-muted);
+  padding: 6px 12px 2px;
+  font-weight: 500;
+}
+
+.wf-palette-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.wf-palette-item:hover {
+  background: rgba(22, 119, 255, 0.08);
+}
+
+.wf-palette-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Canvas area */
+.workflow-canvas-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* @xyflow/react panels */
+.workflow-canvas-area .react-flow {
+  --xy-controls-button-background-color: var(--color-surface);
+  --xy-controls-button-background-color-hover: color-mix(in srgb, var(--color-primary) 8%, var(--color-surface));
+  --xy-controls-button-color: var(--color-text-muted);
+  --xy-controls-button-color-hover: var(--color-primary);
+  --xy-controls-button-border-color: var(--color-border);
+  --xy-controls-box-shadow: var(--shadow-sm);
+  --xy-minimap-background-color: color-mix(in srgb, var(--color-surface) 92%, var(--color-surface-soft));
+  --xy-minimap-mask-background-color: color-mix(in srgb, var(--color-surface) 68%, transparent);
+  --xy-minimap-mask-stroke-color: var(--color-border-strong);
+  --xy-minimap-node-stroke-color: color-mix(in srgb, var(--color-border-strong) 75%, transparent);
+}
+
+.workflow-canvas-area .react-flow__controls {
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.workflow-canvas-area .react-flow__controls-button {
+  background: var(--xy-controls-button-background-color);
+  color: var(--xy-controls-button-color);
+  border-bottom-color: var(--xy-controls-button-border-color);
+  transition: background 0.12s, color 0.12s;
+}
+
+.workflow-canvas-area .react-flow__controls-button:hover {
+  background: var(--xy-controls-button-background-color-hover);
+  color: var(--xy-controls-button-color-hover);
+}
+
+.workflow-canvas-area .react-flow__controls-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-primary) 45%, transparent);
+  outline-offset: -2px;
+}
+
+.workflow-canvas-area .react-flow__controls-button svg {
+  fill: currentColor;
+}
+
+.workflow-canvas-area .react-flow__minimap {
+  overflow: hidden;
+  background: var(--xy-minimap-background-color);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.workflow-canvas-area .react-flow__minimap-svg {
+  background: transparent;
+}
+
+.workflow-canvas-area .react-flow__minimap-mask {
+  fill: var(--xy-minimap-mask-background-color);
+  stroke: var(--xy-minimap-mask-stroke-color);
+}
+
+/* @xyflow/react custom nodes */
+.wf-node {
+  background: var(--color-surface);
+  border: 2px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 8px 12px;
+  min-width: 160px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  cursor: grab;
+  user-select: none;
+  transition: box-shadow 0.16s, border-color 0.16s;
+}
+
+.wf-node:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.wf-node--selected {
+  border-color: var(--color-primary);
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.3);
+}
+
+.wf-node--disabled {
+  opacity: 0.5;
+}
+
+/* Pill shape for start/end */
+.wf-node--pill {
+  border-radius: 20px;
+  min-width: 100px;
+  text-align: center;
+}
+
+.wf-node--pill .wf-node-header {
+  justify-content: center;
+}
+
+/* Host node */
+.wf-node--host {
+  border-style: dashed;
+}
+
+.wf-node-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wf-node-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.wf-node-title {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.wf-node-type {
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+/* Node type colors */
+.wf-node--command { border-left: 3px solid #1677ff; }
+.wf-node--script { border-left: 3px solid #52c41a; }
+.wf-node--transfer { border-left: 3px solid #722ed1; }
+.wf-node--quickAction { border-left: 3px solid #fa8c16; }
+.wf-node--delay { border-left: 3px solid #8c8c8c; }
+.wf-node--condition { border-left: 3px solid #13c2c2; }
+.wf-node--confirm { border-left: 3px solid #eb2f96; }
+.wf-node--rollback { border-left: 3px solid #ff4d4f; }
+.wf-node--start { border-left: 3px solid #52c41a; }
+.wf-node--end { border-left: 3px solid #ff4d4f; }
+.wf-node--selectHost { border-left: 3px solid #1677ff; }
+
+/* Switch node: dashed border to distinguish from condition */
+.wf-node--switch {
+  border-left: 3px solid #722ed1;
+  border-style: solid;
+  border-left-style: solid;
+}
+
+/* Switch node header indicator: diamond icon */
+.wf-node--switch .wf-node-header::before {
+  content: '';
+  display: inline-block;
+  width: 0;
+  height: 0;
+}
+
+.wf-node-switch-branches {
+  gap: 2px;
+}
+
+.wf-node-switch-branch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  position: relative;
+  min-height: 16px;
+  padding-right: 14px;
+}
+
+.wf-node-switch-label {
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wf-port--switch {
+  border-width: 2px;
+}
+
+.wf-port--switch:hover {
+  background: currentColor;
+  border-color: currentColor;
+}
+
+/* Ports */
+.wf-port {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  border: 2px solid var(--color-border-strong);
+  cursor: crosshair;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.wf-port:hover,
+.wf-port--connecting {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+/* Condition node branch handles */
+.wf-node-branches {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+  position: relative;
+}
+
+.wf-node-branch {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+  min-height: 18px;
+}
+
+.wf-node-branch-label {
+  font-size: 10px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.wf-node-branch--true .wf-node-branch-label {
+  color: #52c41a;
+}
+
+.wf-node-branch--false .wf-node-branch-label {
+  color: #ff4d4f;
+}
+
+.wf-port--true {
+  border-color: #52c41a;
+  top: 30% !important;
+}
+
+.wf-port--true:hover {
+  background: #52c41a;
+  border-color: #52c41a;
+}
+
+.wf-port--false {
+  border-color: #ff4d4f;
+  top: 70% !important;
+}
+
+.wf-port--false:hover {
+  background: #ff4d4f;
+  border-color: #ff4d4f;
+}
+
+/* Edge styles */
+.wf-edge-path {
+  stroke: #999;
+  stroke-width: 2;
+}
+
+.wf-edge-path--selected {
+  stroke: var(--color-primary);
+  stroke-width: 2;
+}
+
+/* Empty canvas placeholder */
+.wf-canvas-empty {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: var(--color-text-muted);
+  pointer-events: none;
+}
+
+.wf-canvas-empty-icon {
+  font-size: 36px;
+  margin-bottom: 8px;
+  opacity: 0.4;
+}
+
+/* Context menu */
+.wf-context-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 120px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  padding: 4px 0;
+}
+
+.wf-context-menu-item {
+  display: block;
+  width: 100%;
+  padding: 6px 12px;
+  border: none;
+  background: none;
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+  color: inherit;
+}
+
+.wf-context-menu-item:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.wf-context-menu-item--danger {
+  color: #ff4d4f;
+}
+
+.wf-context-menu-item--danger:hover {
+  background: rgba(255, 77, 79, 0.08);
+}
+
+/* Execution status on nodes */
+@keyframes wf-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(22, 119, 255, 0.4); }
+  70% { box-shadow: 0 0 0 8px rgba(22, 119, 255, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(22, 119, 255, 0); }
+}
+
+.wf-node--exec-running {
+  border-color: #1677ff;
+  animation: wf-pulse 1.5s infinite;
+}
+
+.wf-node--exec-success {
+  border-color: #52c41a;
+}
+
+.wf-node--exec-fail {
+  border-color: #ff4d4f;
+}
+
+.wf-node-status {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.wf-node-status--running {
+  background: #1677ff;
+  animation: wf-pulse 1.5s infinite;
+}
+
+.wf-node-status--success {
+  background: #52c41a;
+}
+
+.wf-node-status--fail {
+  background: #ff4d4f;
+}
+
+/* Execution log panel */
+.wf-exec-log {
+  border-top: 1px solid var(--color-border);
+  background: var(--color-surface);
+  height: 180px;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  transition: height 0.2s;
+}
+
+.wf-exec-log--collapsed {
+  height: auto;
+}
+
+.wf-exec-log-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 12px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--color-border);
+  user-select: none;
+  flex-shrink: 0;
+}
+
+.wf-exec-log-header:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.wf-exec-log-title {
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.wf-exec-log-count {
+  font-size: 10px;
+  background: rgba(0, 0, 0, 0.06);
+  padding: 0 6px;
+  border-radius: 8px;
+  font-weight: 400;
+}
+
+.wf-exec-log-toggle {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.wf-exec-log-body {
+  flex: 1;
+  overflow: auto;
+  padding: 4px 0;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.wf-exec-log-empty {
+  text-align: center;
+  padding: 20px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+
+.wf-exec-log-entry {
+  padding: 2px 12px;
+  display: flex;
+  gap: 6px;
+  line-height: 1.6;
+  border-left: 2px solid transparent;
+}
+
+.wf-exec-log-entry:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.wf-exec-log-entry--running {
+  border-left-color: #1677ff;
+}
+
+.wf-exec-log-entry--success {
+  border-left-color: #52c41a;
+}
+
+.wf-exec-log-entry--fail {
+  border-left-color: #ff4d4f;
+}
+
+.wf-exec-log-entry--info {
+  border-left-color: #d9d9d9;
+}
+
+.wf-exec-log-time {
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.wf-exec-log-node {
+  color: #1677ff;
+  flex-shrink: 0;
+  font-weight: 600;
+}
+
+.wf-exec-log-msg {
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--color-text);
+}
+
+.wf-exec-log-entry--fail .wf-exec-log-msg {
+  color: #ff4d4f;
+}
+
+.wf-exec-log-entry--success .wf-exec-log-msg {
+  color: #52c41a;
+}
+
+/* Snippet inserter */
+.wf-snippet-input-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wf-snippet-chips {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+
+.wf-snippet-prefix {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  opacity: 0.5;
+  margin-right: 1px;
+  font-family: monospace;
+}
+
+.wf-snippet-chip {
+  border: none;
+  background: #f0f0f0;
+  border-radius: 3px;
+  padding: 0 5px;
+  font-size: 10px;
+  line-height: 18px;
+  cursor: pointer;
+  color: var(--color-text-muted);
+  font-family: monospace;
+  transition: background 0.12s, color 0.12s;
+  white-space: nowrap;
+}
+
+.wf-snippet-chip:hover {
+  background: #e0e0e0;
+  color: var(--color-text);
+}
+
+/* Right edit panel */
+.wf-edit-panel {
+  width: 280px;
+  min-width: 280px;
+  border-left: 1px solid var(--color-border);
+  background: var(--color-surface);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width 0.15s ease, min-width 0.15s ease;
+}
+
+.wf-edit-panel-header {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.wf-edit-panel-close {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--color-text-muted);
+  padding: 2px 4px;
+  line-height: 1;
+  border-radius: 4px;
+  transition: color 0.12s, background 0.12s;
+}
+
+.wf-edit-panel-close:hover {
+  color: var(--color-text);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.wf-edit-panel-body {
+  flex: 1;
+  overflow: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wf-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.wf-edit-field > label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.wf-edit-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wf-edit-section-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  padding-bottom: 2px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.wf-edit-checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.wf-edit-panel-footer {
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--color-border);
+}

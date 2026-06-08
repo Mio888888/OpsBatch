@@ -2217,6 +2217,15 @@ body.terminal-monitor-resizing * {
 .terminal-monitor-error,
 .terminal-monitor-empty {
   padding: 2px 6px;
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.terminal-monitor-line,
+.terminal-monitor-muted {
+  line-height: 1.35;
 }
 
 .terminal-monitor-line {

@@ -23,6 +23,11 @@ workflow，把 `website/` 作为静态站点发布。
 Settings -> Pages -> Build and deployment -> Source -> GitHub Actions
 ```
 
+如果希望 workflow 自动完成首次启用，可以在仓库 Secrets 中新增
+`PAGES_TOKEN`，使用具备 Pages 写入权限的 Personal Access Token。未配置该
+secret 时，workflow 会使用默认 `GITHUB_TOKEN`，但 GitHub 不允许它自动创建
+Pages 站点。
+
 发布地址沿用页面中的 canonical URL：
 
 ```text

@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { invoke } from '@tauri-apps/api/core';
 import type { Host } from '../../types';
+import WindowControls from '../../components/WindowControls';
 import TerminalPane from './TerminalPane';
 import './batch-terminal.css';
 
@@ -190,8 +191,16 @@ export default function BatchTerminalWindow() {
 
   return (
     <div className="bt-root">
-      <header className="bt-header">
+      <header
+        className="bt-header"
+        onMouseDown={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest('button, select')) return;
+          void WebviewWindow.getCurrent().startDragging();
+        }}
+      >
         <div className="bt-header-left">
+          <WindowControls className="bt-window-controls" />
           <span className="bt-header-title">广播终端</span>
           <span className="bt-header-count">{sessions.length} 台</span>
           {connectedCount > 0 && (

@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-ro
 import { ToastProvider } from './components/ui';
 import { useTranslation } from './i18n';
 import MainLayout from './components/MainLayout';
+import WindowControls from './components/WindowControls';
 import './App.css';
 
 const TerminalPage = lazy(() => import('./pages/Terminal/TerminalPage'));
@@ -37,9 +38,11 @@ function BatchTerminalRoute() {
 
 function BatchTransferRoute() {
   return (
-    <div className="batch-route-root">
-      <BatchTransferWindow />
-    </div>
+    <StandaloneWindowFrame title="批量上传">
+      <div className="batch-route-root">
+        <BatchTransferWindow />
+      </div>
+    </StandaloneWindowFrame>
   );
 }
 
@@ -47,6 +50,82 @@ function GlobalLogRoute() {
   return (
     <div className="global-log-route-root">
       <GlobalLogPage />
+    </div>
+  );
+}
+
+function SettingsRoute() {
+  return (
+    <SettingsWindowFrame>
+      <SettingsPage />
+    </SettingsWindowFrame>
+  );
+}
+
+function SettingsWindowFrame({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="settings-window-frame">
+      <div
+        className="settings-window-drag-strip"
+        aria-hidden="true"
+        onMouseDown={(e) => {
+          if (e.button !== 0) return;
+          void import('@tauri-apps/api/window')
+            .then(({ getCurrentWindow }) => getCurrentWindow().startDragging())
+            .catch((error) => console.error('Window command failed:', error));
+        }}
+      />
+      <div className="settings-window-control-layer">
+        <WindowControls />
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function StandaloneWindowFrame({
+  children,
+  icon,
+  subtitle,
+  title,
+  tone = 'default',
+  variant = 'plain',
+}: {
+  children: React.ReactNode;
+  icon?: React.ReactNode;
+  subtitle?: string;
+  title: string;
+  tone?: 'default' | 'dark';
+  variant?: 'plain' | 'settings' | 'log';
+}) {
+  return (
+    <div className={`standalone-window-frame standalone-window-frame-${tone} standalone-window-frame-${variant}`}>
+      <header
+        className={`standalone-window-titlebar standalone-window-titlebar-${variant}`}
+        onMouseDown={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest('button')) return;
+          void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().startDragging());
+        }}
+        onDoubleClick={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest('button')) return;
+          void import('@tauri-apps/api/window')
+            .then(({ getCurrentWindow }) => getCurrentWindow().toggleMaximize())
+            .catch((error) => console.error('Window command failed:', error));
+        }}
+      >
+        <WindowControls />
+        <div className="standalone-window-title-block">
+          {icon && <span className="standalone-window-title-icon" aria-hidden="true">{icon}</span>}
+          <div className="standalone-window-title-copy">
+            <div className="standalone-window-title">{title}</div>
+            {subtitle && <div className="standalone-window-subtitle">{subtitle}</div>}
+          </div>
+        </div>
+        <div className="standalone-window-titlebar-spacer" aria-hidden="true" />
+      </header>
+      <div className="standalone-window-content">{children}</div>
     </div>
   );
 }
@@ -87,7 +166,7 @@ function AppContent() {
           <Route path="/editor" element={<EditorRoute />} />
           <Route path="/batch-terminal" element={<BatchTerminalRoute />} />
           <Route path="/batch-transfer" element={<BatchTransferRoute />} />
-          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/settings" element={<SettingsRoute />} />
           <Route path="/global-log" element={<GlobalLogRoute />} />
         </Routes>
       </Suspense>

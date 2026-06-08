@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { ask } from '@tauri-apps/plugin-dialog';
 import { useEditorStore } from '../../stores/editor';
+import WindowControls from '../../components/WindowControls';
 import CodeEditor from '../../components/CodeEditor';
 import FileTree from './FileTree';
 
@@ -139,7 +140,15 @@ export default function EditorWindow() {
 
   return (
     <div className="editor-window">
-      <div className="editor-toolbar">
+      <div
+        className="editor-toolbar"
+        onMouseDown={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest('button')) return;
+          void WebviewWindow.getCurrent().startDragging();
+        }}
+      >
+        <WindowControls className="editor-window-controls" />
         <span className="editor-toolbar-file">
           {dirty && <span className="editor-dirty-dot" />}
           {displayFileName}

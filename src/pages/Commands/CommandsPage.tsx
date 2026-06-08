@@ -90,6 +90,9 @@ export default function CommandsPage() {
       height: 700,
       minWidth: 700,
       minHeight: 550,
+      decorations: false,
+      transparent: true,
+      backgroundColor: '#00000000',
     });
     webview.once('tauri://error', (e) => {
       console.error('Failed to open batch transfer window:', e);

@@ -10,6 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "title": "OpsBatch - 批量运维管理工具",
@@ -17,13 +18,9 @@
         "height": 800,
         "minWidth": 1024,
         "minHeight": 600,
-        "titleBarStyle": "Overlay",
-        "hiddenTitle": true,
-        "backgroundColor": "#1a1b2e",
-        "trafficLightPosition": {
-          "x": 16,
-          "y": 22
-        }
+        "decorations": false,
+        "transparent": true,
+        "backgroundColor": "#00000000"
       }
     ],
     "security": {

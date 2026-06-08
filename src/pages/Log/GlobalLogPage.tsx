@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useLogStore, type LogEntry } from '../../stores/log';
 import { useTranslation } from '../../i18n';
+import WindowControls from '../../components/WindowControls';
 
 const levelColors: Record<string, string> = {
   error: 'var(--color-error, #ef4444)',
@@ -111,8 +113,16 @@ export default function GlobalLogPage() {
 
   return (
     <div className="global-log-root">
-      <div className="global-log-toolbar">
+      <div
+        className="global-log-toolbar"
+        onMouseDown={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest('button, select')) return;
+          void getCurrentWindow().startDragging();
+        }}
+      >
         <div className="global-log-filters">
+          <WindowControls className="global-log-window-controls" />
           <select
             className="global-log-filter-select"
             value={filterLevel}

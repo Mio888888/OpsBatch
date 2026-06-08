@@ -50,6 +50,7 @@ import {
 import type { Key, ReactNode } from 'react';
 import type { DataNode, TreeSelectOption } from './ui';
 import CloudImport from './CloudImport';
+import WindowControls from './WindowControls';
 import { useTranslation } from '../i18n';
 import type { TranslationKey } from '../i18n';
 import { useAssetsStore } from '../stores/assets';
@@ -774,6 +775,9 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       height: 800,
       minWidth: 800,
       minHeight: 600,
+      decorations: false,
+      transparent: true,
+      backgroundColor: '#00000000',
     });
     webview.once('tauri://error', (e) => {
       console.error('Failed to open batch exec window:', e);
@@ -793,6 +797,9 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       height: 700,
       minWidth: 700,
       minHeight: 550,
+      decorations: false,
+      transparent: true,
+      backgroundColor: '#00000000',
     });
     webview.once('tauri://error', (e) => {
       console.error('Failed to open batch transfer window:', e);
@@ -815,6 +822,9 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       height: 680,
       minWidth: 760,
       minHeight: 560,
+      decorations: false,
+      transparent: true,
+      backgroundColor: '#00000000',
     });
     webview.once('tauri://error', (e) => {
       console.error('Failed to open settings window:', e);
@@ -836,6 +846,9 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       height: 600,
       minWidth: 500,
       minHeight: 400,
+      decorations: false,
+      transparent: true,
+      backgroundColor: '#00000000',
     });
     webview.once('tauri://error', (e) => {
       console.error('Failed to open log window:', e);
@@ -979,7 +992,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         }}
       >
         <div className="workbench-titlebar-left">
-          <div className="workbench-titlebar-spacer" aria-hidden="true" />
+          <WindowControls />
           <Tooltip title={assetPanelVisible ? t('assets.closePanel') : t('assets.openPanel')}>
             <button
               type="button"

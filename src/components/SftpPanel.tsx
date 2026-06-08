@@ -271,6 +271,9 @@ const FilePane: FC<FilePaneProps> = memo(({ side, hostId, onContextMenu }) => {
       height: 800,
       minWidth: 800,
       minHeight: 600,
+      decorations: false,
+      transparent: true,
+      backgroundColor: '#00000000',
     });
     webview.once('tauri://error', (e) => {
       console.error('Failed to open editor window:', e);
@@ -668,6 +671,9 @@ const FileContextMenu: FC<{
       height: 800,
       minWidth: 800,
       minHeight: 600,
+      decorations: false,
+      transparent: true,
+      backgroundColor: '#00000000',
     });
     webview.once('tauri://error', (e) => {
       console.error('Failed to open editor window:', e);

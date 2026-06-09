@@ -37,6 +37,7 @@
     'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
   font-size: 14px;
   line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
   color: var(--color-text);
   background-color: transparent;
 }
@@ -44,6 +45,25 @@
 :root[data-platform="windows"] {
   --window-radius: 0;
   background-color: var(--color-workbench-bg);
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Windows: disable backdrop-filter to avoid blur artifacts on high-DPI */
+html[data-platform="windows"] .settings-sidebar-card,
+html[data-platform="windows"] .settings-main-card {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Windows: disable will-change on major layout containers to prevent
+   GPU compositing layer misalignment on non-integer DPI scales (125%/150%).
+   This is the primary fix for text appearing blurry on Windows. */
+html[data-platform="windows"] .workbench-topbar,
+html[data-platform="windows"] .workbench-shell,
+html[data-platform="windows"] .workbench-asset-panel,
+html[data-platform="windows"] .workbench-main-panel,
+html[data-platform="windows"] .asset-ctx-menu {
+  will-change: auto !important;
 }
 
 html {

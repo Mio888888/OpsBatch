@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react';
-import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
+import { HashRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { ToastProvider } from './components/ui';
 import { useTranslation } from './i18n';
 import KeychainNoticeModal from './components/KeychainNoticeModal';
@@ -151,10 +151,10 @@ function AppContent() {
 function App() {
   return (
     <ToastProvider>
-      <BrowserRouter>
+      <HashRouter>
         <AppContent />
         <KeychainNoticeModal />
-      </BrowserRouter>
+      </HashRouter>
     </ToastProvider>
   );
 }

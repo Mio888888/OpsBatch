@@ -26,4 +26,16 @@ test('managed child windows keep transparent WebViews for rounded window corners
   const source = readFileSync('src-tauri/src/commands/window.rs', 'utf8');
 
   assert.match(source, /\.transparent\(true\)/);
+  assert.match(source, /\.background_color\(\s*tauri::utils::config::Color\(0,\s*0,\s*0,\s*0\)\s*\)/);
+});
+
+test('managed child windows load the bundled SPA entry before routing', () => {
+  const windowSource = readFileSync('src-tauri/src/commands/window.rs', 'utf8');
+  const appSource = readFileSync('src/App.tsx', 'utf8');
+
+  assert.match(windowSource, /fn spa_entry_for_route\(route: &str\) -> String\s*\{\s*format!\("index\.html#\{\}", route\)\s*\}/s);
+  assert.match(windowSource, /let url = spa_entry_for_route\(&route\);[\s\S]*WebviewUrl::App\(url\.into\(\)\)/);
+  assert.doesNotMatch(windowSource, /WebviewUrl::App\(route\.into\(\)\)/);
+  assert.match(appSource, /import \{[^}]*HashRouter[^}]*\} from 'react-router-dom'/);
+  assert.match(appSource, /<HashRouter>/);
 });

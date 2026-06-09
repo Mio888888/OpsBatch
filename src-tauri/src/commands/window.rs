@@ -82,6 +82,10 @@ fn is_safe_host_id(value: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
 }
 
+fn spa_entry_for_route(route: &str) -> String {
+    format!("index.html#{}", route)
+}
+
 #[tauri::command]
 pub fn open_managed_window(
     app: tauri::AppHandle,
@@ -103,12 +107,14 @@ pub fn open_managed_window(
 
     let (width, height, min_width, min_height) = window.size();
     let route = window.route(&host_ids)?;
-    WebviewWindowBuilder::new(&app, label, WebviewUrl::App(route.into()))
+    let url = spa_entry_for_route(&route);
+    WebviewWindowBuilder::new(&app, label, WebviewUrl::App(url.into()))
         .title(window.title(host_ids.len()))
         .inner_size(width, height)
         .min_inner_size(min_width, min_height)
         .decorations(false)
         .transparent(true)
+        .background_color(tauri::utils::config::Color(0, 0, 0, 0))
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -125,5 +131,14 @@ mod tests {
         assert!(!is_safe_host_id("../settings"));
         assert!(!is_safe_host_id("a,b"));
         assert!(!is_safe_host_id(""));
+    }
+
+    #[test]
+    fn spa_entry_keeps_route_in_hash_fragment() {
+        assert_eq!(spa_entry_for_route("/settings"), "index.html#/settings");
+        assert_eq!(
+            spa_entry_for_route("/batch-terminal?hostIds=a_b-1"),
+            "index.html#/batch-terminal?hostIds=a_b-1"
+        );
     }
 }

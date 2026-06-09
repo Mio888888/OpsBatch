@@ -179,8 +179,6 @@ If the Windows installer is unsigned, or if the signing certificate/publisher ha
 
 The repository includes a Windows-specific Tauri config at `src-tauri/tauri.windows.conf.json`. When `npm run tauri -- build` runs on Windows, Tauri automatically calls `scripts/windows-sign.ps1` to sign generated Windows executables and installers. If certificate environment variables are not configured, the build fails instead of producing unsigned release artifacts.
 
-The GitHub Actions Windows release job also requires signing and runs `signtool verify` before uploading artifacts. Configure these CI secrets: `WINDOWS_CODESIGN_CERT_BASE64` (Base64-encoded PFX certificate), `WINDOWS_CODESIGN_CERT_PASSWORD` (PFX password), and optionally `WINDOWS_CODESIGN_TIMESTAMP_URL`.
-
 Recommended release flow:
 
 1. Prepare an OV or EV code-signing certificate. EV certificates usually establish SmartScreen trust more quickly; OV certificates still need reputation over time.

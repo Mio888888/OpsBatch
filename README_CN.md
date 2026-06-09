@@ -179,8 +179,6 @@ Windows 安装包如果未进行 Authenticode 代码签名，或签名证书/发
 
 仓库包含 Windows 专用 Tauri 配置 `src-tauri/tauri.windows.conf.json`。在 Windows 上运行 `npm run tauri -- build` 时，Tauri 会自动调用 `scripts/windows-sign.ps1` 对生成的 Windows 可执行文件和安装包进行签名；如果没有配置证书环境变量，构建会失败，避免产出未签名发布件。
 
-GitHub Actions 的 Windows 发布任务同样会强制签名并在上传前执行 `signtool verify`。CI 需要配置以下 secrets：`WINDOWS_CODESIGN_CERT_BASE64`（PFX 证书的 Base64 内容）、`WINDOWS_CODESIGN_CERT_PASSWORD`（PFX 密码），可选 `WINDOWS_CODESIGN_TIMESTAMP_URL`。
-
 推荐发布流程：
 
 1. 准备 OV 或 EV 代码签名证书。EV 证书通常更容易通过 SmartScreen 信誉检查；OV 证书也需要逐步积累下载和安装信誉。

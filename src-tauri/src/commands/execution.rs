@@ -4,6 +4,7 @@ use std::collections::VecDeque;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::Database;
+use crate::security::{clamp_execution_concurrency, truncate_output_lossy};
 use crate::ssh;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,6 +120,9 @@ pub fn execute_command(
             )
             .map_err(|e| format!("host {} not found: {}", hid, e))?;
 
+        let password = crate::commands::hosts::resolve_host_password(hid, password)?;
+        let private_key = crate::commands::hosts::resolve_host_private_key(hid, private_key)?;
+
         configs.push((
             hid.clone(),
             host_name,
@@ -163,7 +167,7 @@ pub fn execute_command(
             "backend",
         );
 
-        let max_concurrent = concurrency as usize;
+        let max_concurrent = clamp_execution_concurrency(concurrency) as usize;
         let mut handles: VecDeque<
             std::thread::JoinHandle<(String, String, u32, String, i32, u64)>,
         > = VecDeque::new();
@@ -225,6 +229,7 @@ pub fn execute_command(
 
                 match pool.execute(&hid, &config, &command, timeout) {
                     Ok(output) => {
+                        let output = truncate_output_lossy(output);
                         let _ = app_spawn.emit(
                             &format!("exec:{}:output", task_id),
                             serde_json::json!({
@@ -239,6 +244,7 @@ pub fn execute_command(
                         (hid, host_name, 1u32, output, 0, 0u64)
                     }
                     Err(e) => {
+                        let e = truncate_output_lossy(e);
                         let _ = app_spawn.emit(
                             &format!("exec:{}:output", task_id),
                             serde_json::json!({
@@ -341,11 +347,29 @@ pub fn execute_command(
         );
 
         let (level, summary) = if fail_count == 0 {
-            ("success", format!("Command [{}]: all succeeded ({} host(s), {}ms)", cmd_clone, success_count, duration_ms))
+            (
+                "success",
+                format!(
+                    "Command [{}]: all succeeded ({} host(s), {}ms)",
+                    cmd_clone, success_count, duration_ms
+                ),
+            )
         } else if success_count == 0 {
-            ("error", format!("Command [{}]: all failed ({} host(s), {}ms)", cmd_clone, fail_count, duration_ms))
+            (
+                "error",
+                format!(
+                    "Command [{}]: all failed ({} host(s), {}ms)",
+                    cmd_clone, fail_count, duration_ms
+                ),
+            )
         } else {
-            ("warn", format!("Command [{}]: {} succeeded, {} failed ({}ms)", cmd_clone, success_count, fail_count, duration_ms))
+            (
+                "warn",
+                format!(
+                    "Command [{}]: {} succeeded, {} failed ({}ms)",
+                    cmd_clone, success_count, fail_count, duration_ms
+                ),
+            )
         };
         crate::commands::app_log::emit_log(&app, level, "execution", &summary, "backend");
     });

@@ -1,3 +1,5 @@
+mod host_key;
+
 use dashmap::DashMap;
 use russh::keys::ssh_key;
 use russh::{
@@ -14,6 +16,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::Manager;
 use tokio::runtime::Runtime;
+
+use host_key::HostKeyVerifier;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SshConfig {
@@ -42,7 +46,17 @@ pub struct TransferResult {
     pub duration_ms: u64,
 }
 
-pub struct ClientHandler;
+pub struct ClientHandler {
+    verifier: HostKeyVerifier,
+}
+
+impl ClientHandler {
+    fn new(host_id: impl Into<String>) -> Self {
+        Self {
+            verifier: HostKeyVerifier::new(host_id),
+        }
+    }
+}
 
 fn build_ssh_client_config() -> client::Config {
     client::Config {
@@ -114,8 +128,12 @@ fn build_ssh_client_config() -> client::Config {
 impl client::Handler for ClientHandler {
     type Error = russh::Error;
 
-    async fn check_server_key(&mut self, _key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
-        Ok(true)
+    async fn check_server_key(&mut self, key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+        let fingerprint = key.fingerprint(ssh_key::HashAlg::Sha256).to_string();
+        self.verifier.verify_fingerprint(&fingerprint).map_err(|e| {
+            eprintln!("[SSH] Host key verification failed: {}", e);
+            russh::Error::Disconnect
+        })
     }
 }
 
@@ -271,6 +289,18 @@ impl SharedSshConnection {
 }
 
 pub fn connect_internal(config: &SshConfig, timeout_secs: u64) -> Result<SshConnection, String> {
+    connect_internal_with_host_id(
+        &format!("{}:{}", config.host, config.port),
+        config,
+        timeout_secs,
+    )
+}
+
+fn connect_internal_with_host_id(
+    host_id: &str,
+    config: &SshConfig,
+    timeout_secs: u64,
+) -> Result<SshConnection, String> {
     let runtime = Runtime::new().map_err(|e| format!("runtime init failed: {}", e))?;
 
     let config_clone = config.clone();
@@ -288,6 +318,7 @@ pub fn connect_internal(config: &SshConfig, timeout_secs: u64) -> Result<SshConn
         .map_err(|e| format!("设置非阻塞失败: {}", e))?;
 
     let config_clone = config.clone();
+    let verifier_id = host_id.to_string();
 
     let handle = runtime.block_on(async move {
         let tcp = tokio::net::TcpStream::from_std(tcp)
@@ -295,7 +326,7 @@ pub fn connect_internal(config: &SshConfig, timeout_secs: u64) -> Result<SshConn
 
         let ssh_config = build_ssh_client_config();
 
-        let handler = ClientHandler;
+        let handler = ClientHandler::new(verifier_id);
 
         let mut handle = client::connect_stream(Arc::new(ssh_config), tcp, handler)
             .await
@@ -378,9 +409,16 @@ pub fn connect_via_jump_chain(
         let tcp = tokio::net::TcpStream::from_std(tcp)
             .map_err(|e| format!("TcpStream转换失败: {}", e))?;
         let ssh_config = build_ssh_client_config();
-        let mut handle = client::connect_stream(Arc::new(ssh_config), tcp, ClientHandler)
-            .await
-            .map_err(|e| format!("跳板机 {} SSH握手失败: {}", first_config_clone.host, e))?;
+        let mut handle = client::connect_stream(
+            Arc::new(ssh_config),
+            tcp,
+            ClientHandler::new(format!(
+                "{}:{}",
+                first_config_clone.host, first_config_clone.port
+            )),
+        )
+        .await
+        .map_err(|e| format!("跳板机 {} SSH握手失败: {}", first_config_clone.host, e))?;
         authenticate_handle(&mut handle, &first_config_clone).await?;
         Ok::<_, String>(handle)
     })?;
@@ -417,9 +455,13 @@ pub fn connect_via_jump_chain(
 
             // Perform SSH handshake on the tunneled stream
             let ssh_config = build_ssh_client_config();
-            let mut handle = client::connect_stream(Arc::new(ssh_config), stream, ClientHandler)
-                .await
-                .map_err(|e| format!("{} {}:{} SSH握手失败: {}", label, hop.host, hop.port, e))?;
+            let mut handle = client::connect_stream(
+                Arc::new(ssh_config),
+                stream,
+                ClientHandler::new(format!("{}:{}", hop.host, hop.port)),
+            )
+            .await
+            .map_err(|e| format!("{} {}:{} SSH握手失败: {}", label, hop.host, hop.port, e))?;
 
             authenticate_handle(&mut handle, &hop).await?;
 
@@ -974,9 +1016,15 @@ impl SshConnectionRegistry {
         config: &SshConfig,
         timeout_secs: u64,
     ) -> Result<SharedSshConnection, String> {
-        self.log("info", &format!("主机 {} 正在连接 {}:{}...", host_id, config.host, config.port));
+        self.log(
+            "info",
+            &format!(
+                "主机 {} 正在连接 {}:{}...",
+                host_id, config.host, config.port
+            ),
+        );
 
-        match connect_internal(config, timeout_secs) {
+        match connect_internal_with_host_id(host_id, config, timeout_secs) {
             Ok(conn) => {
                 let shared = conn.into_shared();
 
@@ -989,7 +1037,10 @@ impl SshConnectionRegistry {
                 self.connections
                     .insert(host_id.to_string(), ConnectionEntry::new(shared.clone()));
 
-                self.log("success", &format!("主机 {} ({}) 已连接", host_id, config.host));
+                self.log(
+                    "success",
+                    &format!("主机 {} ({}) 已连接", host_id, config.host),
+                );
 
                 Ok(shared)
             }

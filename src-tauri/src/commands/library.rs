@@ -37,7 +37,9 @@ pub async fn list_commands(db: tauri::State<'_, Database>) -> Result<Vec<CustomC
                 risk: row.get(5)?,
                 description: row.get(6)?,
                 platform: row.get(7)?,
-                parameters: row.get::<_, Option<String>>(8)?.unwrap_or_else(|| "[]".to_string()),
+                parameters: row
+                    .get::<_, Option<String>>(8)?
+                    .unwrap_or_else(|| "[]".to_string()),
                 url: row.get::<_, Option<String>>(9)?.unwrap_or_default(),
                 starred: row.get::<_, i32>(10)? == 1,
                 is_builtin: row.get::<_, i32>(11)? == 1,

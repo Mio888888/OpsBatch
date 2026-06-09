@@ -129,6 +129,8 @@ fn load_host_config(db: &Database, host_id: &str) -> Result<ssh::SshConfig, Stri
         )
         .map_err(|e| format!("host not found: {}", e))?;
     drop(conn);
+    let password = crate::commands::hosts::resolve_host_password(host_id, password)?;
+    let private_key = crate::commands::hosts::resolve_host_private_key(host_id, private_key)?;
     Ok(ssh::SshConfig {
         host: ip,
         port: port as u16,

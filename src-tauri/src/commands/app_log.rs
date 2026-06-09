@@ -39,13 +39,7 @@ pub fn init_app_logs_table(conn: &rusqlite::Connection) -> Result<(), String> {
 }
 
 /// Emit a structured log entry to all frontend windows and persist to DB.
-pub fn emit_log(
-    app: &AppHandle,
-    level: &str,
-    source: &str,
-    message: &str,
-    origin: &str,
-) {
+pub fn emit_log(app: &AppHandle, level: &str, source: &str, message: &str, origin: &str) {
     let timestamp = chrono::Local::now().format("%H:%M:%S%.3f").to_string();
     let entry = AppLogEntry {
         timestamp: timestamp.clone(),
@@ -75,10 +69,7 @@ pub fn emit_log(
 
 /// Return recent log entries from DB (for loading history).
 #[tauri::command]
-pub fn get_log_history(
-    app: AppHandle,
-    limit: Option<u32>,
-) -> Result<Vec<AppLogEntry>, String> {
+pub fn get_log_history(app: AppHandle, limit: Option<u32>) -> Result<Vec<AppLogEntry>, String> {
     let limit = limit.unwrap_or(500);
     let db = app.state::<Database>();
     let conn = db.conn.lock().map_err(|e| e.to_string())?;

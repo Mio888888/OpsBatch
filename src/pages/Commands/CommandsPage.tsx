@@ -13,7 +13,6 @@ import {
 } from '../../components/ui/icons';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import type { ColumnsType } from '../../components/ui';
 import { useLocation } from 'react-router-dom';
 import { useAssetsStore } from '../../stores/assets';
@@ -79,25 +78,8 @@ export default function CommandsPage() {
 
   const openBatchTransfer = useCallback(async () => {
     if (selectedHostIds.length === 0) return;
-    const existing = await WebviewWindow.getByLabel('batch-transfer');
-    if (existing) await existing.destroy();
-    const baseUrl = window.location.origin;
-    const url = `${baseUrl}/batch-transfer?hostIds=${selectedHostIds.join(',')}`;
-    const webview = new WebviewWindow('batch-transfer', {
-      url,
-      title: tText('assets.batchUploadWindowTitle', { count: selectedHostIds.length }),
-      width: 900,
-      height: 700,
-      minWidth: 700,
-      minHeight: 550,
-      decorations: false,
-      transparent: true,
-      backgroundColor: '#00000000',
-    });
-    webview.once('tauri://error', (e) => {
-      console.error('Failed to open batch transfer window:', e);
-    });
-  }, [selectedHostIds, tText]);
+    await invoke('open_managed_window', { kind: 'batch-transfer', hostIds: selectedHostIds });
+  }, [selectedHostIds]);
 
   const listenersRef = useRef<UnlistenFn[]>([]);
 

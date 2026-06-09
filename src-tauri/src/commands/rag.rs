@@ -1,4 +1,5 @@
 use crate::db::Database;
+use crate::security::clamp_rag_limit;
 use regex::Regex;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -358,22 +359,24 @@ pub fn rag_import_document(
 
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     for chunk in &chunks {
         let tokens = tokenize(&chunk.content);
         let tokens_json = serde_json::to_string(&tokens).map_err(|e| e.to_string())?;
-        conn.execute(
+        tx.execute(
             "INSERT INTO rag_chunks (id, collection_id, content, heading, heading_level, position, tokens) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![chunk.id, chunk.collection_id, chunk.content, chunk.heading, chunk.heading_level, chunk.position, tokens_json],
         )
         .map_err(|e| e.to_string())?;
     }
 
-    conn.execute(
+    tx.execute(
         "UPDATE rag_collections SET document_count = document_count + 1 WHERE id = ?1",
         params![collection_id],
     )
     .map_err(|e| e.to_string())?;
 
+    tx.commit().map_err(|e| e.to_string())?;
     Ok(chunk_count)
 }
 
@@ -407,7 +410,7 @@ pub fn rag_search(
     collection_ids: Option<Vec<String>>,
     limit: Option<i64>,
 ) -> Result<Vec<SearchResult>, String> {
-    let limit = limit.unwrap_or(10);
+    let limit = clamp_rag_limit(limit);
     let query_tokens = tokenize(&query);
 
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -428,6 +431,8 @@ pub fn rag_search(
             param_values.push(Box::new(cid.clone()));
         }
     }
+
+    sql.push_str(" ORDER BY position DESC LIMIT 5000");
 
     // Read raw strings from DB
     struct RawChunk {

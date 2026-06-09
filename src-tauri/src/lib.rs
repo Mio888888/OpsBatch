@@ -1,6 +1,7 @@
 mod commands;
 mod db;
 mod keychain;
+mod security;
 mod ssh;
 
 use std::sync::Arc;
@@ -21,6 +22,9 @@ pub fn run() {
             app.manage(database);
             app.manage(commands::terminal::TerminalManager::new());
             app.manage(commands::sftp::SftpManager::new());
+            let local_fs = commands::local_fs::LocalFsManager::new();
+            let _ = local_fs.authorize_root(&app_data_dir);
+            app.manage(local_fs);
             app.manage(commands::forward::ForwardManager::new());
             app.manage(Arc::new(commands::mcp::McpManager::new()));
             let registry = ssh::SshConnectionRegistry::new();
@@ -213,12 +217,14 @@ pub fn run() {
             commands::sftp::sftp_extract_archive,
             commands::sftp::sftp_warmup,
             // Local FS
-            commands::sftp::local_list_dir,
-            commands::sftp::local_read_file,
-            commands::sftp::local_mkdir,
-            commands::sftp::local_rename,
-            commands::sftp::local_remove,
-            commands::sftp::local_home_dir,
+            commands::local_fs::local_list_dir,
+            commands::local_fs::local_read_file,
+            commands::local_fs::local_mkdir,
+            commands::local_fs::local_rename,
+            commands::local_fs::local_remove,
+            commands::local_fs::local_home_dir,
+            commands::local_fs::local_authorize_directory,
+            commands::local_fs::local_is_authorized,
             // Editor
             commands::sftp::sftp_write_file,
             commands::sftp::sftp_read_file_tree,
@@ -233,6 +239,7 @@ pub fn run() {
             commands::proxyjump::resolve_jump_chain,
             commands::proxyjump::cascade_disconnect,
             commands::proxyjump::import_ssh_config_hosts,
+            commands::window::open_managed_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

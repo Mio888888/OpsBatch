@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use tauri::{AppHandle, Emitter};
 
 use crate::db::Database;
+use crate::security::shell_quote;
 use crate::ssh;
 
 #[derive(Deserialize)]
@@ -21,7 +22,8 @@ fn resolve_firstdir(
     parent_path: &str,
     timeout_secs: u64,
 ) -> Result<String, String> {
-    let cmd = format!("ls -1d {}/ 2>/dev/null | head -1", parent_path);
+    let quoted_parent = shell_quote(parent_path)?;
+    let cmd = format!("ls -1d {}/ 2>/dev/null | head -1", quoted_parent);
     let result = ssh::execute_command(config, &cmd, timeout_secs)?;
     let name = result.output.trim().trim_end_matches('/');
     let name = name.split('/').last().unwrap_or("");
@@ -75,6 +77,9 @@ pub fn file_transfer(
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
             )
             .map_err(|e| format!("host {} not found: {}", hid, e))?;
+
+        let password = crate::commands::hosts::resolve_host_password(hid, password)?;
+        let private_key = crate::commands::hosts::resolve_host_private_key(hid, private_key)?;
 
         configs.push((
             hid.clone(),

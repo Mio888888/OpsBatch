@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::Database;
+use crate::security::{shell_quote, MAX_SFTP_TREE_NODES};
 use crate::ssh;
 
 const SFTP_TRANSFER_CHUNK_SIZE: usize = 128 * 1024;
@@ -82,6 +83,9 @@ fn load_host_config(db: &Database, host_id: &str) -> Result<ssh::SshConfig, Stri
         )
         .map_err(|e| format!("host not found: {}", e))?;
     drop(conn);
+
+    let password = crate::commands::hosts::resolve_host_password(host_id, password)?;
+    let private_key = crate::commands::hosts::resolve_host_private_key(host_id, private_key)?;
 
     Ok(ssh::SshConfig {
         host: ip,
@@ -763,30 +767,32 @@ pub fn sftp_extract_archive(
         target_dir
     };
 
+    let quoted_target = shell_quote(&target)?;
+    let quoted_archive = shell_quote(&archive_path)?;
     let command = match ext.as_str() {
         "gz" | "tgz" => format!(
-            "mkdir -p '{}' && tar xzf '{}' -C '{}'",
-            target, archive_path, target
+            "mkdir -p {} && tar xzf {} -C {}",
+            quoted_target, quoted_archive, quoted_target
         ),
         "bz2" | "tbz2" => format!(
-            "mkdir -p '{}' && tar xjf '{}' -C '{}'",
-            target, archive_path, target
+            "mkdir -p {} && tar xjf {} -C {}",
+            quoted_target, quoted_archive, quoted_target
         ),
         "xz" | "txz" => format!(
-            "mkdir -p '{}' && tar xJf '{}' -C '{}'",
-            target, archive_path, target
+            "mkdir -p {} && tar xJf {} -C {}",
+            quoted_target, quoted_archive, quoted_target
         ),
         "tar" => format!(
-            "mkdir -p '{}' && tar xf '{}' -C '{}'",
-            target, archive_path, target
+            "mkdir -p {} && tar xf {} -C {}",
+            quoted_target, quoted_archive, quoted_target
         ),
         "zip" => format!(
-            "mkdir -p '{}' && unzip -o '{}' -d '{}'",
-            target, archive_path, target
+            "mkdir -p {} && unzip -o {} -d {}",
+            quoted_target, quoted_archive, quoted_target
         ),
         "7z" => format!(
-            "mkdir -p '{}' && 7z x '{}' -o'{}' -y",
-            target, archive_path, target
+            "mkdir -p {} && 7z x {} -o{} -y",
+            quoted_target, quoted_archive, quoted_target
         ),
         _ => return Err(format!("不支持的压缩格式: .{}", ext)),
     };
@@ -794,132 +800,6 @@ pub fn sftp_extract_archive(
     let config = load_host_config(&db, &host_id)?;
     let output = pool.execute(&host_id, &config, &command, 60)?;
     Ok(output)
-}
-
-// ---------------------------------------------------------------------------
-// Local filesystem commands
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub async fn local_list_dir(path: String) -> Result<Vec<FileEntry>, String> {
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    std::thread::spawn(move || {
-        let result = local_list_dir_blocking(path);
-        let _ = tx.send(result);
-    });
-    rx.await
-        .map_err(|e| format!("local list thread failed: {}", e))?
-}
-
-fn local_list_dir_blocking(path: String) -> Result<Vec<FileEntry>, String> {
-    let dir_path = if path.is_empty() { home_dir() } else { path };
-
-    let dir = Path::new(&dir_path);
-    if !dir.exists() || !dir.is_dir() {
-        return Err(format!("directory not found: {}", dir_path));
-    }
-
-    let mut entries: Vec<FileEntry> = Vec::new();
-    let read_dir = fs::read_dir(dir).map_err(|e| format!("read dir: {}", e))?;
-
-    for entry in read_dir {
-        let entry = entry.map_err(|e| format!("dir entry: {}", e))?;
-        let name = entry.file_name().to_string_lossy().to_string();
-        if name == "." {
-            continue;
-        }
-
-        let file_path = entry.path();
-        let symlink_meta = file_path.symlink_metadata().ok();
-        let is_symlink = symlink_meta
-            .as_ref()
-            .map(|m| m.file_type().is_symlink())
-            .unwrap_or(false);
-        let metadata = if is_symlink {
-            entry.metadata().unwrap_or_else(|_| symlink_meta.unwrap())
-        } else {
-            entry.metadata().map_err(|e| format!("metadata: {}", e))?
-        };
-
-        let modified = metadata.modified().ok().and_then(|t| {
-            let secs = t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs() as i64;
-            chrono::DateTime::from_timestamp(secs, 0)
-                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-        });
-
-        #[cfg(unix)]
-        let permissions = {
-            use std::os::unix::fs::PermissionsExt;
-            Some(metadata.permissions().mode() & 0o777)
-        };
-        #[cfg(not(unix))]
-        let permissions: Option<u32> = None;
-
-        entries.push(FileEntry {
-            name,
-            path: file_path.to_string_lossy().to_string(),
-            is_dir: metadata.is_dir(),
-            is_symlink,
-            size: if metadata.is_dir() { 0 } else { metadata.len() },
-            modified,
-            permissions,
-        });
-    }
-
-    entries.sort_by(|a, b| {
-        b.is_dir
-            .cmp(&a.is_dir)
-            .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
-
-    Ok(entries)
-}
-
-#[tauri::command]
-pub async fn local_read_file(path: String, max_size: Option<u64>) -> Result<Vec<u8>, String> {
-    run_on_blocking_thread("local read file", move || {
-        let file = Path::new(&path);
-        if !file.exists() {
-            return Err(format!("file not found: {}", path));
-        }
-
-        let file_size = file.metadata().map(|m| m.len()).unwrap_or(0);
-        let limit = max_size.unwrap_or(10 * 1024 * 1024);
-        if file_size > limit {
-            return Err(format!(
-                "文件过大 ({} bytes)，预览限制 {} bytes",
-                file_size, limit
-            ));
-        }
-
-        fs::read(file).map_err(|e| format!("read failed: {}", e))
-    })
-    .await
-}
-
-#[tauri::command]
-pub fn local_mkdir(path: String) -> Result<(), String> {
-    fs::create_dir_all(&path).map_err(|e| format!("mkdir failed: {}", e))
-}
-
-#[tauri::command]
-pub fn local_rename(old_path: String, new_path: String) -> Result<(), String> {
-    fs::rename(&old_path, &new_path).map_err(|e| format!("rename failed: {}", e))
-}
-
-#[tauri::command]
-pub fn local_remove(path: String) -> Result<(), String> {
-    let p = Path::new(&path);
-    if p.is_dir() {
-        fs::remove_dir(p).map_err(|e| format!("rmdir failed: {}", e))
-    } else {
-        fs::remove_file(p).map_err(|e| format!("remove failed: {}", e))
-    }
-}
-
-#[tauri::command]
-pub fn local_home_dir() -> Result<String, String> {
-    Ok(home_dir())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -950,7 +830,8 @@ pub async fn sftp_read_file_tree(
             .and_then(|n| n.to_str())
             .unwrap_or("")
             .to_string();
-        read_tree_node(&sftp, &entry.lease, &path, &name, depth, 0)
+        let mut visited = 0usize;
+        read_tree_node(&sftp, &entry.lease, &path, &name, depth, 0, &mut visited)
     })
     .await
 }
@@ -962,7 +843,12 @@ fn read_tree_node(
     name: &str,
     max_depth: u32,
     current_depth: u32,
+    visited: &mut usize,
 ) -> Result<TreeNode, String> {
+    *visited += 1;
+    if *visited > MAX_SFTP_TREE_NODES {
+        return Err("目录树节点过多，请缩小范围后重试".to_string());
+    }
     let metadata = connection
         .block_on(sftp.metadata(path))
         .map_err(|e| format!("stat {} failed: {}", path, e))?;
@@ -1009,6 +895,7 @@ fn read_tree_node(
                 &child.name,
                 max_depth,
                 current_depth + 1,
+                visited,
             )
             .ok()
         })
@@ -1139,10 +1026,4 @@ fn attempt_sftp_write(
         eprintln!("[SFTP] write failed: {}", e);
         format!("write failed: {}", e)
     })
-}
-
-fn home_dir() -> String {
-    std::env::var("HOME")
-        .or_else(|_| std::env::var("USERPROFILE"))
-        .unwrap_or_else(|_| "/".to_string())
 }

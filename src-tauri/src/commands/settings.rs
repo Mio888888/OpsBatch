@@ -426,7 +426,11 @@ fn add_font_style(families: &mut HashMap<String, BTreeSet<String>>, family: Stri
 }
 
 fn strip_font_style_suffix(family: &str) -> String {
-    let original = family.trim().split_whitespace().collect::<Vec<_>>().join(" ");
+    let original = family
+        .trim()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     let mut normalized = original.replace(['-', '_'], " ");
 
     loop {
@@ -441,7 +445,9 @@ fn strip_font_style_suffix(family: &str) -> String {
         if normalized.len() <= marker.len() {
             break;
         }
-        normalized = normalized[..normalized.len() - marker.len()].trim().to_string();
+        normalized = normalized[..normalized.len() - marker.len()]
+            .trim()
+            .to_string();
     }
 
     if normalized.trim().is_empty() {
@@ -468,7 +474,11 @@ fn font_family_infos(families: HashMap<String, BTreeSet<String>>) -> Vec<FontFam
             if styles.is_empty() {
                 styles.push("Regular".to_string());
             }
-            styles.sort_by(|a, b| font_style_rank(a).cmp(&font_style_rank(b)).then_with(|| a.cmp(b)));
+            styles.sort_by(|a, b| {
+                font_style_rank(a)
+                    .cmp(&font_style_rank(b))
+                    .then_with(|| a.cmp(b))
+            });
             Some(FontFamilyInfo { family, styles })
         })
         .collect();
@@ -483,7 +493,8 @@ fn font_style_rank(style: &str) -> u8 {
         "semibold" | "semi bold" | "semilight" | "semi light" | "demibold" | "demi bold" => 2,
         "bold" => 3,
         "italic" | "oblique" | "lightitalic" | "light italic" => 4,
-        "bold italic" | "bolditalic" | "semibolditalic" | "semi bold italic" | "semilightitalic" | "semi light italic" => 5,
+        "bold italic" | "bolditalic" | "semibolditalic" | "semi bold italic"
+        | "semilightitalic" | "semi light italic" => 5,
         "light" => 6,
         "thin" => 7,
         _ => 8,

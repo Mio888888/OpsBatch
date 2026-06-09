@@ -27,11 +27,17 @@ function frontendTimestamp(): string {
 }
 
 function emitFrontendLog(level: string, source: string, message: string) {
+  const redacted = message
+    .replace(/(Bearer\s+)[^\s"']+/gi, '$1***')
+    .replace(/(api[_-]?key\s*[=:]\s*)[^\s,"']+/gi, '$1***')
+    .replace(/(token\s*[=:]\s*)[^\s,"']+/gi, '$1***')
+    .replace(/(password\s*[=:]\s*)[^\s,"']+/gi, '$1***')
+    .slice(0, 4000);
   emit("global-log", {
     timestamp: frontendTimestamp(),
     level,
     source,
-    message,
+    message: redacted,
     origin: "frontend",
   }).catch(() => {});
 }

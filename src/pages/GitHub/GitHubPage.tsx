@@ -15,6 +15,7 @@ interface RepoInfo {
   url: string;
   branch: string;
   token?: string;
+  hasToken?: boolean;
   lastPulledAt?: string;
   updateOnStartup: boolean;
   enabled: boolean;

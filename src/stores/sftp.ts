@@ -54,6 +54,7 @@ interface SftpState {
   closeSession: (hostId: string) => Promise<void>;
   navigateRemote: (hostId: string, path: string) => Promise<void>;
   navigateLocal: (path: string) => Promise<void>;
+  authorizeLocalDirectory: () => Promise<string | null>;
   goRemoteUp: (hostId: string) => Promise<void>;
   goLocalUp: () => Promise<void>;
   setSelectedRemote: (entry: FileEntry | null) => void;
@@ -177,6 +178,13 @@ export const useSftpStore = create<SftpState>((set, get) => ({
     } catch (e: unknown) {
       set({ localError: String(e), localLoading: false });
     }
+  },
+
+  authorizeLocalDirectory: async () => {
+    const path = await invoke<string | null>('local_authorize_directory');
+    if (!path) return null;
+    await get().navigateLocal(path);
+    return path;
   },
 
   goRemoteUp: async (hostId) => {

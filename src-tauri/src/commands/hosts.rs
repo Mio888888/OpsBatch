@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::Manager;
 
 use crate::db::Database;
+use crate::security::SECRET_PLACEHOLDER;
 use crate::ssh::{self, SshConnectionRegistry};
 
 #[cfg(target_os = "windows")]
@@ -126,6 +127,9 @@ fn get_host_connection_info(db: &Database, id: &str) -> Result<HostConnectionInf
         )
         .map_err(|e| format!("host not found: {}", e))?;
 
+    let password = resolve_host_password(id, password)?;
+    let private_key = resolve_host_private_key(id, private_key)?;
+
     Ok(HostConnectionInfo {
         config: ssh::SshConfig {
             host: ip,
@@ -137,6 +141,78 @@ fn get_host_connection_info(db: &Database, id: &str) -> Result<HostConnectionInf
         },
         os,
     })
+}
+
+pub(crate) fn resolve_host_password(
+    host_id: &str,
+    stored: Option<String>,
+) -> Result<Option<String>, String> {
+    match stored.as_deref() {
+        Some(SECRET_PLACEHOLDER) => crate::keychain::get_host_password(host_id).map(Some),
+        _ => Ok(stored),
+    }
+}
+
+pub(crate) fn resolve_host_private_key(
+    host_id: &str,
+    stored: Option<String>,
+) -> Result<Option<String>, String> {
+    match stored.as_deref() {
+        Some(SECRET_PLACEHOLDER) => crate::keychain::get_host_private_key(host_id).map(Some),
+        _ => Ok(stored),
+    }
+}
+
+fn store_host_secrets(
+    host_id: &str,
+    password: Option<String>,
+    private_key: Option<String>,
+) -> Result<(Option<String>, Option<String>), String> {
+    let stored_password = match password.filter(|value| !value.is_empty()) {
+        Some(value) => {
+            crate::keychain::store_host_password(host_id, &value)?;
+            Some(SECRET_PLACEHOLDER.to_string())
+        }
+        None => None,
+    };
+    let stored_private_key = match private_key.filter(|value| !value.is_empty()) {
+        Some(value) => {
+            crate::keychain::store_host_private_key(host_id, &value)?;
+            Some(SECRET_PLACEHOLDER.to_string())
+        }
+        None => None,
+    };
+    Ok((stored_password, stored_private_key))
+}
+
+fn mask_secret_for_frontend(value: Option<String>) -> Option<String> {
+    value
+        .filter(|secret| !secret.is_empty())
+        .map(|_| SECRET_PLACEHOLDER.to_string())
+}
+
+fn stored_host_secret_for_update(
+    conn: &rusqlite::Connection,
+    host_id: &str,
+    column: &str,
+    incoming: Option<String>,
+    store: fn(&str, &str) -> Result<(), String>,
+) -> Result<Option<String>, String> {
+    let current = || {
+        let sql = format!("SELECT {} FROM hosts WHERE id=?1", column);
+        conn.query_row(&sql, params![host_id], |row| {
+            row.get::<_, Option<String>>(0)
+        })
+        .unwrap_or(None)
+    };
+
+    match incoming.as_deref() {
+        None | Some("") | Some(SECRET_PLACEHOLDER) => Ok(current()),
+        Some(value) => {
+            store(host_id, value)?;
+            Ok(Some(SECRET_PLACEHOLDER.to_string()))
+        }
+    }
 }
 
 fn is_windows_host(os: &str) -> bool {
@@ -241,7 +317,9 @@ fn measure_ping_ms(host: &str) -> Option<f64> {
     let mut command = std::process::Command::new("ping");
 
     #[cfg(target_os = "windows")]
-    command.args(["-n", "1", "-w", "3000", host]).creation_flags(CREATE_NO_WINDOW);
+    command
+        .args(["-n", "1", "-w", "3000", host])
+        .creation_flags(CREATE_NO_WINDOW);
 
     #[cfg(target_os = "macos")]
     command.args(["-c", "1", "-W", "3000", host]);
@@ -271,7 +349,11 @@ fn parse_ping_value_after(line: &str, marker: &str) -> Option<f64> {
     value.parse::<f64>().ok()
 }
 
-fn empty_monitor_snapshot(timestamp: u64, os: Option<String>, ping_ms: Option<f64>) -> HostMonitorSnapshot {
+fn empty_monitor_snapshot(
+    timestamp: u64,
+    os: Option<String>,
+    ping_ms: Option<f64>,
+) -> HostMonitorSnapshot {
     HostMonitorSnapshot {
         timestamp,
         uptime: None,
@@ -364,7 +446,11 @@ fn inner_get_host_monitor_snapshot(
 
     let ping_ms = measure_ping_ms(&config.host);
     if is_windows_host(&os) {
-        return Ok(empty_monitor_snapshot(timestamp, Some("Windows".to_string()), ping_ms));
+        return Ok(empty_monitor_snapshot(
+            timestamp,
+            Some("Windows".to_string()),
+            ping_ms,
+        ));
     }
 
     let command = r#"
@@ -434,8 +520,8 @@ pub async fn list_hosts(db: tauri::State<'_, Database>) -> Result<Vec<Host>, Str
                     port: row.get(3)?,
                     auth_type: row.get(4)?,
                     username: row.get(5)?,
-                    password: row.get(6)?,
-                    private_key: row.get(7)?,
+                    password: mask_secret_for_frontend(row.get(6)?),
+                    private_key: mask_secret_for_frontend(row.get(7)?),
                     os: row.get(8)?,
                     tags: row.get(9)?,
                     group_id: row.get(10)?,
@@ -475,6 +561,7 @@ pub async fn add_host(db: tauri::State<'_, Database>, host: NewHost) -> Result<S
     let conn = db.conn.clone();
     tokio::task::spawn_blocking(move || {
         let id = uuid::Uuid::new_v4().to_string();
+        let (password, private_key) = store_host_secrets(&id, host.password, host.private_key)?;
         let conn = conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT INTO hosts (id, name, ip, port, auth_type, username, password, private_key, os, tags, group_id, remark, jump_chain) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
@@ -485,8 +572,8 @@ pub async fn add_host(db: tauri::State<'_, Database>, host: NewHost) -> Result<S
                 host.port.unwrap_or(22),
                 host.auth_type.unwrap_or_else(|| "password".into()),
                 host.username.unwrap_or_else(|| "root".into()),
-                host.password,
-                host.private_key,
+                password,
+                private_key,
                 host.os.unwrap_or_else(|| "linux".into()),
                 host.tags.unwrap_or_else(|| "[]".into()),
                 host.group_id,
@@ -504,27 +591,21 @@ pub async fn update_host(db: tauri::State<'_, Database>, host: UpdateHost) -> Re
     tokio::task::spawn_blocking(move || {
         let conn = conn.lock().map_err(|e| e.to_string())?;
 
-        let password = if host.password.as_deref().unwrap_or("").is_empty() {
-            conn.query_row(
-                "SELECT password FROM hosts WHERE id=?1",
-                params![host.id],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .unwrap_or(None)
-        } else {
-            host.password
-        };
+        let password = stored_host_secret_for_update(
+            &conn,
+            &host.id,
+            "password",
+            host.password,
+            crate::keychain::store_host_password,
+        )?;
 
-        let private_key = if host.private_key.as_deref().unwrap_or("").is_empty() {
-            conn.query_row(
-                "SELECT private_key FROM hosts WHERE id=?1",
-                params![host.id],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .unwrap_or(None)
-        } else {
-            host.private_key
-        };
+        let private_key = stored_host_secret_for_update(
+            &conn,
+            &host.id,
+            "private_key",
+            host.private_key,
+            crate::keychain::store_host_private_key,
+        )?;
 
         conn.execute(
             "UPDATE hosts SET name=?1, ip=?2, port=?3, auth_type=?4, username=?5, password=?6, private_key=?7, os=?8, tags=?9, group_id=?10, remark=?11, jump_chain=?12, updated_at=datetime('now','localtime') WHERE id=?13",
@@ -541,6 +622,8 @@ pub async fn delete_host(db: tauri::State<'_, Database>, id: String) -> Result<(
         let conn = conn.lock().map_err(|e| e.to_string())?;
         conn.execute("DELETE FROM hosts WHERE id=?1", params![id])
             .map_err(|e| e.to_string())?;
+        let _ = crate::keychain::delete_host_password(&id);
+        let _ = crate::keychain::delete_host_private_key(&id);
         Ok(())
     })
     .await

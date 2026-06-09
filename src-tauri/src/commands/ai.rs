@@ -670,7 +670,10 @@ fn send_chat_request(config: &AiConfig, request: &ChatRequest) -> Result<ChatRes
     }
 
     let url = format!("{}/chat/completions", config.api_url.trim_end_matches('/'));
-    let model = request.model.clone().unwrap_or_else(|| config.model.clone());
+    let model = request
+        .model
+        .clone()
+        .unwrap_or_else(|| config.model.clone());
 
     let body = build_chat_body(
         &model,
@@ -1117,15 +1120,18 @@ pub fn ai_generate_script(
     );
 
     let config = load_ai_config(&db)?;
-    let result = send_chat_request(&config, &ChatRequest {
-        messages: vec![ChatMessage {
-            role: "user".into(),
-            content: prompt,
-        }],
-        model: None,
-        temperature: Some(0.7),
-        max_tokens: Some(2048),
-    })?;
+    let result = send_chat_request(
+        &config,
+        &ChatRequest {
+            messages: vec![ChatMessage {
+                role: "user".into(),
+                content: prompt,
+            }],
+            model: None,
+            temperature: Some(0.7),
+            max_tokens: Some(2048),
+        },
+    )?;
 
     Ok(result.content)
 }
@@ -1142,15 +1148,18 @@ pub fn ai_analyze_results(
     );
 
     let config = load_ai_config(&db)?;
-    let result = send_chat_request(&config, &ChatRequest {
-        messages: vec![ChatMessage {
-            role: "user".into(),
-            content: prompt,
-        }],
-        model: None,
-        temperature: Some(0.5),
-        max_tokens: Some(1024),
-    })?;
+    let result = send_chat_request(
+        &config,
+        &ChatRequest {
+            messages: vec![ChatMessage {
+                role: "user".into(),
+                content: prompt,
+            }],
+            model: None,
+            temperature: Some(0.5),
+            max_tokens: Some(1024),
+        },
+    )?;
 
     Ok(result.content)
 }
@@ -1167,15 +1176,18 @@ pub fn ai_diagnose_error(
     );
 
     let config = load_ai_config(&db)?;
-    let result = send_chat_request(&config, &ChatRequest {
-        messages: vec![ChatMessage {
-            role: "user".into(),
-            content: prompt,
-        }],
-        model: None,
-        temperature: Some(0.5),
-        max_tokens: Some(1024),
-    })?;
+    let result = send_chat_request(
+        &config,
+        &ChatRequest {
+            messages: vec![ChatMessage {
+                role: "user".into(),
+                content: prompt,
+            }],
+            model: None,
+            temperature: Some(0.5),
+            max_tokens: Some(1024),
+        },
+    )?;
 
     Ok(result.content)
 }
@@ -1198,15 +1210,18 @@ pub fn ai_risk_assessment(
     );
 
     let config = load_ai_config(&db)?;
-    let result = send_chat_request(&config, &ChatRequest {
-        messages: vec![ChatMessage {
-            role: "user".into(),
-            content: prompt,
-        }],
-        model: None,
-        temperature: Some(0.3),
-        max_tokens: Some(512),
-    })?;
+    let result = send_chat_request(
+        &config,
+        &ChatRequest {
+            messages: vec![ChatMessage {
+                role: "user".into(),
+                content: prompt,
+            }],
+            model: None,
+            temperature: Some(0.3),
+            max_tokens: Some(512),
+        },
+    )?;
 
     Ok(result.content)
 }
@@ -1237,24 +1252,23 @@ pub async fn ai_list_models(
     let url = format!("{}/models", url_base.trim_end_matches('/'));
 
     let effective_provider = provider.as_deref().unwrap_or(&config.provider);
-    let key = api_key
-        .as_deref()
-        .unwrap_or(&config.api_key);
+    let key = api_key.as_deref().unwrap_or(&config.api_key);
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
         .build()
         .map_err(|e| format!("初始化请求失败: {}", e))?;
 
-    let mut builder = client
-        .get(&url)
-        .header("Content-Type", "application/json");
+    let mut builder = client.get(&url).header("Content-Type", "application/json");
 
     if effective_provider != "ollama" && !key.trim().is_empty() && !key.contains("****") {
         builder = builder.header("Authorization", format!("Bearer {}", key.trim()));
     }
 
-    let resp = builder.send().await.map_err(|e| format!("请求失败: {}", e))?;
+    let resp = builder
+        .send()
+        .await
+        .map_err(|e| format!("请求失败: {}", e))?;
 
     if !resp.status().is_success() {
         let status = resp.status();
@@ -1262,7 +1276,10 @@ pub async fn ai_list_models(
         return Err(format!("获取模型列表失败 (HTTP {}): {}", status, text));
     }
 
-    let resp_json: serde_json::Value = resp.json().await.map_err(|e| format!("解析响应失败: {}", e))?;
+    let resp_json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("解析响应失败: {}", e))?;
 
     let models = resp_json["data"]
         .as_array()
@@ -1384,7 +1401,8 @@ mod ai_action_tests {
 
     #[test]
     fn command_plan_validation_rejects_unknown_version() {
-        let raw = r#"{"version":2,"summary":"检查","steps":[{"description":"查看","command":"df -h"}]}"#;
+        let raw =
+            r#"{"version":2,"summary":"检查","steps":[{"description":"查看","command":"df -h"}]}"#;
 
         let err = validate_command_plan(raw).expect_err("version must fail");
 

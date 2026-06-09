@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { invoke } from '@tauri-apps/api/core';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import {
@@ -764,96 +764,21 @@ export default function MainLayout({ children }: { children: ReactNode }) {
 
   const openBatchTerminal = useCallback(async () => {
     if (selectedHostIds.length === 0) return;
-    const existing = await WebviewWindow.getByLabel('batch-terminal');
-    if (existing) await existing.destroy();
-    const baseUrl = window.location.origin;
-    const url = `${baseUrl}/batch-terminal?hostIds=${selectedHostIds.join(',')}`;
-    const webview = new WebviewWindow('batch-terminal', {
-      url,
-      title: tText('assets.broadcastTerminalWindowTitle', { count: selectedHostIds.length }),
-      width: 1200,
-      height: 800,
-      minWidth: 800,
-      minHeight: 600,
-      decorations: false,
-      transparent: true,
-      backgroundColor: '#00000000',
-    });
-    webview.once('tauri://error', (e) => {
-      console.error('Failed to open batch exec window:', e);
-    });
-  }, [selectedHostIds, tText]);
+    await invoke('open_managed_window', { kind: 'batch-terminal', hostIds: selectedHostIds });
+  }, [selectedHostIds]);
 
   const openBatchTransfer = useCallback(async () => {
     if (selectedHostIds.length === 0) return;
-    const existing = await WebviewWindow.getByLabel('batch-transfer');
-    if (existing) await existing.destroy();
-    const baseUrl = window.location.origin;
-    const url = `${baseUrl}/batch-transfer?hostIds=${selectedHostIds.join(',')}`;
-    const webview = new WebviewWindow('batch-transfer', {
-      url,
-      title: tText('assets.batchUploadWindowTitle', { count: selectedHostIds.length }),
-      width: 900,
-      height: 700,
-      minWidth: 700,
-      minHeight: 550,
-      decorations: false,
-      transparent: true,
-      backgroundColor: '#00000000',
-    });
-    webview.once('tauri://error', (e) => {
-      console.error('Failed to open batch transfer window:', e);
-    });
-  }, [selectedHostIds, tText]);
+    await invoke('open_managed_window', { kind: 'batch-transfer', hostIds: selectedHostIds });
+  }, [selectedHostIds]);
 
   const openSettingsWindow = useCallback(async () => {
-    const existing = await WebviewWindow.getByLabel('settings');
-    if (existing) {
-      await existing.show();
-      await existing.setFocus();
-      return;
-    }
-
-    const baseUrl = window.location.origin;
-    const webview = new WebviewWindow('settings', {
-      url: `${baseUrl}/settings`,
-      title: tText('nav.settings'),
-      width: 900,
-      height: 680,
-      minWidth: 760,
-      minHeight: 560,
-      decorations: false,
-      transparent: true,
-      backgroundColor: '#00000000',
-    });
-    webview.once('tauri://error', (e) => {
-      console.error('Failed to open settings window:', e);
-    });
-  }, [tText]);
+    await invoke('open_managed_window', { kind: 'settings' });
+  }, []);
 
   const openLogWindow = useCallback(async () => {
-    const existing = await WebviewWindow.getByLabel('global-log');
-    if (existing) {
-      await existing.show();
-      await existing.setFocus();
-      return;
-    }
-    const baseUrl = window.location.origin;
-    const webview = new WebviewWindow('global-log', {
-      url: `${baseUrl}/global-log`,
-      title: tText('nav.globalLog'),
-      width: 720,
-      height: 600,
-      minWidth: 500,
-      minHeight: 400,
-      decorations: false,
-      transparent: true,
-      backgroundColor: '#00000000',
-    });
-    webview.once('tauri://error', (e) => {
-      console.error('Failed to open log window:', e);
-    });
-  }, [tText]);
+    await invoke('open_managed_window', { kind: 'global-log' });
+  }, []);
 
   useGSAP(() => {
     const root = layoutRef.current;

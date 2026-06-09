@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback, useRef, memo, useMemo, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { invoke } from '@tauri-apps/api/core';
-import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { useSftpStore, type FileEntry } from '../stores/sftp';
 import PortForwardPanel from './PortForwardPanel';
 import { useTranslation } from '../i18n';
@@ -224,8 +222,7 @@ const FilePane: FC<FilePaneProps> = memo(({ side, hostId, onContextMenu }) => {
   const download = useSftpStore((s) => s.download);
   const remotePath = useSftpStore((s) => s.remotePath);
   const localPath = useSftpStore((s) => s.localPath);
-  const localEntries = useSftpStore((s) => s.localEntries);
-  const localLoading = useSftpStore((s) => s.localLoading);
+  const authorizeLocalDirectory = useSftpStore((s) => s.authorizeLocalDirectory);
 
   const navigate = side === 'local' ? navigateLocal : (p: string) => navigateRemote(hostId, p);
   const goUp = side === 'local' ? goLocalUp : () => goRemoteUp(hostId);
@@ -241,14 +238,6 @@ const FilePane: FC<FilePaneProps> = memo(({ side, hostId, onContextMenu }) => {
     setPathInput(path);
   }, [path]);
 
-  useEffect(() => {
-    if (side === 'local' && localEntries.length === 0 && !localLoading) {
-      invoke<string>('local_home_dir').then((home) => {
-        navigateLocal(home);
-      }).catch(() => {});
-    }
-  }, [side]);
-
   const handleNavigate = useCallback(() => {
     if (pathInput.trim()) {
       navigate(pathInput.trim());
@@ -256,28 +245,13 @@ const FilePane: FC<FilePaneProps> = memo(({ side, hostId, onContextMenu }) => {
   }, [pathInput, navigate]);
 
   const openInIde = useCallback(async (entry: FileEntry) => {
-    const existing = await WebviewWindow.getByLabel('editor');
-    if (existing) {
-      await existing.destroy();
+    if (isPreviewable(entry)) {
+      if (side === 'local') {
+        await useSftpStore.getState().previewLocal(entry);
+      } else {
+        await useSftpStore.getState().previewRemote(hostId, entry);
+      }
     }
-    const baseUrl = window.location.origin;
-    const mode = entry.is_dir ? 'dir' : 'file';
-    const url = `${baseUrl}/editor?hostId=${encodeURIComponent(hostId)}&path=${encodeURIComponent(entry.path)}&mode=${mode}`;
-    const title = tText('sftp.editTitle', { name: entry.name, side: side === 'local' ? tText('sftp.local') : tText('sftp.remote') });
-    const webview = new WebviewWindow('editor', {
-      url,
-      title,
-      width: 1200,
-      height: 800,
-      minWidth: 800,
-      minHeight: 600,
-      decorations: false,
-      transparent: true,
-      backgroundColor: '#00000000',
-    });
-    webview.once('tauri://error', (e) => {
-      console.error('Failed to open editor window:', e);
-    });
   }, [hostId, side]);
 
   const handleDoubleClick = useCallback((entry: FileEntry) => {
@@ -367,6 +341,9 @@ const FilePane: FC<FilePaneProps> = memo(({ side, hostId, onContextMenu }) => {
             onKeyDown={(e) => e.key === 'Enter' && handleNavigate()}
             placeholder="/"
           />
+          {side === 'local' && (
+            <button className="sftp-btn-icon" onClick={() => { void authorizeLocalDirectory(); }} title="选择本地目录">…</button>
+          )}
           <button className="sftp-btn-icon" onClick={goUp} title={tText('sftp.parentDir')}>↑</button>
           <button className="sftp-btn-icon" onClick={() => refresh()} title={tText('common.refresh')}>↻</button>
         </div>
@@ -411,7 +388,11 @@ const FilePane: FC<FilePaneProps> = memo(({ side, hostId, onContextMenu }) => {
           </div>
         )}
         {!loading && !error && entries.length === 0 && (
-          <div className="sftp-empty">{tText('sftp.emptyDir')}</div>
+          <div className="sftp-empty">
+            {side === 'local' && !path ? (
+              <button className="sftp-btn" onClick={() => { void authorizeLocalDirectory(); }}>选择本地目录</button>
+            ) : tText('sftp.emptyDir')}
+          </div>
         )}
       </div>
     </div>
@@ -654,36 +635,15 @@ const FileContextMenu: FC<{
 
   const handleIdeOpen = async () => {
     onClose();
-    const existing = await WebviewWindow.getByLabel('editor');
-    if (existing) {
-      await existing.destroy();
+    if (!menu.entry.is_dir && isPreviewable(menu.entry)) {
+      await previewRemote(hostId, menu.entry);
     }
-    const mode = menu.entry.is_dir ? 'dir' : 'file';
-    const baseUrl = window.location.origin;
-    const url = `${baseUrl}/editor?hostId=${encodeURIComponent(hostId)}&path=${encodeURIComponent(menu.entry.path)}&mode=${mode}`;
-    const title = menu.entry.is_dir
-      ? tText('sftp.editTitle', { name: `${menu.entry.name}/`, side: tText('sftp.remote') })
-      : tText('sftp.editTitle', { name: menu.entry.name, side: tText('sftp.remote') });
-    const webview = new WebviewWindow('editor', {
-      url,
-      title,
-      width: 1200,
-      height: 800,
-      minWidth: 800,
-      minHeight: 600,
-      decorations: false,
-      transparent: true,
-      backgroundColor: '#00000000',
-    });
-    webview.once('tauri://error', (e) => {
-      console.error('Failed to open editor window:', e);
-    });
   };
 
   const items: { label: string; action: () => void; separator?: boolean }[] = [];
 
-  if (menu.side === 'remote') {
-    items.push({ label: menu.entry.is_dir ? tText('sftp.ideOpenDir') : tText('sftp.ideOpenFile'), action: handleIdeOpen });
+  if (menu.side === 'remote' && !menu.entry.is_dir && isPreviewable(menu.entry)) {
+    items.push({ label: tText('sftp.ideOpenFile'), action: handleIdeOpen });
   }
 
   if (!menu.entry.is_dir) {

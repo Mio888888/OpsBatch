@@ -2,6 +2,8 @@ use rusqlite::Connection;
 
 use std::sync::{Arc, Mutex};
 
+use crate::security::SECRET_PLACEHOLDER;
+
 pub struct Database {
     pub conn: Arc<Mutex<Connection>>,
 }
@@ -313,6 +315,8 @@ impl Database {
             );
 
             CREATE INDEX IF NOT EXISTS idx_ai_action_audit_action ON ai_action_audit(action_id, created_at);
+            CREATE INDEX IF NOT EXISTS idx_execution_history_started ON execution_history(started_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_execution_details_history ON execution_details(history_id, host_name);
             ",
         )
         .map_err(|e| e.to_string())?;
@@ -411,6 +415,8 @@ impl Database {
             conn.execute_batch("ALTER TABLE hosts ADD COLUMN private_key TEXT;")
                 .map_err(|e| e.to_string())?;
         }
+
+        self.migrate_host_secrets_to_keychain(&conn)?;
 
         // Add jump_chain column to hosts if missing
         let has_jump_chain: bool = conn
@@ -554,9 +560,18 @@ impl Database {
                 .map_err(|e| e.to_string())?;
             }
         }
+        self.migrate_repo_tokens_to_keychain(&conn)?;
 
         // RAG tables
         crate::commands::rag::init_rag_tables(&conn)?;
+        conn.execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS idx_rag_chunks_collection ON rag_chunks(collection_id, position);
+            CREATE INDEX IF NOT EXISTS idx_rag_collections_scope ON rag_collections(scope, scope_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_github_repos_startup ON github_repos(enabled, update_on_startup);
+            ",
+        )
+        .map_err(|e| e.to_string())?;
 
         // MCP tables
         crate::commands::mcp::init_mcp_tables(&conn)?;
@@ -643,9 +658,84 @@ impl Database {
                 .map_err(|e| e.to_string())?;
         }
 
+        conn.execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS idx_commands_source_repo ON commands(source_repo_id);
+            CREATE INDEX IF NOT EXISTS idx_scripts_source_repo ON scripts(source_repo_id);
+            CREATE INDEX IF NOT EXISTS idx_quick_actions_source_repo ON quick_actions(source_repo_id);
+            ",
+        )
+        .map_err(|e| e.to_string())?;
+
         // App logs table
         crate::commands::app_log::init_app_logs_table(&conn)?;
 
+        Ok(())
+    }
+
+    fn migrate_host_secrets_to_keychain(&self, conn: &Connection) -> Result<(), String> {
+        let mut stmt = conn
+            .prepare("SELECT id, password, private_key FROM hosts")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        let mut updates = Vec::new();
+        for row in rows {
+            let (id, password, private_key) = row.map_err(|e| e.to_string())?;
+            if let Some(secret) =
+                password.filter(|value| !value.is_empty() && value != SECRET_PLACEHOLDER)
+            {
+                crate::keychain::store_host_password(&id, &secret)?;
+                updates.push(("password", id.clone()));
+            }
+            if let Some(secret) =
+                private_key.filter(|value| !value.is_empty() && value != SECRET_PLACEHOLDER)
+            {
+                crate::keychain::store_host_private_key(&id, &secret)?;
+                updates.push(("private_key", id.clone()));
+            }
+        }
+        for (column, id) in updates {
+            let sql = format!("UPDATE hosts SET {}=?1 WHERE id=?2", column);
+            conn.execute(&sql, rusqlite::params![SECRET_PLACEHOLDER, id])
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    fn migrate_repo_tokens_to_keychain(&self, conn: &Connection) -> Result<(), String> {
+        let mut stmt = conn
+            .prepare("SELECT id, token FROM github_repos")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
+            })
+            .map_err(|e| e.to_string())?;
+        let mut ids = Vec::new();
+        for row in rows {
+            let (id, token) = row.map_err(|e| e.to_string())?;
+            if let Some(secret) =
+                token.filter(|value| !value.is_empty() && value != SECRET_PLACEHOLDER)
+            {
+                crate::keychain::store_github_token(&id, &secret)?;
+                ids.push(id);
+            }
+        }
+        for id in ids {
+            conn.execute(
+                "UPDATE github_repos SET token=?1 WHERE id=?2",
+                rusqlite::params![SECRET_PLACEHOLDER, id],
+            )
+            .map_err(|e| e.to_string())?;
+        }
         Ok(())
     }
 }

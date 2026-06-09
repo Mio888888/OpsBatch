@@ -135,6 +135,45 @@ function buildScopedRequest(
 }
 
 let _listenerPromise: Promise<UnlistenFn> | null = null;
+const streamDeltaBuffer = new Map<string, string>();
+const streamDeltaTimers = new Map<string, number>();
+
+function flushStreamDelta(sessionId: string, setState: (fn: (prev: AiChatState) => Partial<AiChatState> | AiChatState) => void) {
+  const delta = streamDeltaBuffer.get(sessionId);
+  if (!delta) return;
+  streamDeltaBuffer.delete(sessionId);
+  const timer = streamDeltaTimers.get(sessionId);
+  if (timer) {
+    window.cancelAnimationFrame(timer);
+    streamDeltaTimers.delete(sessionId);
+  }
+  setState((prev) => {
+    const s = getSession(prev.sessions, sessionId);
+    if (!s.streamingMessageId) return prev;
+    return {
+      sessions: {
+        ...prev.sessions,
+        [sessionId]: {
+          ...s,
+          messages: s.messages.map((m) =>
+            m.id === s.streamingMessageId ? { ...m, content: m.content + delta } : m,
+          ),
+        },
+      },
+    };
+  });
+}
+
+function enqueueStreamDelta(sessionId: string, delta: string, setState: (fn: (prev: AiChatState) => Partial<AiChatState> | AiChatState) => void) {
+  if (!delta) return;
+  streamDeltaBuffer.set(sessionId, (streamDeltaBuffer.get(sessionId) || '') + delta);
+  if (streamDeltaTimers.has(sessionId)) return;
+  const timer = window.requestAnimationFrame(() => {
+    streamDeltaTimers.delete(sessionId);
+    flushStreamDelta(sessionId, setState);
+  });
+  streamDeltaTimers.set(sessionId, timer);
+}
 
 function blockedAssessment(error: string): AiActionAssessment {
   return {
@@ -537,6 +576,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
         if (!session.streamingMessageId) return;
 
         if (chunk.done) {
+          flushStreamDelta(sid, set);
           const targetMessageId = session.streamingMessageId;
           const targetMsg = session.messages.find((m) => m.id === targetMessageId);
           const rawContent = targetMsg?.content ?? '';
@@ -623,23 +663,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
           return;
         }
 
-        set((prev) => {
-          const s = getSession(prev.sessions, sid);
-          if (!s.streamingMessageId || (chunk.client_request_id && s.activeRequestId !== chunk.client_request_id)) return prev;
-          return {
-            sessions: {
-              ...prev.sessions,
-              [sid]: {
-                ...s,
-                messages: s.messages.map((m) =>
-                  m.id === s.streamingMessageId
-                    ? { ...m, content: m.content + chunk.delta }
-                    : m,
-                ),
-              },
-            },
-          };
-        });
+        enqueueStreamDelta(sid, chunk.delta, set);
       });
     }
     const unlisten = await _listenerPromise;

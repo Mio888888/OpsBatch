@@ -88,6 +88,7 @@
           <a href="#features">能力</a>
           <a href="#architecture">架构</a>
           <a href="#security">安全</a>
+          <a href="#compliance">合规</a>
           <a href="#download">下载</a>
         </nav>
 
@@ -537,6 +538,55 @@ $ _</code></pre>
           </p>
         </section>
 
+        <section id="compliance" class="compliance-section" aria-labelledby="compliance-title">
+          <div class="section-heading">
+            <div class="section-kicker">
+              <p class="eyebrow">Compliance & Legal</p>
+              <h2 id="compliance-title">合规与法律声明</h2>
+              <p class="section-note">
+                OpsBatch 面向授权运维场景。它提供 SSH、SFTP、批量命令、工作流和 AI 辅助能力，但不会替用户取得授权，也不会替代组织内部审批、审计和变更管理制度。
+              </p>
+            </div>
+          </div>
+          <div class="compliance-grid">
+            <article class="compliance-card clay-card">
+              <span>01</span>
+              <h3>网络合规与授权访问</h3>
+              <p>
+                用户应仅在自己拥有、管理或获得明确授权的服务器、账号、网络与云资源上使用 OpsBatch。批量命令、文件分发、端口转发、脚本和工作流可能造成配置变更、数据移动或服务中断，执行前应确认目标范围、权限边界、审批要求和回滚方案。
+              </p>
+            </article>
+            <article class="compliance-card clay-card">
+              <span>02</span>
+              <h3>生成式 AI 服务说明</h3>
+              <p>
+                AI 功能是可选辅助能力，支持 OpenAI、Ollama 或兼容端点。用户自行配置模型服务、API Key 和发送内容；终端输出、命令片段或错误信息可能被提交给所选服务商处理。AI 生成的命令和解释仅供参考，必须由用户审查确认后再执行。
+              </p>
+            </article>
+            <article class="compliance-card clay-card">
+              <span>03</span>
+              <h3>数据安全与隐私边界</h3>
+              <p>
+                OpsBatch 采用本地优先设计，主机资产、执行历史、命令库、工作流和日志主要保存在本机 SQLite 数据库中。部分凭据会尽力写入系统 keychain，但云厂商凭据、AI 配置或历史数据仍可能留存在本地配置或数据库中；请结合设备可信度、磁盘加密和最小权限策略使用。
+              </p>
+            </article>
+            <article class="compliance-card clay-card">
+              <span>04</span>
+              <h3>许可协议与第三方服务</h3>
+              <p>
+                OpsBatch 及其依赖遵循仓库声明的开源许可和各第三方组件许可。通过 OpsBatch 连接的云平台、AI 服务、Git 仓库、SSH 主机和网络资源，仍受对应服务条款、组织政策、地区法规和账号权限约束，用户需自行确保使用方式符合这些要求。
+              </p>
+            </article>
+            <article class="compliance-card clay-card">
+              <span>05</span>
+              <h3>非法律与专业建议</h3>
+              <p>
+                官网、README、应用界面、风险提示和 AI 输出均不构成法律、合规、安全审计或专业运维建议。不同组织和地区的要求可能不同，涉及生产变更、个人信息、敏感数据、监管行业或跨境处理时，请咨询具备资质的专业人员并遵循内部流程。
+              </p>
+            </article>
+          </div>
+        </section>
+
         <section id="download" class="download-section clay-window" aria-labelledby="download-title">
           <div class="download-copy">
             <p class="eyebrow">Download OpsBatch</p>
@@ -587,6 +637,7 @@ $ _</code></pre>
         <nav aria-label="页脚链接">
           <a href="#features">能力</a>
           <a href="#security">安全</a>
+          <a href="#compliance">合规</a>
           <a href="#download">下载</a>
           <a href="https://github.com/Mio888888/OpsBatch/releases/latest" target="_blank" rel="noreferrer">Release</a>
           <a href="https://github.com/Mio888888/OpsBatch" target="_blank" rel="noreferrer">源码</a>

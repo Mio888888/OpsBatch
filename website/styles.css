@@ -312,6 +312,7 @@ h3 {
 .download-section p,
 .security-copy p:not(.eyebrow),
 .risk-step p,
+.compliance-card p,
 .feature-card p {
   color: var(--muted);
   font-size: 16px;
@@ -635,6 +636,7 @@ h3 {
 }
 
 .section-block,
+.compliance-section,
 .download-section {
   margin: 108px 0;
 }
@@ -851,6 +853,53 @@ h3 {
   line-height: 1.68;
 }
 
+.compliance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+}
+
+.compliance-card {
+  display: grid;
+  align-content: start;
+  min-height: 284px;
+  padding: 30px;
+}
+
+.compliance-card:nth-child(3) {
+  grid-row: span 2;
+}
+
+.compliance-card span {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 28px;
+  place-items: center;
+  color: #445276;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  font-weight: 900;
+  background: #e6f7ee;
+  border-radius: 18px;
+  box-shadow: inset 4px 4px 10px rgba(124, 101, 119, 0.1), inset -5px -5px 11px rgba(255, 255, 255, 0.8);
+}
+
+.compliance-card:nth-child(2) span { background: #fff0bc; }
+.compliance-card:nth-child(3) span { background: #e7ecff; }
+.compliance-card:nth-child(4) span { background: #ffe4dd; }
+
+.compliance-card h3 {
+  margin-bottom: 14px;
+  color: #27304b;
+  font-size: 24px;
+  line-height: 1.18;
+}
+
+.compliance-card p {
+  margin: 0;
+}
+
 .download-section {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 0.78fr);
@@ -1043,6 +1092,14 @@ h3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .compliance-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .compliance-card:nth-child(3) {
+    grid-row: auto;
+  }
+
   .security-shell {
     grid-template-columns: 1fr;
   }
@@ -1100,12 +1157,14 @@ h3 {
   .download-section p,
   .security-copy p:not(.eyebrow),
   .risk-step p,
+  .compliance-card p,
   .feature-card p {
     font-size: 15px;
     line-height: 1.68;
   }
 
   .section-block,
+  .compliance-section,
   .security-section,
   .download-section {
     margin: 52px 0;
@@ -1133,6 +1192,7 @@ h3 {
   }
 
   .product-grid,
+  .compliance-grid,
   .feature-grid {
     grid-template-columns: 1fr;
   }
@@ -1187,11 +1247,13 @@ h3 {
 
   .terminal-panel,
   .monitor-card,
+  .compliance-card,
   .feature-card {
     min-height: auto;
   }
 
   .feature-card,
+  .compliance-card,
   .risk-step,
   .security-shell {
     padding: 20px;

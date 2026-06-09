@@ -229,6 +229,38 @@ Please note the current security status and avoid over-assumptions:
 - Tauri now has a baseline CSP that restricts script, object, and frame loading while allowing required IPC, HTTP(S), local development services, and media resources. Reassess and tighten the policy when adding new resource origins for production.
 - Avoid storing high-privilege credentials on untrusted devices. In team environments, use least-privilege accounts, temporary credentials, jump-host auditing, and system disk encryption where appropriate.
 
+## Compliance and Legal Notice
+
+OpsBatch is intended for authorized operations workflows. It provides SSH, SFTP, batch commands, file distribution, workflows, and optional AI assistance. The tool does not grant authorization on behalf of users and does not replace internal approval, audit, change-management, or security processes.
+
+### Network Compliance and Authorized Access
+
+- Use OpsBatch only on servers, accounts, networks, cloud resources, and data scopes that you own, manage, or are explicitly authorized to access.
+- Batch commands, scripts, file distribution, port forwarding, and workflows can change configuration, move data, alter permissions, or interrupt services. Confirm the target scope, command impact, approval requirements, and rollback plan before execution.
+- Users must comply with organizational policies, provider terms, account-permission boundaries, and applicable laws and regulations. Do not use OpsBatch for unauthorized access, bypassing security controls, service disruption, or handling data you are not permitted to process.
+
+### Generative AI Service Notice
+
+- AI features are optional. OpsBatch can be configured with OpenAI, local Ollama, or OpenAI-compatible services; users decide whether to enable AI, which service to use, and what context to send.
+- When a third-party AI service is used, terminal output, command snippets, error messages, script content, or other context may be sent to that provider for processing. Remove secrets, tokens, personal information, customer data, and other sensitive content before sending.
+- AI-generated commands, scripts, explanations, diagnostics, and risk assessments are for reference only. They are not guaranteed to be correct, complete, or suitable for your environment. Review, test, and confirm generated content before executing it.
+
+### Data Security and Privacy Boundaries
+
+- OpsBatch follows a local-first design. Host assets, execution history, command libraries, script libraries, workflows, AI conversations, and logs are mainly stored in the local SQLite database or local configuration.
+- Host passwords, private-key fields, and Git repository tokens are preferentially stored in the OS keychain, but some AI settings, cloud provider credentials, historical data, or runtime configuration may still be stored in the local database or config files.
+- Before use, evaluate risk based on device trust, account permissions, disk encryption, OS login protection, backup location, and team audit requirements. Avoid storing high-privilege credentials on untrusted devices.
+
+### Licenses and Third-Party Services
+
+- OpsBatch and its dependencies follow the open-source licenses and third-party component licenses declared by the repository. Redistribution, modification, or integration should also comply with those license requirements.
+- SSH hosts, cloud platforms, Git repositories, AI services, API services, and network resources accessed through OpsBatch remain subject to their own terms, organizational policies, regional regulations, and account authorization.
+- Users are responsible for the compliance of third-party service accounts, API keys, access tokens, model outputs, and data-processing choices.
+
+### Not Legal or Professional Advice
+
+The README, website, application UI, risk prompts, and AI outputs do not constitute legal, compliance, security-audit, or professional operations advice. Requirements vary across organizations, industries, and jurisdictions. For production changes, personal information, sensitive data, regulated industries, or cross-border processing, consult qualified professionals and follow your organization's formal processes.
+
 ## Current Status and Known Limitations
 
 - README language mapping: `README.md` and `README_CN.md` are both complete Chinese documents; `README_EN.md` is the English document. Keep the two Chinese files synchronized in future updates.

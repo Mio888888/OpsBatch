@@ -183,7 +183,7 @@ npm run dev
 
 Windows 安装包如果未进行 Authenticode 代码签名，或签名证书/发布源还没有积累 Microsoft 信誉，用户安装时可能看到“Windows 已保护你的电脑 / Microsoft Defender SmartScreen 阻止了无法识别的应用启动”。这不是应用运行时代码能直接关闭的提示，正式发布应使用可信代码签名证书签署安装包与可执行文件。
 
-仓库包含 Windows 专用 Tauri 配置 `src-tauri/tauri.windows.conf.json`。在 Windows 上运行 `npm run tauri -- build` 时，Tauri 会自动调用 `scripts/windows-sign.ps1` 对生成的 Windows 可执行文件和安装包进行签名；如果没有配置证书环境变量，构建会失败，避免产出未签名发布件。
+仓库包含 Windows 专用 Tauri 配置 `src-tauri/tauri.windows.conf.json`。在 Windows 上运行 `npm run tauri -- build` 时，Tauri 会自动调用 `scripts/windows-sign.ps1` 对生成的 Windows 可执行文件和安装包进行签名；如果没有配置证书环境变量，脚本会跳过 Authenticode 签名并输出 warning，构建继续产出未签名发布件。
 
 推荐发布流程：
 

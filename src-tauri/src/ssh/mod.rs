@@ -731,21 +731,66 @@ impl ConnectionEntry {
     }
 }
 
+struct CachedSshConfig {
+    config: SshConfig,
+    stored_at: Instant,
+}
+
 pub struct SshConnectionRegistry {
     connections: DashMap<String, ConnectionEntry>,
+    config_cache: DashMap<String, CachedSshConfig>,
     connection_locks: DashMap<String, Arc<Mutex<()>>>,
     app_handle: Mutex<Option<tauri::AppHandle>>,
     idle_timeout: Duration,
+    config_cache_ttl: Duration,
 }
 
 impl SshConnectionRegistry {
     pub fn new() -> Self {
         Self {
             connections: DashMap::new(),
+            config_cache: DashMap::new(),
             connection_locks: DashMap::new(),
             app_handle: Mutex::new(None),
             idle_timeout: Duration::from_secs(15 * 60),
+            config_cache_ttl: Duration::from_secs(120),
         }
+    }
+
+    #[cfg(test)]
+    fn new_with_config_cache_ttl(config_cache_ttl: Duration) -> Self {
+        Self {
+            connections: DashMap::new(),
+            config_cache: DashMap::new(),
+            connection_locks: DashMap::new(),
+            app_handle: Mutex::new(None),
+            idle_timeout: Duration::from_secs(15 * 60),
+            config_cache_ttl,
+        }
+    }
+
+    pub fn remember_config(&self, host_id: &str, config: &SshConfig) {
+        self.config_cache.insert(
+            host_id.to_string(),
+            CachedSshConfig {
+                config: config.clone(),
+                stored_at: Instant::now(),
+            },
+        );
+    }
+
+    pub fn cached_config(&self, host_id: &str) -> Option<SshConfig> {
+        let cached = self.config_cache.get(host_id)?;
+        if cached.stored_at.elapsed() <= self.config_cache_ttl {
+            return Some(cached.config.clone());
+        }
+        drop(cached);
+        self.config_cache.remove(host_id);
+        None
+    }
+
+    pub fn forget_config(&self, host_id: &str) {
+        self.config_cache.remove(host_id);
     }
 
     pub fn set_app_handle(&self, handle: tauri::AppHandle) {
@@ -1178,5 +1223,49 @@ impl SshConnectionRegistry {
                 self.emit_connection_status(&key, ConnectionState::LinkDown);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SshConfig, SshConnectionRegistry};
+    use std::time::Duration;
+
+    fn sample_config(host: &str) -> SshConfig {
+        SshConfig {
+            host: host.to_string(),
+            port: 22,
+            username: "root".to_string(),
+            auth_type: "password".to_string(),
+            password: Some("secret".to_string()),
+            private_key: None,
+        }
+    }
+
+    #[test]
+    fn cached_config_returns_recent_resolved_config() {
+        let registry = SshConnectionRegistry::new_with_config_cache_ttl(Duration::from_secs(60));
+        let config = sample_config("192.0.2.10");
+
+        registry.remember_config("host-1", &config);
+
+        assert_eq!(
+            registry.cached_config("host-1").map(|cached| cached.host),
+            Some("192.0.2.10".to_string())
+        );
+    }
+
+    #[test]
+    fn cached_config_expires_and_can_be_forgotten() {
+        let registry = SshConnectionRegistry::new_with_config_cache_ttl(Duration::from_millis(0));
+        let config = sample_config("192.0.2.20");
+
+        registry.remember_config("host-2", &config);
+        assert!(registry.cached_config("host-2").is_none());
+
+        let registry = SshConnectionRegistry::new();
+        registry.remember_config("host-2", &config);
+        registry.forget_config("host-2");
+        assert!(registry.cached_config("host-2").is_none());
     }
 }

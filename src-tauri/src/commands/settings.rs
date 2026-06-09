@@ -3,6 +3,7 @@ use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+#[cfg(target_os = "macos")]
 use std::process::Command;
 use tauri::Manager;
 
@@ -191,10 +192,13 @@ pub async fn list_system_font_families() -> Result<Vec<FontFamilyInfo>, String> 
     Ok(font_family_infos(families))
 }
 
+#[cfg(target_os = "macos")]
 fn collect_platform_font_families(families: &mut HashMap<String, BTreeSet<String>>) {
-    #[cfg(target_os = "macos")]
     collect_macos_font_families(families);
 }
+
+#[cfg(not(target_os = "macos"))]
+fn collect_platform_font_families(_families: &mut HashMap<String, BTreeSet<String>>) {}
 
 #[cfg(target_os = "macos")]
 fn collect_macos_font_families(families: &mut HashMap<String, BTreeSet<String>>) {

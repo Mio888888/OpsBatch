@@ -99,7 +99,11 @@ struct HostConnectionInfo {
     os: String,
 }
 
-fn get_host_connection_info(db: &Database, id: &str) -> Result<HostConnectionInfo, String> {
+fn get_host_connection_info(
+    db: &Database,
+    pool: &crate::ssh::SshConnectionRegistry,
+    id: &str,
+) -> Result<HostConnectionInfo, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let (ip, port, auth_type, username, password, private_key, os): (
         String,
@@ -126,6 +130,10 @@ fn get_host_connection_info(db: &Database, id: &str) -> Result<HostConnectionInf
             },
         )
         .map_err(|e| format!("host not found: {}", e))?;
+
+    if let Some(config) = pool.cached_config(id) {
+        return Ok(HostConnectionInfo { config, os });
+    }
 
     let password = resolve_host_password(id, password)?;
     let private_key = resolve_host_private_key(id, private_key)?;
@@ -510,7 +518,7 @@ fn inner_get_host_monitor_snapshot(
     pool: &SshConnectionRegistry,
     id: &str,
 ) -> Result<HostMonitorSnapshot, String> {
-    let HostConnectionInfo { config, os } = get_host_connection_info(db, id)?;
+    let HostConnectionInfo { config, os } = get_host_connection_info(db, pool, id)?;
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
@@ -722,12 +730,18 @@ pub async fn update_host(
             &format!("update_host db update succeeded host={}", host.id),
             "backend",
         );
+        app.state::<crate::ssh::SshConnectionRegistry>()
+            .forget_config(&host.id);
         Ok(())
     }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub async fn delete_host(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
+pub async fn delete_host(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, Database>,
+    id: String,
+) -> Result<(), String> {
     let conn = db.conn.clone();
     tokio::task::spawn_blocking(move || {
         let conn = conn.lock().map_err(|e| e.to_string())?;
@@ -735,6 +749,8 @@ pub async fn delete_host(db: tauri::State<'_, Database>, id: String) -> Result<(
             .map_err(|e| e.to_string())?;
         let _ = crate::keychain::delete_host_password(&id);
         let _ = crate::keychain::delete_host_private_key(&id);
+        app.state::<crate::ssh::SshConnectionRegistry>()
+            .forget_config(&id);
         Ok(())
     })
     .await

@@ -552,6 +552,8 @@ pub async fn terminal_connect(
         password,
         private_key,
     };
+    let pool = app.state::<ssh::SshConnectionRegistry>();
+    pool.remember_config(&host_id, &config);
 
     let cols = cols.unwrap_or(80);
     let rows = rows.unwrap_or(24);
@@ -601,14 +603,16 @@ pub async fn terminal_connect(
                     );
                     e
                 })?;
-            configs.push(ssh::SshConfig {
+            let jump_config = ssh::SshConfig {
                 host: jip,
                 port: jport as u16,
                 username: juname,
                 auth_type: jauth,
                 password: jpass,
                 private_key: jkey,
-            });
+            };
+            pool.remember_config(jump_id, &jump_config);
+            configs.push(jump_config);
         }
         configs
     };

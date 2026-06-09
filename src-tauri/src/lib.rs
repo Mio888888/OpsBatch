@@ -5,7 +5,9 @@ mod security;
 mod ssh;
 
 use std::sync::Arc;
-use tauri::{Listener, Manager};
+#[cfg(debug_assertions)]
+use tauri::Listener;
+use tauri::Manager;
 
 pub fn run() {
     tauri::Builder::default()

@@ -64,6 +64,20 @@ function Resolve-SignTargets {
   $targets | Sort-Object -Unique
 }
 
+if ($CertificatePath) {
+  if (-not (Test-Path -LiteralPath $CertificatePath)) {
+    throw "Certificate file not found: $CertificatePath"
+  }
+} elseif ($CertificateThumbprint) {
+  # Certificate store signing is configured below.
+} else {
+  Write-Warning 'Windows Authenticode signing skipped: set WINDOWS_CODESIGN_CERT_PATH or WINDOWS_CODESIGN_CERT_THUMBPRINT to sign release artifacts.'
+  if ($env:GITHUB_ACTIONS -eq 'true') {
+    Write-Host '::warning title=Windows signing skipped::Set WINDOWS_CODESIGN_CERT_PATH or WINDOWS_CODESIGN_CERT_THUMBPRINT to sign release artifacts.'
+  }
+  exit 0
+}
+
 $resolvedSignTool = Resolve-SignTool -ConfiguredPath $SignTool
 $targets = @(Resolve-SignTargets -InputPaths $Path)
 
@@ -74,17 +88,12 @@ if ($targets.Count -eq 0) {
 $signArgs = @('sign', '/fd', $DigestAlgorithm, '/tr', $TimestampUrl, '/td', $DigestAlgorithm)
 
 if ($CertificatePath) {
-  if (-not (Test-Path -LiteralPath $CertificatePath)) {
-    throw "Certificate file not found: $CertificatePath"
-  }
   $signArgs += @('/f', (Resolve-Path -LiteralPath $CertificatePath).Path)
   if ($CertificatePassword) {
     $signArgs += @('/p', $CertificatePassword)
   }
 } elseif ($CertificateThumbprint) {
   $signArgs += @('/sha1', $CertificateThumbprint)
-} else {
-  throw 'Set WINDOWS_CODESIGN_CERT_PATH or WINDOWS_CODESIGN_CERT_THUMBPRINT before signing.'
 }
 
 foreach ($target in $targets) {

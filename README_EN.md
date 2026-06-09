@@ -183,7 +183,7 @@ npm run dev
 
 If the Windows installer is unsigned, or if the signing certificate/publisher has not built enough Microsoft reputation yet, users may see the Microsoft Defender SmartScreen warning that Windows protected the PC from an unrecognized app. This cannot be disabled from application runtime code. Production Windows releases should be signed with a trusted Authenticode code-signing certificate.
 
-The repository includes a Windows-specific Tauri config at `src-tauri/tauri.windows.conf.json`. When `npm run tauri -- build` runs on Windows, Tauri automatically calls `scripts/windows-sign.ps1` to sign generated Windows executables and installers. If certificate environment variables are not configured, the build fails instead of producing unsigned release artifacts.
+The repository includes a Windows-specific Tauri config at `src-tauri/tauri.windows.conf.json`. When `npm run tauri -- build` runs on Windows, Tauri automatically calls `scripts/windows-sign.ps1` to sign generated Windows executables and installers. If certificate environment variables are not configured, the script skips Authenticode signing with a warning and the build continues with unsigned release artifacts.
 
 Recommended release flow:
 

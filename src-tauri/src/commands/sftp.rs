@@ -57,7 +57,15 @@ pub struct FileEntry {
     pub permissions: Option<u32>,
 }
 
-fn load_host_config(db: &Database, host_id: &str) -> Result<ssh::SshConfig, String> {
+fn load_host_config(
+    db: &Database,
+    pool: &ssh::SshConnectionRegistry,
+    host_id: &str,
+) -> Result<ssh::SshConfig, String> {
+    if let Some(config) = pool.cached_config(host_id) {
+        return Ok(config);
+    }
+
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let (ip, port, auth_type, username, password, private_key): (
         String,
@@ -124,7 +132,7 @@ pub async fn sftp_open(app: tauri::AppHandle, host_id: String) -> Result<SftpCap
                 });
             }
 
-            let config = load_host_config(&db, &host_id)?;
+            let config = load_host_config(&db, &pool, &host_id)?;
             let pooled_sftp = pool.open_sftp_session(&host_id, &config, 10)?;
             let ssh::PooledSftpSession { sftp, lease } = pooled_sftp;
 
@@ -161,7 +169,8 @@ pub fn sftp_close(manager: tauri::State<'_, SftpManager>, host_id: String) -> Re
 #[tauri::command]
 pub async fn sftp_warmup(app: tauri::AppHandle, host_id: String) -> Result<(), String> {
     let db = app.state::<Database>();
-    let config = load_host_config(&db, &host_id)?;
+    let pool = app.state::<ssh::SshConnectionRegistry>();
+    let config = load_host_config(&db, &pool, &host_id)?;
     let manager = app.state::<SftpManager>();
 
     if manager.sessions.contains_key(&host_id) {
@@ -797,7 +806,7 @@ pub fn sftp_extract_archive(
         _ => return Err(format!("不支持的压缩格式: .{}", ext)),
     };
 
-    let config = load_host_config(&db, &host_id)?;
+    let config = load_host_config(&db, &pool, &host_id)?;
     let output = pool.execute(&host_id, &config, &command, 60)?;
     Ok(output)
 }
@@ -928,7 +937,7 @@ fn ensure_sftp_session(
         eprintln!("[SFTP] No session for {}, creating new one", host_id);
     }
     drop(manager.sessions.remove(host_id));
-    let config = load_host_config(db, host_id)?;
+    let config = load_host_config(db, pool, host_id)?;
     eprintln!(
         "[SFTP] Opening SFTP session for {}@{}:{}",
         config.username, config.host, config.port

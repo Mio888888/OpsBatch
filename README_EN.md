@@ -110,8 +110,9 @@ React/Vite UI
 ├── README.md                 # Chinese README, default entry
 ├── README_CN.md              # Chinese README copy / named version
 ├── README_EN.md              # English README
-├── PRD.MD                    # Product requirements and long-term planning notes
 ├── package.json              # Desktop/web frontend and Tauri CLI scripts
+├── vite.config.ts            # Vite build configuration
+├── tsconfig.json             # TypeScript configuration
 ├── src/                      # React desktop frontend source
 │   ├── components/           # Layout, SFTP, AI, UI wrappers, and shared components
 │   ├── pages/                # Terminal, Commands, Libraries, Workflow, Settings, etc.
@@ -122,8 +123,13 @@ React/Vite UI
 │   ├── src/commands/         # hosts, terminal, execution, sftp, workflow, ai, etc.
 │   ├── src/db/               # SQLite schema and migrations
 │   ├── Cargo.toml            # Rust dependencies
-│   └── tauri.conf.json       # Tauri app and bundle configuration
-└── .trellis/                 # Project workflow, specs, and task materials
+│   ├── tauri.conf.json       # Tauri app and bundle configuration
+│   └── tauri.windows.conf.json # Windows signing extension config
+├── tests/                    # Node test files
+├── scripts/                  # Release and signing helper scripts
+├── website/                  # Standalone static website and download page
+├── docs/superpowers/         # Project specs, plans, and collaboration notes
+└── .github/workflows/        # Build and GitHub Pages workflows
 ```
 
 ## Prerequisites
@@ -216,10 +222,11 @@ OpsBatch is primarily a local desktop client. Core data is stored on the local m
 
 Please note the current security status and avoid over-assumptions:
 
-- Host passwords, private-key fields, cloud provider credentials, and parts of the AI configuration are written to local SQLite/settings data. The current implementation should not be described as fully encrypted protection for all sensitive information.
-- AI API keys have best-effort logic for storing in the OS keychain, but the configuration save path also writes local settings JSON.
-- The SSH client currently accepts server host keys permissively. Confirm the target network and host trust before connecting.
-- The Tauri CSP configuration is currently `null`. For production hardening, review this against actual window and resource-loading behavior.
+- Host passwords, private-key fields, and Git repository tokens are preferentially stored in the OS keychain, while SQLite stores the `***keychain***` placeholder; existing historical data is also migrated to the keychain on startup when possible.
+- AI API keys have best-effort logic for storing in the OS keychain, but the current configuration save path still writes the real key to local settings JSON. Do not describe all sensitive data as fully encrypted.
+- Cloud provider credentials and some runtime configuration may still be stored in the local database or config data. Evaluate risk according to device trust and credential scope.
+- SSH host keys use a trust-on-first-use (TOFU) fingerprint flow. Later fingerprint mismatches block the connection and ask the user to re-confirm the host. The first connection still requires a trusted network and host.
+- Tauri now has a baseline CSP that restricts script, object, and frame loading while allowing required IPC, HTTP(S), local development services, and media resources. Reassess and tighten the policy when adding new resource origins for production.
 - Avoid storing high-privilege credentials on untrusted devices. In team environments, use least-privilege accounts, temporary credentials, jump-host auditing, and system disk encryption where appropriate.
 
 ## Current Status and Known Limitations
@@ -234,11 +241,12 @@ Please note the current security status and avoid over-assumptions:
 
 ## Development and Contribution Notes
 
-- Before modifying features, read `PRD.MD`, relevant source files, and project specs under `.trellis/spec/`.
+- Before modifying features, read the relevant source files, specs/plans under `docs/superpowers/`, and the corresponding page, store, and Rust command implementations.
 - Frontend types are centralized in `src/types/index.ts`; pages live under `src/pages/`; shared components live under `src/components/`; stores and backend-call wrappers live under `src/stores/`.
 - The frontend calls Tauri `invoke()` through Zustand stores. Backend commands often use snake_case fields, and frontend stores normalize them to camelCase domain types.
 - Prefer project-owned `src/components/ui` wrappers and `App.css` variables/classes for UI. Application text already supports Chinese and English language modes.
 - When adding persisted backend capabilities, consider SQLite schema/migrations, Tauri command registration, frontend types, store calls, and verification commands together.
+- The product website lives under `website/` and is deployed to GitHub Pages through `.github/workflows/website.yml`. Desktop installers are built and published by `.github/workflows/build.yml` when the version tag does not already exist.
 - After documentation or code changes, run commands according to the affected scope:
 
 ```bash
@@ -250,6 +258,6 @@ Documentation-only changes usually do not require a full build, but README comma
 
 ## Related Documents
 
-- [PRD.MD](PRD.MD) — Product requirements, user scenarios, and long-term planning.
 - [README_CN.md](README_CN.md) — Chinese README.
 - [README_EN.md](README_EN.md) — English README.
+- [website/README.md](website/README.md) — Static website preview and deployment notes.

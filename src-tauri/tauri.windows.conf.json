@@ -2,13 +2,14 @@
   "bundle": {
     "windows": {
       "signCommand": {
-        "cmd": "powershell",
+        "cmd": "powershell.exe",
         "args": [
           "-NoProfile",
           "-ExecutionPolicy",
           "Bypass",
-          "-Command",
-          "$target = '%1'; $script = Join-Path (Get-Location) 'scripts/windows-sign.ps1'; if (-not (Test-Path -LiteralPath $script)) { $script = Join-Path (Get-Location) '../scripts/windows-sign.ps1' }; if (-not (Test-Path -LiteralPath $script)) { throw 'scripts/windows-sign.ps1 not found from Tauri signing command cwd.' }; & $script $target"
+          "-File",
+          "scripts/windows-sign.ps1",
+          "%1"
         ]
       }
     }

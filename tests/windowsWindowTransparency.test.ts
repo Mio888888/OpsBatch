@@ -46,3 +46,10 @@ test('managed child windows load the bundled SPA entry before routing', () => {
   assert.doesNotMatch(appSource, /consumeInitialRouteFromSearch/);
   assert.match(appSource, /<HashRouter>/);
 });
+
+test('managed child windows are created from an async command on Windows', () => {
+  const windowSource = readFileSync('src-tauri/src/commands/window.rs', 'utf8');
+
+  assert.match(windowSource, /#\[tauri::command\]\s*pub async fn open_managed_window/);
+  assert.match(windowSource, /tauri::async_runtime::spawn_blocking/);
+});

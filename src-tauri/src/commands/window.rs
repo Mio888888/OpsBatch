@@ -99,7 +99,7 @@ fn spa_entry_for_route(route: &str) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn open_managed_window(
+pub async fn open_managed_window(
     app: tauri::AppHandle,
     kind: String,
     host_ids: Option<Vec<String>>,
@@ -125,34 +125,44 @@ pub fn open_managed_window(
     let (width, height, min_width, min_height) = window.size();
     let route = window.route(&host_ids)?;
     let url = spa_entry_for_route(&route)?;
+    let title = window.title(host_ids.len());
     crate::commands::diagnostics::append_diagnostic_log(
         app.app_handle(),
         "window",
-        &format!("create kind={kind} label={label} route={route} url={url}"),
+        &format!("schedule create kind={kind} label={label} route={route} url={url}"),
     );
 
-    WebviewWindowBuilder::new(&app, label, WebviewUrl::App(url.into()))
-        .title(window.title(host_ids.len()))
-        .inner_size(width, height)
-        .min_inner_size(min_width, min_height)
-        .decorations(false)
-        .build()
-        .map(|_| {
-            crate::commands::diagnostics::append_diagnostic_log(
-                app.app_handle(),
-                "window",
-                &format!("created label={label}"),
-            );
-        })
-        .map_err(|e| {
+    let app_for_create = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::commands::diagnostics::append_diagnostic_log(
+            app_for_create.app_handle(),
+            "window",
+            &format!("create kind={kind} label={label} route={route} url={url}"),
+        );
+
+        if let Err(e) =
+            WebviewWindowBuilder::new(&app_for_create, label, WebviewUrl::App(url.into()))
+                .title(title)
+                .inner_size(width, height)
+                .min_inner_size(min_width, min_height)
+                .decorations(false)
+                .build()
+        {
             let message = e.to_string();
             crate::commands::diagnostics::append_diagnostic_log(
-                app.app_handle(),
+                app_for_create.app_handle(),
                 "window",
                 &format!("create failed label={label} error={message}"),
             );
-            message
-        })?;
+            return;
+        }
+
+        crate::commands::diagnostics::append_diagnostic_log(
+            app_for_create.app_handle(),
+            "window",
+            &format!("created label={label}"),
+        );
+    });
 
     Ok(())
 }

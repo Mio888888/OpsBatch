@@ -6,13 +6,14 @@ import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import type { Host } from '../../types';
 import {
-  Button, Space, Input, InputNumber, message, Empty, Tooltip,
+  Button, Input, InputNumber, message, Tooltip,
 } from '../../components/ui';
+import WindowControls from '../../components/WindowControls';
 import {
   UploadOutlined,
   FolderOpenOutlined, FileOutlined,
   CheckCircleOutlined, CloseCircleOutlined,
-  LoadingOutlined, CloudServerOutlined,
+  LoadingOutlined,
 } from '../../components/ui/icons';
 
 interface TransferProgress {
@@ -40,6 +41,13 @@ const VARIABLE_HELP = [
   { var: '{firstdir:路径}', desc: '远程路径下第一个子目录' },
 ];
 
+const MAX_COLLAPSED_HOSTS = 3;
+
+function getFileName(path: string) {
+  if (!path) return '';
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
+}
+
 export default function BatchTransferWindow() {
   const [searchParams] = useSearchParams();
   const hostIds = searchParams.get('hostIds')?.split(',').filter(Boolean) || [];
@@ -53,6 +61,7 @@ export default function BatchTransferWindow() {
   const [transferring, setTransferring] = useState(false);
   const [results, setResults] = useState<TransferProgress[]>([]);
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
+  const [targetsExpanded, setTargetsExpanded] = useState(false);
 
   const listenersRef = useRef<UnlistenFn[]>([]);
 
@@ -92,6 +101,12 @@ export default function BatchTransferWindow() {
     setup();
     return () => { unlisteners.forEach((fn) => fn()); };
   }, [activeTaskId]);
+
+  useEffect(() => {
+    if (hosts.length <= MAX_COLLAPSED_HOSTS && targetsExpanded) {
+      setTargetsExpanded(false);
+    }
+  }, [hosts.length, targetsExpanded]);
 
   const handleSelectFile = async () => {
     try {
@@ -140,7 +155,12 @@ export default function BatchTransferWindow() {
   const successCount = useMemo(() => results.filter((r) => r.success).length, [results]);
   const failCount = useMemo(() => results.filter((r) => !r.success).length, [results]);
   const doneCount = successCount + failCount;
-  const progress = results.length > 0 ? (doneCount / hostIds.length) * 100 : 0;
+  const pendingCount = Math.max(hostIds.length - doneCount, 0);
+  const progress = hostIds.length > 0 ? (doneCount / hostIds.length) * 100 : 0;
+  const isReady = hostIds.length > 0 && Boolean(localPath) && Boolean(remotePath);
+  const selectedSourceName = getFileName(localPath);
+  const visibleHosts = targetsExpanded ? hosts : hosts.slice(0, MAX_COLLAPSED_HOSTS);
+  const hiddenHostCount = Math.max(hosts.length - MAX_COLLAPSED_HOSTS, 0);
 
   const resultsListRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -158,191 +178,228 @@ export default function BatchTransferWindow() {
 
   if (hostsLoading) {
     return (
-      <div className="batch-window">
-        <div className="batch-loading">正在加载...</div>
+      <div className="batch-window batch-window-loading-state">
+        <div className="batch-loading-card">
+          <LoadingOutlined spin />
+          <div>
+            <strong>正在加载目标主机</strong>
+            <span>读取批量上传上下文</span>
+          </div>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="batch-window">
-      {/* Target hosts */}
-      <div className="batch-targets-bar">
-        <div className="batch-targets-label">
-          <CloudServerOutlined />
+      <header
+        className="batch-titlebar"
+        onMouseDown={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest('button')) return;
+          void import('@tauri-apps/api/window').then(({ getCurrentWindow }) => getCurrentWindow().startDragging());
+        }}
+        onDoubleClick={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest('button')) return;
+          void import('@tauri-apps/api/window')
+            .then(({ getCurrentWindow }) => getCurrentWindow().toggleMaximize())
+            .catch((error) => console.error('Window command failed:', error));
+        }}
+      >
+        <WindowControls className="batch-window-controls" />
+        <div className="batch-targets-strip-label">
           <span>目标主机</span>
-          <span className="batch-targets-count">{hostIds.length}</span>
+          <strong>{hosts.length}</strong>
         </div>
-        <div className="batch-targets-list">
-          {hosts.map((h) => (
-            <span key={h.id} className="batch-target-pill">
+        <div className="batch-targets-strip-list">
+          {visibleHosts.map((h) => (
+            <span key={h.id} className="batch-target-pill" title={`${h.name || h.ip} · ${h.ip}:${h.port}`}>
               {h.name || h.ip}
             </span>
           ))}
+          {!targetsExpanded && hiddenHostCount > 0 && (
+            <button
+              className="batch-target-count-tag"
+              type="button"
+              onClick={() => setTargetsExpanded(true)}
+              aria-label={`显示剩余 ${hiddenHostCount} 台主机`}
+            >
+              +{hiddenHostCount}
+            </button>
+          )}
+          {targetsExpanded && hiddenHostCount > 0 && (
+            <button
+              className="batch-target-count-tag batch-target-count-tag-muted"
+              type="button"
+              onClick={() => setTargetsExpanded(false)}
+            >
+              收起
+            </button>
+          )}
           {hosts.length === 0 && <span className="batch-targets-empty">未选择主机</span>}
         </div>
-      </div>
+      </header>
 
-      {/* Upload config */}
-      <div className="batch-command-card">
-        <div className="transfer-direction-row">
-          <UploadOutlined />
-          <span style={{ fontSize: 13, fontWeight: 600, color: '#263044' }}>批量上传</span>
-          <span className="transfer-direction-hint">本地 → 远程</span>
-        </div>
+      <div className="batch-layout">
+        <section className="batch-panel batch-config-panel" aria-label="上传设置">
+          <header className="batch-panel-header">
+            <div>
+              <span className="batch-panel-eyebrow">Source & path</span>
+              <h2>上传设置</h2>
+            </div>
+            {selectedSourceName && <span className="batch-source-name">{selectedSourceName}</span>}
+          </header>
 
-        <div className="transfer-paths">
-          <div className="transfer-path-group">
-            <label className="transfer-path-label">本地路径</label>
-            <div className="transfer-path-input-row">
+          <div className="transfer-paths">
+            <div className="transfer-path-group">
+              <label className="transfer-path-label" htmlFor="batch-local-path">本地路径</label>
+              <div className="transfer-path-input-row">
+                <Input
+                  id="batch-local-path"
+                  value={localPath}
+                  onChange={(e) => setLocalPath(e.target.value)}
+                  placeholder="/path/to/local/file"
+                  className="transfer-path-input"
+                  size="small"
+                />
+                <Tooltip title="选择文件">
+                  <Button className="transfer-icon-button" size="small" icon={<FileOutlined />} onClick={handleSelectFile} />
+                </Tooltip>
+                <Tooltip title="选择目录">
+                  <Button className="transfer-icon-button" size="small" icon={<FolderOpenOutlined />} onClick={handleSelectDirectory} />
+                </Tooltip>
+              </div>
+            </div>
+
+            <div className="transfer-path-group">
+              <label className="transfer-path-label" htmlFor="batch-remote-path">远程路径</label>
               <Input
-                value={localPath}
-                onChange={(e) => setLocalPath(e.target.value)}
-                placeholder="/path/to/local/file"
-                style={{ fontFamily: 'monospace', flex: 1 }}
+                id="batch-remote-path"
+                value={remotePath}
+                onChange={(e) => setRemotePath(e.target.value)}
+                placeholder="/home/{host}/ 或 /home/{firstdir:/home}/web/"
+                className="transfer-path-input"
                 size="small"
               />
-              <Tooltip title="选择文件">
-                <Button size="small" icon={<FileOutlined />} onClick={handleSelectFile} />
-              </Tooltip>
-              <Tooltip title="选择目录">
-                <Button size="small" icon={<FolderOpenOutlined />} onClick={handleSelectDirectory} />
-              </Tooltip>
+              <div className="transfer-path-suggestions" aria-label="远程路径快捷填充">
+                {TEMPLATE_QUICK_FILLS.map((item) => (
+                  <button
+                    key={item.label}
+                    className="transfer-path-suggestion"
+                    type="button"
+                    onClick={() => setRemotePath(item.value)}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <div className="transfer-var-help">
+                {VARIABLE_HELP.map((v) => (
+                  <span key={v.var} className="transfer-var-item" title={v.desc}>
+                    <code>{v.var}</code>
+                    <span>{v.desc}</span>
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
 
-          <div className="transfer-path-group">
-            <label className="transfer-path-label">远程路径</label>
-            <Input
-              value={remotePath}
-              onChange={(e) => setRemotePath(e.target.value)}
-              placeholder="/home/{host}/ 或 /home/{firstdir:/home}/web/"
-              style={{ fontFamily: 'monospace' }}
-              size="small"
-            />
-            <div className="transfer-path-suggestions">
-              {TEMPLATE_QUICK_FILLS.map((item) => (
-                <span key={item.label} className="transfer-path-suggestion" onClick={() => setRemotePath(item.value)}>
-                  {item.label}
-                </span>
-              ))}
-            </div>
-            <div className="transfer-var-help">
-              {VARIABLE_HELP.map((v) => (
-                <span key={v.var} className="transfer-var-item" title={v.desc}>
-                  <code>{v.var}</code> {v.desc}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="batch-controls">
-          <div className="batch-params">
-            <Space>
+          <div className="batch-controls">
+            <label className="batch-param-card">
               <span className="batch-param-label">并发</span>
-              <InputNumber min={1} max={20} value={concurrency} onChange={(v) => setConcurrency(v || 5)} style={{ width: 64 }} />
-            </Space>
-            <Space>
+              <InputNumber min={1} max={20} value={concurrency} onChange={(v) => setConcurrency(v || 5)} />
+            </label>
+            <label className="batch-param-card batch-param-card-wide">
               <span className="batch-param-label">超时</span>
-              <InputNumber min={1} max={3600} value={timeout} onChange={(v) => setTimeout_(v || 120)} style={{ width: 80 }} addonAfter="秒" />
-            </Space>
+              <InputNumber min={1} max={3600} value={timeout} onChange={(v) => setTimeout_(v || 120)} addonAfter="秒" />
+            </label>
+            <div className="batch-actions">
+              {activeTaskId ? (
+                <Button className="batch-upload-button" type="primary" danger loading>
+                  上传中
+                </Button>
+              ) : (
+                <Button
+                  className="batch-upload-button"
+                  type="primary"
+                  icon={<UploadOutlined />}
+                  onClick={handleUpload}
+                  loading={transferring}
+                  disabled={!isReady}
+                >
+                  开始上传
+                </Button>
+              )}
+            </div>
           </div>
-          <div className="batch-actions">
-            {activeTaskId ? (
-              <Button type="primary" danger loading>上传中...</Button>
+        </section>
+
+        <section className="batch-panel batch-results-panel" aria-label="上传结果">
+          <div className="batch-results-header">
+            <div>
+              <span className="batch-panel-eyebrow">Results</span>
+              <h2>上传结果</h2>
+            </div>
+            <div className="batch-results-tools">
+              <span className="batch-result-counter">{doneCount}/{hostIds.length}</span>
+              {results.length > 0 && (
+                <Button size="small" onClick={() => { setResults([]); setActiveTaskId(null); setTransferring(false); }}>
+                  清除
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="batch-progress-block" aria-label="上传进度">
+            <div className="batch-progress-meta">
+              <span>{Math.round(progress)}%</span>
+              <span>{pendingCount > 0 ? `剩余 ${pendingCount}` : '无待处理主机'}</span>
+            </div>
+            <div className="batch-progress-bar">
+              <div className="batch-progress-fill" style={{ width: `${progress}%` }} />
+            </div>
+          </div>
+
+          <div className="batch-results-body">
+            {results.length > 0 ? (
+              <div className="batch-results-list" ref={resultsListRef}>
+                {results.map((r, idx) => (
+                  <div key={`${r.hostId}-${idx}`} className={`batch-result-row ${r.success ? 'batch-result-success' : 'batch-result-failed'}`}>
+                    <div className="batch-result-summary">
+                      <div className="batch-result-host">
+                        <span className="batch-result-icon" aria-hidden="true">
+                          {r.success ? <CheckCircleOutlined /> : <CloseCircleOutlined />}
+                        </span>
+                        <span className="batch-result-host-name">{r.hostName}</span>
+                      </div>
+                      <div className="batch-result-meta">
+                        <span className={`batch-result-status ${r.success ? 'batch-result-status-success' : 'batch-result-status-failed'}`}>
+                          {r.success ? '成功' : '失败'}
+                        </span>
+                        {r.duration > 0 && <span>{r.duration}ms</span>}
+                        {r.fileSize > 0 && <span>{formatSize(r.fileSize)}</span>}
+                      </div>
+                    </div>
+                    {r.error && (
+                      <div className="batch-result-output">
+                        {r.error}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
             ) : (
-              <Button
-                type="primary"
-                icon={<UploadOutlined />}
-                onClick={handleUpload}
-                loading={transferring}
-                disabled={hostIds.length === 0}
-              >
-                开始上传
-              </Button>
+              <div className="batch-empty">
+                <div className="batch-empty-mark">
+                  <UploadOutlined />
+                </div>
+                <strong>暂无上传结果</strong>
+                <span>{hostIds.length > 0 ? '等待上传任务' : '未选择目标主机'}</span>
+              </div>
             )}
           </div>
-        </div>
-      </div>
-
-      {/* Results */}
-      <div className="batch-results-card">
-        <div className="batch-results-header">
-          <h3>上传结果</h3>
-          {results.length > 0 && (
-            <div className="batch-stats">
-              <span className="batch-stat">
-                <span className="batch-stat-value">{doneCount}/{hostIds.length}</span>
-              </span>
-              {successCount > 0 && (
-                <span className="batch-stat batch-stat-success">
-                  <CheckCircleOutlined /> {successCount}
-                </span>
-              )}
-              {failCount > 0 && (
-                <span className="batch-stat batch-stat-fail">
-                  <CloseCircleOutlined /> {failCount}
-                </span>
-              )}
-              {(hostIds.length - doneCount) > 0 && (
-                <span className="batch-stat batch-stat-running">
-                  <LoadingOutlined /> {hostIds.length - doneCount}
-                </span>
-              )}
-            </div>
-          )}
-          {results.length > 0 && (
-            <div className="batch-results-actions">
-              <Button size="small" onClick={() => { setResults([]); setActiveTaskId(null); setTransferring(false); }}>
-                清除
-              </Button>
-            </div>
-          )}
-        </div>
-
-        {results.length > 0 && (
-          <div className="batch-progress-bar">
-            <div className="batch-progress-fill" style={{ width: `${progress}%` }} />
-          </div>
-        )}
-
-        <div className="batch-results-body">
-          {results.length > 0 ? (
-            <div className="batch-results-list" ref={resultsListRef}>
-              {results.map((r, idx) => (
-                <div key={`${r.hostId}-${idx}`} className={`batch-result-row ${r.success ? 'batch-result-success' : 'batch-result-failed'}`}>
-                  <div className="batch-result-summary">
-                    <div className="batch-result-host">
-                      {r.success ? (
-                        <CheckCircleOutlined style={{ color: '#52c41a', fontSize: 14 }} />
-                      ) : (
-                        <CloseCircleOutlined style={{ color: '#ff4d4f', fontSize: 14 }} />
-                      )}
-                      <span className="batch-result-host-name">{r.hostName}</span>
-                    </div>
-                    <div className="batch-result-meta">
-                      <span className={`batch-result-status ${r.success ? 'batch-result-status-success' : 'batch-result-status-failed'}`}>
-                        {r.success ? '成功' : '失败'}
-                      </span>
-                      {r.duration > 0 && <span className="batch-result-duration">{r.duration}ms</span>}
-                      {r.fileSize > 0 && <span className="batch-result-duration">{formatSize(r.fileSize)}</span>}
-                    </div>
-                  </div>
-                  {r.error && (
-                    <div className="batch-result-output batch-result-output-muted">
-                      {r.error}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="batch-empty">
-              <Empty description="配置路径后开始上传" />
-            </div>
-          )}
-        </div>
+        </section>
       </div>
     </div>
   );

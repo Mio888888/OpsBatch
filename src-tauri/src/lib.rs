@@ -195,6 +195,8 @@ pub fn run() {
             commands::settings::save_general_settings,
             commands::settings::list_system_font_families,
             commands::settings::export_database_backup,
+            // System
+            commands::system::get_local_performance_snapshot,
             // Terminal
             commands::terminal::terminal_connect,
             commands::terminal::terminal_connect_local,

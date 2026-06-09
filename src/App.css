@@ -1239,6 +1239,75 @@ button:focus-visible,
   height: 100%;
 }
 
+.titlebar-performance-monitor {
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  color: var(--color-text-secondary);
+  cursor: default;
+  background: color-mix(in srgb, var(--color-surface) 68%, transparent);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--color-text) 5%, transparent);
+  transition: color 0.16s ease, background 0.16s ease, border-color 0.16s ease;
+}
+
+.titlebar-performance-monitor-error {
+  opacity: 0.62;
+}
+
+.titlebar-performance-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+
+.titlebar-performance-label,
+.titlebar-performance-value {
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.titlebar-performance-label {
+  color: var(--color-text-muted);
+}
+
+.titlebar-performance-value {
+  min-width: 26px;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.titlebar-performance-chip:last-child .titlebar-performance-value {
+  min-width: 48px;
+}
+
+.titlebar-performance-track {
+  width: 24px;
+  height: 4px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-text-muted) 18%, transparent);
+  border-radius: 999px;
+}
+
+.titlebar-performance-track span {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--color-primary), var(--terminal-accent, var(--color-primary)));
+  border-radius: inherit;
+  transition: width 0.26s ease;
+}
+
+[data-reduce-motion="true"] .titlebar-performance-track span {
+  transition: none;
+}
+
 .connection-pill,
 .level-pill,
 .state-pill {
@@ -1733,7 +1802,7 @@ button:focus-visible,
   align-items: stretch;
   gap: 0;
   margin: 0;
-  padding: 0 36px 0 8px;
+  padding: 0 8px;
   overflow-x: auto;
   overflow-y: hidden;
   background: var(--terminal-tab-bg);
@@ -1741,10 +1810,7 @@ button:focus-visible,
 }
 
 .terminal-tab-add {
-  position: absolute;
-  top: 0;
-  right: 8px;
-  z-index: 1;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2661,6 +2727,14 @@ body.terminal-monitor-resizing * {
   background: rgba(128, 202, 255, 0.12);
 }
 
+.terminal-context-menu-item-danger {
+  color: #f87171;
+}
+
+.terminal-context-menu-item-danger:hover {
+  background: rgba(248, 113, 113, 0.14);
+}
+
 .terminal-context-menu-item-ai {
   color: #60a5fa;
   font-weight: 500;
@@ -3518,6 +3592,14 @@ body.terminal-monitor-resizing * {
   .workbench-titlebar-left { grid-area: titlebar-left; }
   .workbench-mode-tabs { grid-area: modes; justify-content: center; max-width: 100%; overflow-x: auto; }
   .workbench-tools { grid-area: tools; }
+
+  .titlebar-performance-monitor {
+    max-width: 112px;
+  }
+
+  .titlebar-performance-chip:last-child {
+    display: none;
+  }
 
   .workbench-main-panel {
     padding: 0;

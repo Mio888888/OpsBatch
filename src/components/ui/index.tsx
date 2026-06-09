@@ -695,6 +695,9 @@ export function Tabs({
   style,
   className,
   destroyInactiveTabPane = false,
+  tabBarExtraContent,
+  onTabContextMenu,
+  onTabListContextMenu,
 }: {
   activeKey?: string;
   defaultActiveKey?: string;
@@ -705,7 +708,10 @@ export function Tabs({
   style?: CSSProperties;
   className?: string;
   destroyInactiveTabPane?: boolean;
+  tabBarExtraContent?: ReactNode;
   onEdit?: (targetKey: string | MouseEvent | KeyboardEvent, action: 'add' | 'remove') => void;
+  onTabContextMenu?: (event: MouseEvent<HTMLDivElement>, key: string) => void;
+  onTabListContextMenu?: (event: MouseEvent<HTMLDivElement>) => void;
 }) {
   const { tText } = useTranslation();
   const value = activeKey ?? defaultActiveKey ?? items?.[0]?.key;
@@ -715,13 +721,19 @@ export function Tabs({
 
   return (
     <RadixTabs.Root value={value} onValueChange={onChange} className={cx('ui-tabs', className)} style={style}>
-      <RadixTabs.List className="ui-tabs-list">
+      <RadixTabs.List className="ui-tabs-list" onContextMenu={onTabListContextMenu}>
         {items?.map((item) => {
           const closeLabel = item.closeLabel ?? tText('common.closeTab');
 
           return (
             <RadixTabs.Trigger key={item.key} value={item.key} asChild>
-              <div className="ui-tabs-trigger">
+              <div
+                className="ui-tabs-trigger"
+                onContextMenu={(event) => {
+                  event.stopPropagation();
+                  onTabContextMenu?.(event, item.key);
+                }}
+              >
                 {item.label}
                 {item.closable ? (
                   <button
@@ -741,6 +753,7 @@ export function Tabs({
             </RadixTabs.Trigger>
           );
         })}
+        {tabBarExtraContent}
       </RadixTabs.List>
       {items?.map((item) => {
         const isActive = item.key === value;

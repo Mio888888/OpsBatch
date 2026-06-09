@@ -50,6 +50,9 @@ export const dictionaries = {
     'common.retry': '重试',
     'common.createdAt': '创建时间',
 
+    'performance.title': 'OpsBatch 性能：CPU {cpu}，内存 {memory}',
+    'performance.unavailable': 'OpsBatch 性能监控暂不可用',
+
     'keychainNotice.title': '即将访问系统钥匙串',
     'keychainNotice.body': 'OpsBatch 会通过系统钥匙串项 com.opsbatch.app 保护应用机密信息。接下来 macOS 可能会弹出“登录”钥匙串授权窗口。',
     'keychainNotice.store': '保存配置时，用于保存 SSH 密码、SSH 私钥、AI API Key 或 GitHub token，数据库只记录占位引用。',
@@ -87,6 +90,11 @@ export const dictionaries = {
     'terminal.quickCommandTitle': '⌘I 快速命令',
     'terminal.aiAnalyzeError': 'AI 分析错误原因',
     'terminal.openSplit': '打开分屏终端',
+    'terminal.context.newConnection': '新建连接',
+    'terminal.context.closeAll': '关闭全部',
+    'terminal.context.closeOthers': '关闭其他',
+    'terminal.context.closeLeft': '关闭左侧所有',
+    'terminal.context.closeRight': '关闭右侧所有',
     'terminal.copy': '复制',
     'terminal.paste': '粘贴',
     'terminal.retry': '重试',
@@ -885,6 +893,9 @@ export const dictionaries = {
     'common.retry': 'Retry',
     'common.createdAt': 'Created at',
 
+    'performance.title': 'OpsBatch performance: CPU {cpu}, memory {memory}',
+    'performance.unavailable': 'OpsBatch performance monitor unavailable',
+
     'keychainNotice.title': 'System keychain access',
     'keychainNotice.body': 'OpsBatch protects application secrets in the system keychain item com.opsbatch.app. macOS may now show a Login keychain permission prompt.',
     'keychainNotice.store': 'When saving settings, OpsBatch stores SSH passwords, SSH private keys, AI API keys, or GitHub tokens in the keychain and keeps only placeholder references in the database.',
@@ -922,6 +933,11 @@ export const dictionaries = {
     'terminal.quickCommandTitle': '⌘I Quick command',
     'terminal.aiAnalyzeError': 'Ask AI to analyze error',
     'terminal.openSplit': 'Open split terminal',
+    'terminal.context.newConnection': 'New connection',
+    'terminal.context.closeAll': 'Close all',
+    'terminal.context.closeOthers': 'Close others',
+    'terminal.context.closeLeft': 'Close all to the left',
+    'terminal.context.closeRight': 'Close all to the right',
     'terminal.copy': 'Copy',
     'terminal.paste': 'Paste',
     'terminal.retry': 'Retry',

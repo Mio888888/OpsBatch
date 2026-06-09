@@ -17,6 +17,7 @@ pub mod quick_actions;
 pub mod rag;
 pub mod settings;
 pub mod sftp;
+pub mod system;
 pub mod tags;
 pub mod terminal;
 pub mod terminal_shell;

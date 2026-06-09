@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, memo, useMemo, startTransition, useDeferredValue, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Tabs, Empty, Button, Spin } from '../../components/ui';
 import { PlusOutlined } from '../../components/ui/icons';
@@ -15,6 +16,7 @@ import { useAssetsStore } from '../../stores/assets';
 import { useAiChatStore } from '../../stores/aiChat';
 import { useTranslation } from '../../i18n';
 import type { HostMonitorNetwork, HostMonitorSnapshot } from '../../types';
+import { getTerminalTabCloseTargets, type TerminalTabCloseMode } from '../../utils/terminalTabs';
 
 interface TerminalTab {
   key: string;
@@ -39,6 +41,13 @@ interface TerminalSplitContextMenu {
   x: number;
   y: number;
   selectedText?: string;
+}
+
+interface TerminalTabContextMenu {
+  kind: 'tab' | 'list';
+  tabKey?: string;
+  x: number;
+  y: number;
 }
 
 interface OpenHostRequest {
@@ -732,6 +741,7 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
   const [tabs, setTabs] = useState<TerminalTab[]>([]);
   const [activeKey, setActiveKey] = useState<string>('');
   const [splitContextMenu, setSplitContextMenu] = useState<TerminalSplitContextMenu | null>(null);
+  const [tabContextMenu, setTabContextMenu] = useState<TerminalTabContextMenu | null>(null);
   const [monitorWidth, setMonitorWidth] = useState(DEFAULT_MONITOR_PANEL_WIDTH);
   const terminalPageShellRef = useRef<HTMLDivElement>(null);
   const monitorResizeCleanupRef = useRef<(() => void) | null>(null);
@@ -790,6 +800,19 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
       window.removeEventListener('blur', close);
     };
   }, [splitContextMenu]);
+
+  useEffect(() => {
+    if (!tabContextMenu) return;
+    const close = () => setTabContextMenu(null);
+    window.addEventListener('click', close);
+    window.addEventListener('blur', close);
+    window.addEventListener('scroll', close, true);
+    return () => {
+      window.removeEventListener('click', close);
+      window.removeEventListener('blur', close);
+      window.removeEventListener('scroll', close, true);
+    };
+  }, [tabContextMenu]);
 
   const connectRemoteTab = useCallback(async (tabKey: string, hostId: string, hostName = tText('terminal.defaultName'), hostIp = '') => {
     const connectionId = createConnectionId(tabKey);
@@ -1186,24 +1209,40 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
     void disconnectTerminalSession(sessionId, hostId);
   }, []);
 
-  const handleCloseTab = useCallback(
-    (targetKey: string) => {
+  const handleCloseTabs = useCallback(
+    (targetKeys: readonly string[], preferredActiveKey?: string) => {
+      if (targetKeys.length === 0) return;
+
       const currentTabs = tabsRef.current;
-      const closingTab = currentTabs.find((tab) => tab.key === targetKey);
-      const closingIndex = currentTabs.findIndex((tab) => tab.key === targetKey);
-      const nextTabs = currentTabs.filter((tab) => tab.key !== targetKey);
+      const targetKeySet = new Set(targetKeys);
+      const closingTabs = currentTabs.filter((tab) => targetKeySet.has(tab.key));
+      if (closingTabs.length === 0) return;
+
+      const firstClosingIndex = currentTabs.findIndex((tab) => targetKeySet.has(tab.key));
+      const nextTabs = currentTabs.filter((tab) => !targetKeySet.has(tab.key));
 
       // Immediate: update refs so everything else uses the correct state
-      activeConnectionIdsRef.current.delete(targetKey);
-      activeConnectionIdsRef.current.delete(`${targetKey}:split`);
-      terminalBufferRefs.current.delete(targetKey);
-      terminalBufferRefs.current.delete(`${targetKey}:split`);
-      monitorSnapshotRefs.current.delete(targetKey);
+      closingTabs.forEach((tab) => {
+        activeConnectionIdsRef.current.delete(tab.key);
+        activeConnectionIdsRef.current.delete(`${tab.key}:split`);
+        terminalBufferRefs.current.delete(tab.key);
+        terminalBufferRefs.current.delete(`${tab.key}:split`);
+        monitorSnapshotRefs.current.delete(tab.key);
+      });
       tabsRef.current = nextTabs;
 
-      // Immediate: switch active tab away from the closing one
-      if (activeKeyRef.current === targetKey) {
-        setActiveKey(nextTabs[closingIndex]?.key ?? nextTabs[closingIndex - 1]?.key ?? '');
+      const preferredTabExists = preferredActiveKey && nextTabs.some((tab) => tab.key === preferredActiveKey);
+      const activeTabWasClosed = targetKeySet.has(activeKeyRef.current);
+
+      // Immediate: switch active tab away from closed tabs
+      if (activeTabWasClosed) {
+        const nextActiveKey = (
+          preferredTabExists
+            ? preferredActiveKey
+            : nextTabs[firstClosingIndex]?.key ?? nextTabs[firstClosingIndex - 1]?.key ?? ''
+        );
+        activeKeyRef.current = nextActiveKey;
+        setActiveKey(nextActiveKey);
       }
 
       // Deferred: remove tab from list (re-render is interruptible)
@@ -1212,8 +1251,9 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
       });
 
       // Async: destroy frontend & backend resources after UI has settled
-      if (closingTab?.sessionId) {
-        const { sessionId, hostId, splitSessionId, kind } = closingTab;
+      closingTabs.forEach((tab) => {
+        if (!tab.sessionId) return;
+        const { sessionId, hostId, splitSessionId, kind } = tab;
         window.setTimeout(() => {
           useAiChatStore.getState().clearSession(sessionId);
           disconnectSession(sessionId, hostId);
@@ -1222,10 +1262,47 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
             disconnectSession(splitSessionId, kind === 'remote' ? hostId : undefined);
           }
         }, 0);
-      }
+      });
     },
     [disconnectSession],
   );
+
+  const handleCloseTab = useCallback((targetKey: string) => {
+    handleCloseTabs([targetKey]);
+  }, [handleCloseTabs]);
+
+  const handleCloseTabsByMode = useCallback((targetKey: string, mode: TerminalTabCloseMode) => {
+    const targetKeys = getTerminalTabCloseTargets(tabsRef.current.map((tab) => tab.key), targetKey, mode);
+    const preferredActiveKey = mode === 'all' ? undefined : targetKey;
+    setTabContextMenu(null);
+    handleCloseTabs(targetKeys, preferredActiveKey);
+  }, [handleCloseTabs]);
+
+  const handleTabContextMenu = useCallback((event: MouseEvent<HTMLDivElement>, tabKey: string) => {
+    event.preventDefault();
+    setSplitContextMenu(null);
+    setTabContextMenu({
+      kind: 'tab',
+      tabKey,
+      x: event.clientX,
+      y: event.clientY,
+    });
+  }, []);
+
+  const handleTabListContextMenu = useCallback((event: MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    setSplitContextMenu(null);
+    setTabContextMenu({
+      kind: 'list',
+      x: event.clientX,
+      y: event.clientY,
+    });
+  }, []);
+
+  const handleCloseAllTabs = useCallback(() => {
+    setTabContextMenu(null);
+    handleCloseTabs(tabsRef.current.map((tab) => tab.key));
+  }, [handleCloseTabs]);
 
   const handleRetryTab = useCallback((tab: TerminalTab) => {
     if (tab.kind === 'remote' && tab.hostId) {
@@ -1249,6 +1326,11 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
   const handleBackToAssets = useCallback(() => {
     navigate('/terminal?assets=1');
   }, [navigate]);
+
+  const handleNewConnectionFromContext = useCallback(() => {
+    setTabContextMenu(null);
+    handleBackToAssets();
+  }, [handleBackToAssets]);
 
   const renderTabLabel = useCallback((tab: TerminalTab) => {
     const stateLabel = getTabStateLabel(tab.state, {
@@ -1498,20 +1580,24 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
           destroyInactiveTabPane
           className="terminal-tabs"
           items={tabItems}
+          onTabContextMenu={handleTabContextMenu}
+          onTabListContextMenu={handleTabListContextMenu}
+          tabBarExtraContent={(
+            <button
+              type="button"
+              className="terminal-tab-add"
+              title={tText('terminal.connectHost')}
+              onClick={handleBackToAssets}
+            >
+              <PlusOutlined />
+            </button>
+          )}
           onEdit={(targetKey, action) => {
             if (action === 'remove' && typeof targetKey === 'string') {
               handleCloseTab(targetKey);
             }
           }}
         />
-        <button
-          type="button"
-          className="terminal-tab-add"
-          title={tText('terminal.connectHost')}
-          onClick={handleBackToAssets}
-        >
-          <PlusOutlined />
-        </button>
 
         {shouldShowFixedPanels && deferredActiveTab?.sessionId && (
           <BottomPanel
@@ -1526,7 +1612,7 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
           />
         )}
 
-        {splitContextMenu && (
+        {splitContextMenu ? createPortal(
           <div
             className="terminal-context-menu"
             style={{ left: splitContextMenu.x, top: splitContextMenu.y }}
@@ -1553,8 +1639,47 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
             <button type="button" className="terminal-context-menu-item" onClick={() => handleOpenSplit(splitContextMenu.tabKey)}>
               {t('terminal.openSplit')}
             </button>
-          </div>
-        )}
+          </div>,
+          document.body,
+        ) : null}
+
+        {tabContextMenu ? createPortal(
+          <div
+            className="terminal-context-menu terminal-tab-context-menu"
+            style={{ left: tabContextMenu.x, top: tabContextMenu.y }}
+            onClick={(event) => event.stopPropagation()}
+            onContextMenu={(event) => event.preventDefault()}
+          >
+            {tabContextMenu.kind === 'list' ? (
+              <>
+                <button type="button" className="terminal-context-menu-item" onClick={handleNewConnectionFromContext}>
+                  {t('terminal.context.newConnection')}
+                </button>
+                <div className="terminal-context-menu-separator" />
+                <button type="button" className="terminal-context-menu-item terminal-context-menu-item-danger" onClick={handleCloseAllTabs}>
+                  {t('terminal.context.closeAll')}
+                </button>
+              </>
+            ) : (
+              <>
+                <button type="button" className="terminal-context-menu-item terminal-context-menu-item-danger" onClick={() => tabContextMenu.tabKey && handleCloseTabsByMode(tabContextMenu.tabKey, 'all')}>
+                  {t('terminal.context.closeAll')}
+                </button>
+                <button type="button" className="terminal-context-menu-item" onClick={() => tabContextMenu.tabKey && handleCloseTabsByMode(tabContextMenu.tabKey, 'others')}>
+                  {t('terminal.context.closeOthers')}
+                </button>
+                <div className="terminal-context-menu-separator" />
+                <button type="button" className="terminal-context-menu-item" onClick={() => tabContextMenu.tabKey && handleCloseTabsByMode(tabContextMenu.tabKey, 'left')}>
+                  {t('terminal.context.closeLeft')}
+                </button>
+                <button type="button" className="terminal-context-menu-item" onClick={() => tabContextMenu.tabKey && handleCloseTabsByMode(tabContextMenu.tabKey, 'right')}>
+                  {t('terminal.context.closeRight')}
+                </button>
+              </>
+            )}
+          </div>,
+          document.body,
+        ) : null}
       </div>
 
       {hasMonitor && deferredActiveTab && activeRemoteHostId && (

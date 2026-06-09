@@ -6,6 +6,16 @@ import { emit } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { resolveSystemLanguage, translateText } from "./i18n";
 
+function detectHostPlatform(): string {
+  const platformText = `${navigator.userAgent} ${navigator.platform}`.toLowerCase();
+  if (platformText.includes("win")) return "windows";
+  if (platformText.includes("mac")) return "macos";
+  if (platformText.includes("linux")) return "linux";
+  return "unknown";
+}
+
+document.documentElement.dataset.platform = detectHostPlatform();
+
 function diagnosticContext() {
   return `href=${window.location.href} search=${window.location.search} hash=${window.location.hash}`;
 }

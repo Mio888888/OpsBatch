@@ -1,1 +1,16 @@
-{}
+{
+  "app": {
+    "windows": [
+      {
+        "title": "OpsBatch - 批量运维管理工具",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 1024,
+        "minHeight": 600,
+        "decorations": false,
+        "transparent": false,
+        "backgroundColor": "#e8e3d6"
+      }
+    ]
+  }
+}

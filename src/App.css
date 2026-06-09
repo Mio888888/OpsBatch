@@ -41,6 +41,11 @@
   background-color: transparent;
 }
 
+:root[data-platform="windows"] {
+  --window-radius: 0;
+  background-color: var(--color-workbench-bg);
+}
+
 html {
   width: 100%;
   height: 100%;
@@ -60,6 +65,12 @@ body {
   overflow: hidden;
   background: transparent;
   background-color: transparent;
+}
+
+html[data-platform="windows"],
+html[data-platform="windows"] body {
+  background: var(--color-workbench-bg);
+  background-color: var(--color-workbench-bg);
 }
 
 #root {

@@ -7,6 +7,9 @@ use tauri::Manager;
 use crate::db::Database;
 use crate::ssh::{self, SshConnectionRegistry};
 
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Host {
     pub id: String,
@@ -90,18 +93,24 @@ fn parse_first_f64(value: &str) -> Option<f64> {
     value.split_whitespace().next()?.parse::<f64>().ok()
 }
 
-fn get_host_ssh_config(db: &Database, id: &str) -> Result<ssh::SshConfig, String> {
+struct HostConnectionInfo {
+    config: ssh::SshConfig,
+    os: String,
+}
+
+fn get_host_connection_info(db: &Database, id: &str) -> Result<HostConnectionInfo, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let (ip, port, auth_type, username, password, private_key): (
+    let (ip, port, auth_type, username, password, private_key, os): (
         String,
         i32,
         String,
         String,
         Option<String>,
         Option<String>,
+        String,
     ) = conn
         .query_row(
-            "SELECT ip, port, auth_type, username, password, private_key FROM hosts WHERE id=?1",
+            "SELECT ip, port, auth_type, username, password, private_key, os FROM hosts WHERE id=?1",
             params![id],
             |row| {
                 Ok((
@@ -111,19 +120,27 @@ fn get_host_ssh_config(db: &Database, id: &str) -> Result<ssh::SshConfig, String
                     row.get(3)?,
                     row.get(4)?,
                     row.get(5)?,
+                    row.get(6)?,
                 ))
             },
         )
         .map_err(|e| format!("host not found: {}", e))?;
 
-    Ok(ssh::SshConfig {
-        host: ip,
-        port: port as u16,
-        username,
-        auth_type,
-        password,
-        private_key,
+    Ok(HostConnectionInfo {
+        config: ssh::SshConfig {
+            host: ip,
+            port: port as u16,
+            username,
+            auth_type,
+            password,
+            private_key,
+        },
+        os,
     })
+}
+
+fn is_windows_host(os: &str) -> bool {
+    os.trim().eq_ignore_ascii_case("windows")
 }
 
 fn section_lines(output: &str, name: &str) -> Vec<String> {
@@ -217,6 +234,63 @@ fn parse_memory(output: &str, field: &str) -> Option<u64> {
         })
 }
 
+fn measure_ping_ms(host: &str) -> Option<f64> {
+    #[cfg(target_os = "windows")]
+    use std::os::windows::process::CommandExt;
+
+    let mut command = std::process::Command::new("ping");
+
+    #[cfg(target_os = "windows")]
+    command.args(["-n", "1", "-w", "3000", host]).creation_flags(CREATE_NO_WINDOW);
+
+    #[cfg(target_os = "macos")]
+    command.args(["-c", "1", "-W", "3000", host]);
+
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    command.args(["-c", "1", "-W", "3", host]);
+
+    let output = command.output().ok()?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    stdout.lines().find_map(|line| {
+        if let Some(value) = parse_ping_value_after(line, "time=") {
+            return Some(value);
+        }
+        parse_ping_value_after(line, "时间=")
+    })
+}
+
+fn parse_ping_value_after(line: &str, marker: &str) -> Option<f64> {
+    let start = line.find(marker)? + marker.len();
+    let rest = line[start..].trim_start();
+    let value = rest
+        .trim_start_matches('<')
+        .split(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
+        .next()?;
+
+    value.parse::<f64>().ok()
+}
+
+fn empty_monitor_snapshot(timestamp: u64, os: Option<String>, ping_ms: Option<f64>) -> HostMonitorSnapshot {
+    HostMonitorSnapshot {
+        timestamp,
+        uptime: None,
+        load_average: None,
+        cpu_percent: None,
+        memory_used_mb: None,
+        memory_total_mb: None,
+        swap_used_mb: None,
+        swap_total_mb: None,
+        os,
+        kernel: None,
+        processes: Vec::new(),
+        network: None,
+        networks: Vec::new(),
+        ping_ms,
+        filesystems: Vec::new(),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemInfoResult {
     pub cpu_usage: f64,
@@ -282,11 +356,17 @@ fn inner_get_host_monitor_snapshot(
     pool: &SshConnectionRegistry,
     id: &str,
 ) -> Result<HostMonitorSnapshot, String> {
-    let config = get_host_ssh_config(db, id)?;
+    let HostConnectionInfo { config, os } = get_host_connection_info(db, id)?;
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_millis() as u64;
+
+    let ping_ms = measure_ping_ms(&config.host);
+    if is_windows_host(&os) {
+        return Ok(empty_monitor_snapshot(timestamp, Some("Windows".to_string()), ping_ms));
+    }
+
     let command = r#"
 printf '__UPTIME__\n'; uptime -p 2>/dev/null || awk '{print int($1/86400) " 天"}' /proc/uptime 2>/dev/null
 printf '__LOAD__\n'; awk '{print $1", "$2", "$3}' /proc/loadavg 2>/dev/null
@@ -301,28 +381,6 @@ printf '__FILESYSTEMS__\n'; df -hP 2>/dev/null | awk 'NR>1 {print $6 "|" $3 "|" 
     let output = pool.execute(id, &config, command, 10).unwrap_or_default();
     let networks = parse_networks(section_lines(&output, "NETWORK"));
     let network = networks.first().cloned();
-
-    let ping_ms = {
-        let wait = if cfg!(target_os = "macos") {
-            "3000"
-        } else {
-            "3"
-        };
-        let output = std::process::Command::new("ping")
-            .args(["-c", "1", "-W", wait, &config.host])
-            .output()
-            .ok();
-        output.and_then(|out| {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            stdout.lines().find_map(|line| {
-                let prefix = "time=";
-                let start = line.find(prefix)?;
-                let rest = &line[start + prefix.len()..];
-                let end = rest.find(' ').unwrap_or(rest.len());
-                rest[..end].parse::<f64>().ok()
-            })
-        })
-    };
 
     Ok(HostMonitorSnapshot {
         timestamp,

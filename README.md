@@ -173,6 +173,41 @@ npm run dev
 
 > 当前仓库没有单独的 `lint` npm 脚本；前端验证主要依赖 TypeScript 检查和 Vite 构建，后端验证可运行 `cargo check`。
 
+## Windows 发布与 SmartScreen
+
+Windows 安装包如果未进行 Authenticode 代码签名，或签名证书/发布源还没有积累 Microsoft 信誉，用户安装时可能看到“Windows 已保护你的电脑 / Microsoft Defender SmartScreen 阻止了无法识别的应用启动”。这不是应用运行时代码能直接关闭的提示，正式发布应使用可信代码签名证书签署安装包与可执行文件。
+
+仓库包含 Windows 专用 Tauri 配置 `src-tauri/tauri.windows.conf.json`。在 Windows 上运行 `npm run tauri -- build` 时，Tauri 会自动调用 `scripts/windows-sign.ps1` 对生成的 Windows 可执行文件和安装包进行签名；如果没有配置证书环境变量，构建会失败，避免产出未签名发布件。
+
+GitHub Actions 的 Windows 发布任务同样会强制签名并在上传前执行 `signtool verify`。CI 需要配置以下 secrets：`WINDOWS_CODESIGN_CERT_BASE64`（PFX 证书的 Base64 内容）、`WINDOWS_CODESIGN_CERT_PASSWORD`（PFX 密码），可选 `WINDOWS_CODESIGN_TIMESTAMP_URL`。
+
+推荐发布流程：
+
+1. 准备 OV 或 EV 代码签名证书。EV 证书通常更容易通过 SmartScreen 信誉检查；OV 证书也需要逐步积累下载和安装信誉。
+2. 在 Windows 构建机安装 Windows SDK，确保 `signtool.exe` 可用。
+3. 通过环境变量提供证书，不要把证书文件或密码提交到仓库：
+
+```powershell
+$env:WINDOWS_CODESIGN_CERT_PATH = 'C:\secure\OpsBatch.pfx'
+$env:WINDOWS_CODESIGN_CERT_PASSWORD = '<pfx-password>'
+npm run tauri -- build
+```
+
+如果证书已安装到 Windows 证书存储，也可以使用指纹：
+
+```powershell
+$env:WINDOWS_CODESIGN_CERT_THUMBPRINT = '<certificate-sha1-thumbprint>'
+npm run tauri -- build
+```
+
+需要对已有产物补签时，也可以直接运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows-sign.ps1 .\src-tauri\target\release\bundle
+```
+
+签名后可用 `signtool verify /pa /v <installer.exe>` 验证签名。即使已经签名，新证书或低分发量应用仍可能短期触发 SmartScreen，持续使用同一发布者证书、稳定版本号和官方分发渠道有助于建立信誉。
+
 ## 本地数据与安全说明
 
 OpsBatch 的核心设计是本地桌面客户端，数据主要保存在本机：

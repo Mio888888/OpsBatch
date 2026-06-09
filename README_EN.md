@@ -173,6 +173,41 @@ npm run dev
 
 > The repository currently does not define a dedicated `lint` npm script. Frontend verification mainly relies on TypeScript checks and Vite builds; backend verification can use `cargo check`.
 
+## Windows Releases and SmartScreen
+
+If the Windows installer is unsigned, or if the signing certificate/publisher has not built enough Microsoft reputation yet, users may see the Microsoft Defender SmartScreen warning that Windows protected the PC from an unrecognized app. This cannot be disabled from application runtime code. Production Windows releases should be signed with a trusted Authenticode code-signing certificate.
+
+The repository includes a Windows-specific Tauri config at `src-tauri/tauri.windows.conf.json`. When `npm run tauri -- build` runs on Windows, Tauri automatically calls `scripts/windows-sign.ps1` to sign generated Windows executables and installers. If certificate environment variables are not configured, the build fails instead of producing unsigned release artifacts.
+
+The GitHub Actions Windows release job also requires signing and runs `signtool verify` before uploading artifacts. Configure these CI secrets: `WINDOWS_CODESIGN_CERT_BASE64` (Base64-encoded PFX certificate), `WINDOWS_CODESIGN_CERT_PASSWORD` (PFX password), and optionally `WINDOWS_CODESIGN_TIMESTAMP_URL`.
+
+Recommended release flow:
+
+1. Prepare an OV or EV code-signing certificate. EV certificates usually establish SmartScreen trust more quickly; OV certificates still need reputation over time.
+2. Install the Windows SDK on the Windows build machine so `signtool.exe` is available.
+3. Provide signing material via environment variables. Do not commit certificate files or passwords:
+
+```powershell
+$env:WINDOWS_CODESIGN_CERT_PATH = 'C:\secure\OpsBatch.pfx'
+$env:WINDOWS_CODESIGN_CERT_PASSWORD = '<pfx-password>'
+npm run tauri -- build
+```
+
+If the certificate is installed in the Windows certificate store, use its thumbprint instead:
+
+```powershell
+$env:WINDOWS_CODESIGN_CERT_THUMBPRINT = '<certificate-sha1-thumbprint>'
+npm run tauri -- build
+```
+
+To sign existing artifacts after a build, run the script directly:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\windows-sign.ps1 .\src-tauri\target\release\bundle
+```
+
+Verify signed artifacts with `signtool verify /pa /v <installer.exe>`. Even signed apps can still trigger SmartScreen for a while when the certificate or app is new; using the same publisher certificate, stable versioning, and official distribution channels helps build reputation.
+
 ## Local Data and Security Notes
 
 OpsBatch is primarily a local desktop client. Core data is stored on the local machine:

@@ -22,11 +22,11 @@ test('main window keeps transparent background for rounded window corners', () =
   assert.equal(mainWindow.backgroundColor?.toLowerCase(), '#00000000');
 });
 
-test('managed child windows keep transparent WebViews for rounded window corners', () => {
+test('managed child windows use opaque WebViews to avoid Windows creation hangs', () => {
   const source = readFileSync('src-tauri/src/commands/window.rs', 'utf8');
 
-  assert.match(source, /\.transparent\(true\)/);
-  assert.match(source, /\.background_color\(\s*tauri::utils::config::Color\(0,\s*0,\s*0,\s*0\)\s*\)/);
+  assert.doesNotMatch(source, /\.transparent\(true\)/);
+  assert.doesNotMatch(source, /\.background_color\(\s*tauri::utils::config::Color\(0,\s*0,\s*0,\s*0\)\s*\)/);
 });
 
 test('managed child windows load the bundled SPA entry before routing', () => {

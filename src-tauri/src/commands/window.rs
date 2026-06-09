@@ -136,8 +136,6 @@ pub fn open_managed_window(
         .inner_size(width, height)
         .min_inner_size(min_width, min_height)
         .decorations(false)
-        .transparent(true)
-        .background_color(tauri::utils::config::Color(0, 0, 0, 0))
         .build()
         .map(|_| {
             crate::commands::diagnostics::append_diagnostic_log(

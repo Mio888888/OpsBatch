@@ -2,6 +2,7 @@ pub mod ai;
 pub mod app_log;
 pub mod asciinema;
 pub mod cloud;
+pub mod diagnostics;
 pub mod execution;
 pub mod forward;
 pub mod github;

@@ -112,6 +112,11 @@ pub fn open_managed_window(
 
     let label = window.label();
     if let Some(existing) = app.get_webview_window(label) {
+        crate::commands::diagnostics::append_diagnostic_log(
+            app.app_handle(),
+            "window",
+            &format!("reuse label={label} kind={kind}"),
+        );
         existing.show().map_err(|e| e.to_string())?;
         existing.set_focus().map_err(|e| e.to_string())?;
         return Ok(());
@@ -120,6 +125,12 @@ pub fn open_managed_window(
     let (width, height, min_width, min_height) = window.size();
     let route = window.route(&host_ids)?;
     let url = spa_entry_for_route(&route);
+    crate::commands::diagnostics::append_diagnostic_log(
+        app.app_handle(),
+        "window",
+        &format!("create kind={kind} label={label} route={route} url={url}"),
+    );
+
     WebviewWindowBuilder::new(&app, label, WebviewUrl::App(url.into()))
         .title(window.title(host_ids.len()))
         .inner_size(width, height)
@@ -128,7 +139,22 @@ pub fn open_managed_window(
         .transparent(true)
         .background_color(tauri::utils::config::Color(0, 0, 0, 0))
         .build()
-        .map_err(|e| e.to_string())?;
+        .map(|_| {
+            crate::commands::diagnostics::append_diagnostic_log(
+                app.app_handle(),
+                "window",
+                &format!("created label={label}"),
+            );
+        })
+        .map_err(|e| {
+            let message = e.to_string();
+            crate::commands::diagnostics::append_diagnostic_log(
+                app.app_handle(),
+                "window",
+                &format!("create failed label={label} error={message}"),
+            );
+            message
+        })?;
 
     Ok(())
 }

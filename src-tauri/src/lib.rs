@@ -5,6 +5,7 @@ mod security;
 mod ssh;
 
 use std::sync::Arc;
+use tauri::webview::PageLoadEvent;
 #[cfg(debug_assertions)]
 use tauri::Listener;
 use tauri::Manager;
@@ -12,6 +13,22 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .on_page_load(|webview, payload| {
+            let event = match payload.event() {
+                PageLoadEvent::Started => "started",
+                PageLoadEvent::Finished => "finished",
+            };
+            crate::commands::diagnostics::append_diagnostic_log(
+                webview.app_handle(),
+                "page-load",
+                &format!(
+                    "label={} event={} url={}",
+                    webview.label(),
+                    event,
+                    payload.url()
+                ),
+            );
+        })
         .setup(|app| {
             let app_data_dir = app
                 .path()
@@ -21,6 +38,15 @@ pub fn run() {
             let db_path = app_data_dir.join("opsbatch.db");
             let database = db::Database::new(&db_path).expect("failed to open database");
             database.init_tables().expect("failed to init tables");
+            commands::diagnostics::append_diagnostic_log(
+                app.handle(),
+                "startup",
+                &format!(
+                    "app started app_data_dir={} db_path={}",
+                    app_data_dir.display(),
+                    db_path.display()
+                ),
+            );
             app.manage(database);
             app.manage(commands::terminal::TerminalManager::new());
             app.manage(commands::sftp::SftpManager::new());
@@ -70,6 +96,7 @@ pub fn run() {
             // App Log
             commands::app_log::ping_log,
             commands::app_log::get_log_history,
+            commands::diagnostics::write_diagnostic_log,
             // Hosts
             commands::hosts::list_hosts,
             commands::hosts::add_host,

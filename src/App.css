@@ -5165,6 +5165,28 @@ body.terminal-monitor-resizing * {
   overflow: visible;
 }
 
+.keychain-notice {
+  display: grid;
+  gap: 12px;
+  color: var(--color-text);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.keychain-notice p {
+  margin: 0;
+}
+
+.keychain-notice ul {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px 12px 28px;
+  margin: 0;
+  background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
 .asset-host-form {
   gap: 10px;
   margin-top: 12px;

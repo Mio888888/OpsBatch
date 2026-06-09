@@ -12,7 +12,7 @@ export interface LogEntry {
   origin: 'backend' | 'frontend';
 }
 
-const MAX_LOG_ENTRIES = 2000;
+const MAX_LOG_ENTRIES = 600;
 
 interface LogState {
   logs: LogEntry[];
@@ -22,6 +22,24 @@ interface LogState {
 }
 
 let _initPromise: Promise<void> | null = null;
+let pendingLogs: LogEntry[] = [];
+let flushFrame: number | null = null;
+
+function enqueueLog(entry: LogEntry, set: (fn: (state: LogState) => Partial<LogState>) => void) {
+  pendingLogs.push(entry);
+  if (pendingLogs.length > 200) {
+    pendingLogs = pendingLogs.slice(-200);
+  }
+  if (flushFrame !== null) return;
+  flushFrame = requestAnimationFrame(() => {
+    flushFrame = null;
+    const batch = pendingLogs;
+    pendingLogs = [];
+    set((s) => ({
+      logs: [...batch.reverse(), ...s.logs].slice(0, MAX_LOG_ENTRIES),
+    }));
+  });
+}
 
 export const useLogStore = create<LogState>((set) => ({
   logs: [],
@@ -32,15 +50,13 @@ export const useLogStore = create<LogState>((set) => ({
     _initPromise = (async () => {
       // 1. Set up listener for real-time logs
       const unlisten: UnlistenFn = await listen<LogEntry>('global-log', (event) => {
-        set((s) => ({
-          logs: [event.payload, ...s.logs.slice(0, MAX_LOG_ENTRIES - 1)],
-        }));
+        enqueueLog(event.payload, set);
       });
 
       // 2. Load history from DB (newest first)
       try {
-        const history = await invoke<LogEntry[]>('get_log_history', { limit: 500 });
-        set({ logs: history.reverse(), loading: false });
+        const history = await invoke<LogEntry[]>('get_log_history', { limit: 200 });
+        set({ logs: history.reverse().slice(0, MAX_LOG_ENTRIES), loading: false });
       } catch {
         set({ loading: false });
       }

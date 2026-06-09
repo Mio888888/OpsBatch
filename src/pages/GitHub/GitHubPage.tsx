@@ -9,6 +9,7 @@ import {
 } from '../../components/ui/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from '../../i18n';
+import { requestKeychainNotice } from '../../utils/keychainNotice';
 
 interface RepoInfo {
   id: string;
@@ -82,6 +83,7 @@ export default function GitHubPage() {
   const handleAdd = async () => {
     try {
       const values = await form.validateFields();
+      if (values.token && !(await requestKeychainNotice())) return;
       await invoke('add_repo', {
         url: values.url,
         branch: values.branch || 'main',
@@ -99,6 +101,7 @@ export default function GitHubPage() {
     setPulling(repo.id);
     setPullResult(null);
     try {
+      if (repo.hasToken && !(await requestKeychainNotice())) return;
       const result = await invoke<PullResult>('pull_repo', { repoId: repo.id, language });
       setPullResult(result);
       const total = result.added.length + result.updated.length;

@@ -18,6 +18,7 @@ import {
   useThemeStore, loadThemeSettings, patchTheme,
   normalizeTerminalFontFamily,
 } from '../../stores/theme';
+import { requestKeychainNotice } from '../../utils/keychainNotice';
 import { darkThemes, lightThemes, accentColors } from '../../data/themes';
 import type { ThemePreviewMeta } from '../../data/themes';
 
@@ -809,6 +810,13 @@ export default function SettingsPage() {
         message.error(tText('settings.aiMissingApiUrl'));
         return;
       }
+      const storesApiKey = Boolean(
+        configToSave.api_key
+        && values.provider !== 'ollama'
+        && !String(configToSave.api_key).includes('****')
+        && configToSave.api_key !== '***keychain***',
+      );
+      if (storesApiKey && !(await requestKeychainNotice())) return;
       await invoke('save_ai_config', { config: configToSave });
       message.success(tText('settings.aiSaved'));
       setAiConfig(configToSave);
@@ -825,6 +833,7 @@ export default function SettingsPage() {
         message.error(tText('settings.aiSelectModelFirst'));
         return;
       }
+      if (values.provider !== 'ollama' && !(await requestKeychainNotice())) return;
       const result = await invoke<{ content: string }>('ai_chat', {
         request: { messages: [{ role: 'user', content: tText('settings.aiTestPrompt') }], model },
       });

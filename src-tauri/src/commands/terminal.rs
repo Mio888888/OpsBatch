@@ -513,8 +513,36 @@ pub async fn terminal_connect(
         .map_err(|e| format!("host not found: {}", e))?
     };
 
-    let password = crate::commands::hosts::resolve_host_password(&host_id, password)?;
-    let private_key = crate::commands::hosts::resolve_host_private_key(&host_id, private_key)?;
+    let password =
+        crate::commands::hosts::resolve_host_password(&host_id, password).map_err(|e| {
+            crate::commands::app_log::emit_log(
+                &app,
+                "error",
+                "host-secret",
+                &format!(
+                    "terminal_connect password resolve failed host={} {} error={}",
+                    host_id,
+                    crate::keychain::host_password_debug_label(&host_id),
+                    e
+                ),
+                "backend",
+            );
+            e
+        })?;
+    let private_key = crate::commands::hosts::resolve_host_private_key(&host_id, private_key)
+        .map_err(|e| {
+            crate::commands::app_log::emit_log(
+                &app,
+                "error",
+                "host-secret",
+                &format!(
+                    "terminal_connect private_key resolve failed host={} error={}",
+                    host_id, e
+                ),
+                "backend",
+            );
+            e
+        })?;
 
     let config = ssh::SshConfig {
         host: ip.clone(),
@@ -545,8 +573,34 @@ pub async fn terminal_connect(
                     |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
                 )
                 .map_err(|e| format!("跳板机 {} 未找到: {}", jump_id, e))?;
-            let jpass = crate::commands::hosts::resolve_host_password(jump_id, jpass)?;
-            let jkey = crate::commands::hosts::resolve_host_private_key(jump_id, jkey)?;
+            let jpass =
+                crate::commands::hosts::resolve_host_password(jump_id, jpass).map_err(|e| {
+                    crate::commands::app_log::emit_log(
+                        &app,
+                        "error",
+                        "host-secret",
+                        &format!(
+                            "terminal_connect jump password resolve failed host={} error={}",
+                            jump_id, e
+                        ),
+                        "backend",
+                    );
+                    e
+                })?;
+            let jkey =
+                crate::commands::hosts::resolve_host_private_key(jump_id, jkey).map_err(|e| {
+                    crate::commands::app_log::emit_log(
+                        &app,
+                        "error",
+                        "host-secret",
+                        &format!(
+                            "terminal_connect jump private_key resolve failed host={} error={}",
+                            jump_id, e
+                        ),
+                        "backend",
+                    );
+                    e
+                })?;
             configs.push(ssh::SshConfig {
                 host: jip,
                 port: jport as u16,

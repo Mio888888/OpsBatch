@@ -22,6 +22,8 @@ const SOURCE_KEYS: Record<string, 'log.source.system' | 'log.source.ssh' | 'log.
   execution: 'log.source.execution',
 };
 
+const MAX_RENDERED_LOGS = 300;
+
 function formatLogMessage(message: string, tText: (key: string, values?: Record<string, string | number>) => string): string {
   if (message === 'OpsBatch 后端服务已启动' || message === 'OpsBatch backend started') {
     return tText('log.message.backendStarted');
@@ -95,11 +97,12 @@ export default function GlobalLogPage() {
     setAutoScroll(bodyRef.current.scrollTop < 40);
   };
 
-  const filtered = logs.filter((log) => {
+  const filteredAll = logs.filter((log) => {
     if (filterLevel !== 'all' && log.level !== filterLevel) return false;
     if (filterOrigin !== 'all' && log.origin !== filterOrigin) return false;
     return true;
   });
+  const filtered = filteredAll.slice(0, MAX_RENDERED_LOGS);
 
   const getOriginLabel = (origin: string) => {
     const key = ORIGIN_KEYS[origin];
@@ -143,7 +146,7 @@ export default function GlobalLogPage() {
             <option value="backend">{tText('log.backend')}</option>
             <option value="frontend">{tText('log.frontend')}</option>
           </select>
-          <span className="global-log-count">{t('log.count', { count: filtered.length })}</span>
+          <span className="global-log-count">{t('log.count', { count: filteredAll.length })}</span>
         </div>
         <div className="global-log-actions">
           {!autoScroll && (

@@ -56,6 +56,14 @@ function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function secretDebugState(value?: string) {
+  return {
+    present: Boolean(value),
+    placeholder: value === '***keychain***',
+    length: value?.length ?? 0,
+  };
+}
+
 function mapHostMonitorNetwork(network: BackendHostMonitorNetwork): HostMonitorNetwork {
   return {
     interface: network.interface,
@@ -174,10 +182,21 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
       remark: host.remark,
       jump_chain: JSON.stringify(host.jumpChain ?? []),
     };
+    console.info('[host-secret] invoke update_host', {
+      hostId: host.id,
+      authType: host.authType,
+      password: secretDebugState(host.password),
+      privateKey: secretDebugState(host.privateKey),
+    });
     try {
       await invoke('update_host', { host: backend });
+      console.info('[host-secret] update_host succeeded', { hostId: host.id });
       await get().loadHosts();
     } catch (error: unknown) {
+      console.error('[host-secret] update_host failed', {
+        hostId: host.id,
+        error: getErrorMessage(error),
+      });
       throw new Error(getErrorMessage(error));
     }
   },

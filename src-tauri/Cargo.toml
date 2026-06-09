@@ -35,4 +35,5 @@ dashmap = "6"
 regex = "1"
 sha2 = "0.10"
 hmac = "0.12"
-keyring = "3"
+keyring = { version = "3", features = ["windows-native", "sync-secret-service", "crypto-rust"] }
+security-framework = "3"

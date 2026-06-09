@@ -243,7 +243,15 @@ pub async fn set_repo_update_on_startup(
 
 fn resolve_repo_token(repo_id: &str, stored: Option<String>) -> Result<Option<String>, String> {
     match stored.as_deref() {
-        Some(SECRET_PLACEHOLDER) => crate::keychain::get_github_token(repo_id).map(Some),
+        Some(SECRET_PLACEHOLDER) => crate::keychain::get_github_token(repo_id)
+            .map(Some)
+            .map_err(|e| match e {
+                crate::keychain::SecretError::Missing => format!(
+                    "GitHub 仓库 {} 的 token 未在系统钥匙串中找到，请重新保存仓库 token。",
+                    repo_id
+                ),
+                other => other.to_string(),
+            }),
         Some(value) if !value.is_empty() => Ok(Some(value.to_string())),
         _ => Ok(None),
     }

@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { ToastProvider } from './components/ui';
 import { useTranslation } from './i18n';
+import KeychainNoticeModal from './components/KeychainNoticeModal';
 import MainLayout from './components/MainLayout';
 import WindowControls from './components/WindowControls';
 import './App.css';
@@ -201,6 +202,7 @@ function App() {
     <ToastProvider>
       <BrowserRouter>
         <AppContent />
+        <KeychainNoticeModal />
       </BrowserRouter>
     </ToastProvider>
   );

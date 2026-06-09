@@ -17,10 +17,11 @@ impl HostKeyVerifier {
                 "SSH 主机密钥指纹不匹配：已保存 {}，当前 {}。如确认主机已更换密钥，请删除后重新添加主机。",
                 stored, fingerprint
             )),
-            Err(_) => {
+            Err(crate::keychain::SecretError::Missing) => {
                 crate::keychain::store_ssh_host_key(&self.host_id, fingerprint)?;
                 Ok(true)
             }
+            Err(error) => Err(error.to_string()),
         }
     }
 }

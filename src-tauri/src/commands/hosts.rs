@@ -148,7 +148,9 @@ pub(crate) fn resolve_host_password(
     stored: Option<String>,
 ) -> Result<Option<String>, String> {
     match stored.as_deref() {
-        Some(SECRET_PLACEHOLDER) => crate::keychain::get_host_password(host_id).map(Some),
+        Some(SECRET_PLACEHOLDER) => crate::keychain::get_host_password(host_id)
+            .map(Some)
+            .map_err(|e| missing_host_secret_message("密码", host_id, e)),
         _ => Ok(stored),
     }
 }
@@ -158,8 +160,24 @@ pub(crate) fn resolve_host_private_key(
     stored: Option<String>,
 ) -> Result<Option<String>, String> {
     match stored.as_deref() {
-        Some(SECRET_PLACEHOLDER) => crate::keychain::get_host_private_key(host_id).map(Some),
+        Some(SECRET_PLACEHOLDER) => crate::keychain::get_host_private_key(host_id)
+            .map(Some)
+            .map_err(|e| missing_host_secret_message("私钥", host_id, e)),
         _ => Ok(stored),
+    }
+}
+
+fn missing_host_secret_message(
+    label: &str,
+    host_id: &str,
+    error: crate::keychain::SecretError,
+) -> String {
+    match error {
+        crate::keychain::SecretError::Missing => format!(
+            "主机 {} 的 SSH {} 未在系统钥匙串中找到，请重新编辑主机并保存凭据。",
+            host_id, label
+        ),
+        other => other.to_string(),
     }
 }
 
@@ -191,25 +209,79 @@ fn mask_secret_for_frontend(value: Option<String>) -> Option<String> {
         .map(|_| SECRET_PLACEHOLDER.to_string())
 }
 
+fn secret_state(value: Option<&str>) -> String {
+    match value {
+        None => "none".to_string(),
+        Some("") => "empty".to_string(),
+        Some(SECRET_PLACEHOLDER) => "placeholder".to_string(),
+        Some(value) => format!("provided(len={})", value.len()),
+    }
+}
+
 fn stored_host_secret_for_update(
-    conn: &rusqlite::Connection,
+    app: &tauri::AppHandle,
     host_id: &str,
-    column: &str,
+    label: &str,
+    current_stored: Option<String>,
     incoming: Option<String>,
     store: fn(&str, &str) -> Result<(), String>,
+    read: fn(&str) -> Result<String, crate::keychain::SecretError>,
 ) -> Result<Option<String>, String> {
-    let current = || {
-        let sql = format!("SELECT {} FROM hosts WHERE id=?1", column);
-        conn.query_row(&sql, params![host_id], |row| {
-            row.get::<_, Option<String>>(0)
-        })
-        .unwrap_or(None)
-    };
-
     match incoming.as_deref() {
-        None | Some("") | Some(SECRET_PLACEHOLDER) => Ok(current()),
+        None | Some("") | Some(SECRET_PLACEHOLDER) => {
+            if current_stored.as_deref() == Some(SECRET_PLACEHOLDER) {
+                match read(host_id) {
+                    Ok(_) => {}
+                    Err(error) => {
+                        crate::commands::app_log::emit_log(
+                            app,
+                            "error",
+                            "host-secret",
+                            &format!(
+                                "keychain entry missing/unreadable host={} field={} error={}",
+                                host_id, label, error
+                            ),
+                            "backend",
+                        );
+                        return Err(missing_host_secret_message(label, host_id, error));
+                    }
+                }
+            }
+            Ok(current_stored)
+        }
         Some(value) => {
-            store(host_id, value)?;
+            crate::commands::app_log::emit_log(
+                app,
+                "info",
+                "host-secret",
+                &format!(
+                    "storing new keychain secret host={} field={} len={}",
+                    host_id,
+                    label,
+                    value.len()
+                ),
+                "backend",
+            );
+            store(host_id, value).map_err(|error| {
+                crate::commands::app_log::emit_log(
+                    app,
+                    "error",
+                    "host-secret",
+                    &format!(
+                        "keychain store failed host={} field={} error={}",
+                        host_id, label, error
+                    ),
+                    "backend",
+                );
+                error
+            })?;
+            crate::commands::app_log::emit_log(
+                app,
+                "info",
+                "host-secret",
+                &format!("keychain store succeeded host={} field={}", host_id, label),
+                "backend",
+            );
             Ok(Some(SECRET_PLACEHOLDER.to_string()))
         }
     }
@@ -586,31 +658,70 @@ pub async fn add_host(db: tauri::State<'_, Database>, host: NewHost) -> Result<S
 }
 
 #[tauri::command]
-pub async fn update_host(db: tauri::State<'_, Database>, host: UpdateHost) -> Result<(), String> {
+pub async fn update_host(
+    app: tauri::AppHandle,
+    db: tauri::State<'_, Database>,
+    host: UpdateHost,
+) -> Result<(), String> {
     let conn = db.conn.clone();
     tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().map_err(|e| e.to_string())?;
+        crate::commands::app_log::emit_log(
+            &app,
+            "info",
+            "host-secret",
+            &format!(
+                "update_host start host={} auth_type={} password={} private_key={}",
+                host.id,
+                host.auth_type,
+                secret_state(host.password.as_deref()),
+                secret_state(host.private_key.as_deref())
+            ),
+            "backend",
+        );
+        let (current_password, current_private_key): (Option<String>, Option<String>) = {
+            let conn = conn.lock().map_err(|e| e.to_string())?;
+            conn.query_row(
+                "SELECT password, private_key FROM hosts WHERE id=?1",
+                params![host.id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|e| format!("host {} not found: {}", host.id, e))?
+        };
 
         let password = stored_host_secret_for_update(
-            &conn,
+            &app,
             &host.id,
-            "password",
+            "密码",
+            current_password,
             host.password,
             crate::keychain::store_host_password,
+            crate::keychain::get_host_password,
         )?;
 
         let private_key = stored_host_secret_for_update(
-            &conn,
+            &app,
             &host.id,
-            "private_key",
+            "私钥",
+            current_private_key,
             host.private_key,
             crate::keychain::store_host_private_key,
+            crate::keychain::get_host_private_key,
         )?;
 
-        conn.execute(
-            "UPDATE hosts SET name=?1, ip=?2, port=?3, auth_type=?4, username=?5, password=?6, private_key=?7, os=?8, tags=?9, group_id=?10, remark=?11, jump_chain=?12, updated_at=datetime('now','localtime') WHERE id=?13",
-            params![host.name, host.ip, host.port, host.auth_type, host.username, password, private_key, host.os, host.tags, host.group_id, host.remark, host.jump_chain.as_deref().unwrap_or("[]"), host.id],
-        ).map_err(|e| e.to_string())?;
+        {
+            let conn = conn.lock().map_err(|e| e.to_string())?;
+            conn.execute(
+                "UPDATE hosts SET name=?1, ip=?2, port=?3, auth_type=?4, username=?5, password=?6, private_key=?7, os=?8, tags=?9, group_id=?10, remark=?11, jump_chain=?12, updated_at=datetime('now','localtime') WHERE id=?13",
+                params![host.name, host.ip, host.port, host.auth_type, host.username, password, private_key, host.os, host.tags, host.group_id, host.remark, host.jump_chain.as_deref().unwrap_or("[]"), host.id],
+            ).map_err(|e| e.to_string())?;
+        }
+        crate::commands::app_log::emit_log(
+            &app,
+            "info",
+            "host-secret",
+            &format!("update_host db update succeeded host={}", host.id),
+            "backend",
+        );
         Ok(())
     }).await.map_err(|e| e.to_string())?
 }

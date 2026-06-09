@@ -50,6 +50,13 @@ export const dictionaries = {
     'common.retry': '重试',
     'common.createdAt': '创建时间',
 
+    'keychainNotice.title': '即将访问系统钥匙串',
+    'keychainNotice.body': 'OpsBatch 会通过系统钥匙串项 com.opsbatch.app 保护应用机密信息。接下来 macOS 可能会弹出“登录”钥匙串授权窗口。',
+    'keychainNotice.store': '保存配置时，用于保存 SSH 密码、SSH 私钥、AI API Key 或 GitHub token，数据库只记录占位引用。',
+    'keychainNotice.read': '连接主机、执行任务、同步仓库或调用 AI 时，用于读取已保存的机密信息完成认证。',
+    'keychainNotice.multiple': '如果一次操作涉及多个主机、账号或密钥，系统可能会对不同凭据分别询问多次。',
+    'keychainNotice.continue': '继续并允许系统询问',
+
     'terminal.defaultName': '终端',
     'terminal.localTerminal': '本机终端',
     'terminal.state.connecting': '连接中',
@@ -876,6 +883,13 @@ export const dictionaries = {
     'common.paste': 'Paste',
     'common.retry': 'Retry',
     'common.createdAt': 'Created at',
+
+    'keychainNotice.title': 'System keychain access',
+    'keychainNotice.body': 'OpsBatch protects application secrets in the system keychain item com.opsbatch.app. macOS may now show a Login keychain permission prompt.',
+    'keychainNotice.store': 'When saving settings, OpsBatch stores SSH passwords, SSH private keys, AI API keys, or GitHub tokens in the keychain and keeps only placeholder references in the database.',
+    'keychainNotice.read': 'When connecting hosts, running tasks, syncing repositories, or calling AI, OpsBatch reads saved secrets to authenticate the operation.',
+    'keychainNotice.multiple': 'If one action touches multiple hosts, accounts, or keys, macOS may ask for permission more than once.',
+    'keychainNotice.continue': 'Continue and allow prompt',
 
     'terminal.defaultName': 'Terminal',
     'terminal.localTerminal': 'Local terminal',

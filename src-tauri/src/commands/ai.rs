@@ -1310,7 +1310,12 @@ pub fn ai_keychain_store(provider: String, api_key: String) -> Result<(), String
 
 #[tauri::command]
 pub fn ai_keychain_get(provider: String) -> Result<String, String> {
-    crate::keychain::get_api_key(&provider)
+    crate::keychain::get_api_key(&provider).map_err(|e| match e {
+        crate::keychain::SecretError::Missing => {
+            "API Key 未在系统钥匙串中找到，请重新保存 AI 配置。".to_string()
+        }
+        other => other.to_string(),
+    })
 }
 
 #[tauri::command]

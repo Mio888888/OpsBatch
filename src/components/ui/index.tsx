@@ -410,7 +410,7 @@ const FormContext = createContext<FormContextValue | null>(null);
 
 function createForm<T extends object = Record<string, never>>(): FormInstance<T> {
   let values: Record<string, unknown> = {};
-  const initialValues: Record<string, unknown> = {};
+  let initialValues: Record<string, unknown> = {};
   const rules = new Map<FieldName, FormRule[]>();
   const listeners = new Set<() => void>();
 
@@ -428,9 +428,7 @@ function createForm<T extends object = Record<string, never>>(): FormInstance<T>
     },
     setFieldsValue: (next) => {
       values = { ...values, ...next };
-      Object.entries(next).forEach(([key, value]) => {
-        if (!(key in initialValues)) initialValues[key] = value;
-      });
+      initialValues = { ...initialValues, ...next };
       notify();
     },
     setFieldValue: (name, value) => {
@@ -441,7 +439,8 @@ function createForm<T extends object = Record<string, never>>(): FormInstance<T>
     getFieldValue: (name) => values[String(name)],
     getFieldsValue: () => values as T,
     resetFields: () => {
-      values = { ...initialValues };
+      values = {};
+      initialValues = {};
       notify();
     },
     _subscribe: (listener) => {

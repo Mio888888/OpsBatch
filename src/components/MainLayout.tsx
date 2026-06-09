@@ -56,6 +56,7 @@ import type { TranslationKey } from '../i18n';
 import { useAssetsStore } from '../stores/assets';
 import { useThemeStore } from '../stores/theme';
 import type { AssetGroup, Host } from '../types';
+import { requestKeychainNotice } from '../utils/keychainNotice';
 
 const { Content } = Layout;
 
@@ -123,6 +124,34 @@ interface HostFormValues {
 const DEFAULT_GROUP_ID = '__default__';
 const GROUP_DROP_ID_PREFIX = 'asset-group:';
 const HOST_DRAG_ID_PREFIX = 'asset-host:';
+const SECRET_PLACEHOLDER = '***keychain***';
+
+function editableSecret(value?: string): string | undefined {
+  return value && value !== SECRET_PLACEHOLDER ? value : undefined;
+}
+
+function submittedSecret(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed && trimmed !== SECRET_PLACEHOLDER ? value : undefined;
+}
+
+function secretDebugState(value?: string) {
+  return {
+    present: Boolean(value),
+    placeholder: value === SECRET_PLACEHOLDER,
+    length: value?.length ?? 0,
+  };
+}
+
+function hostUsesStoredSecret(host: Pick<Host, 'authType' | 'password' | 'privateKey' | 'jumpChain'>) {
+  if (host.authType === 'password' && host.password === SECRET_PLACEHOLDER) return true;
+  if (host.authType === 'key' && host.privateKey === SECRET_PLACEHOLDER) return true;
+  return host.jumpChain.length > 0;
+}
+
+function hostFormStoresSecret(host: Pick<Host, 'password' | 'privateKey'>) {
+  return Boolean(host.password || host.privateKey);
+}
 
 function getGroupDropId(groupId: string) {
   return `${GROUP_DROP_ID_PREFIX}${groupId}`;
@@ -344,8 +373,9 @@ export default function MainLayout({ children }: { children: ReactNode }) {
   }, [assetPanelVisible, hosts.length, loadHosts]);
 
   const lastOpenHostRef = useRef('');
-  const openHostTerminal = useCallback((host: Host) => {
+  const openHostTerminal = useCallback(async (host: Host) => {
     if (lastOpenHostRef.current === host.id) return;
+    if (hostUsesStoredSecret(host) && !(await requestKeychainNotice())) return;
     lastOpenHostRef.current = host.id;
     window.setTimeout(() => {
       if (lastOpenHostRef.current === host.id) lastOpenHostRef.current = '';
@@ -361,7 +391,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         },
       },
     });
-  }, [closeAssetPanel, navigate]);
+  }, [closeAssetPanel, navigate, requestKeychainNotice]);
 
   const hostIdSet = useMemo(() => new Set(hosts.map((h) => h.id)), [hosts]);
 
@@ -478,14 +508,20 @@ export default function MainLayout({ children }: { children: ReactNode }) {
   const openEditHostModal = useCallback((host: Host) => {
     setEditingHost(host);
     hostForm.resetFields();
+    console.info('[host-secret] open edit host modal', {
+      hostId: host.id,
+      authType: host.authType,
+      password: secretDebugState(host.password),
+      privateKey: secretDebugState(host.privateKey),
+    });
     hostForm.setFieldsValue({
       name: host.name,
       ip: host.ip,
       port: host.port,
       authType: host.authType,
       username: host.username,
-      password: host.password,
-      privateKey: host.privateKey,
+      password: editableSecret(host.password),
+      privateKey: editableSecret(host.privateKey),
       os: host.os,
       groupId: host.groupId ?? DEFAULT_GROUP_ID,
       remark: host.remark,
@@ -509,16 +545,26 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         port: values.port,
         authType: values.authType,
         username: values.username,
-        password: values.password,
-        privateKey: values.privateKey,
+        password: submittedSecret(values.password),
+        privateKey: submittedSecret(values.privateKey),
         os: values.os,
         tags: values.tags ?? [],
         groupId: values.groupId && values.groupId !== DEFAULT_GROUP_ID ? values.groupId : undefined,
         remark: values.remark ?? '',
         jumpChain: values.jumpChain ?? [],
       };
+      console.info('[host-secret] submit host form', {
+        hostId: editingHost?.id ?? '(new)',
+        authType: values.authType,
+        editing: Boolean(editingHost),
+        rawPassword: secretDebugState(values.password),
+        submittedPassword: secretDebugState(normalizedHost.password),
+        rawPrivateKey: secretDebugState(values.privateKey),
+        submittedPrivateKey: secretDebugState(normalizedHost.privateKey),
+      });
 
       try {
+        if (hostFormStoresSecret(normalizedHost) && !(await requestKeychainNotice())) return;
         if (editingHost) {
           await updateHost({ ...editingHost, ...normalizedHost });
           message.success(tText('assets.hostUpdated'));
@@ -533,7 +579,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     } catch {
       // 表单校验失败时由项目 Form 展示字段错误
     }
-  }, [addHost, closeHostModal, editingHost, hostForm, tText, updateHost]);
+  }, [addHost, closeHostModal, editingHost, hostForm, requestKeychainNotice, tText, updateHost]);
 
   const handleDeleteHost = useCallback(async (hostId: string) => {
     try {
@@ -583,7 +629,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         className="asset-tree-host-title"
         onClick={(event) => {
           if (event.defaultPrevented || event.button !== 0 || event.ctrlKey) return;
-          openHostTerminal(host);
+          void openHostTerminal(host);
         }}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -608,7 +654,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
               className="asset-tree-host-icon-button"
               onClick={(event) => {
                 event.stopPropagation();
-                openHostTerminal(host);
+                void openHostTerminal(host);
               }}
             >
               <CodeOutlined />
@@ -764,13 +810,15 @@ export default function MainLayout({ children }: { children: ReactNode }) {
 
   const openBatchTerminal = useCallback(async () => {
     if (selectedHostIds.length === 0) return;
+    if (!(await requestKeychainNotice())) return;
     await invoke('open_managed_window', { kind: 'batch-terminal', hostIds: selectedHostIds });
-  }, [selectedHostIds]);
+  }, [requestKeychainNotice, selectedHostIds]);
 
   const openBatchTransfer = useCallback(async () => {
     if (selectedHostIds.length === 0) return;
+    if (!(await requestKeychainNotice())) return;
     await invoke('open_managed_window', { kind: 'batch-transfer', hostIds: selectedHostIds });
-  }, [selectedHostIds]);
+  }, [requestKeychainNotice, selectedHostIds]);
 
   const openSettingsWindow = useCallback(async () => {
     await invoke('open_managed_window', { kind: 'settings' });
@@ -1095,7 +1143,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                     return (
                       <>
                         <button type="button" className="asset-ctx-menu-item"
-                          onClick={() => { setCtxMenu(null); openHostTerminal(host); }}
+                          onClick={() => { setCtxMenu(null); void openHostTerminal(host); }}
                         ><CodeOutlined /> {t('assets.openTerminal')}</button>
                         <button type="button" className="asset-ctx-menu-item"
                           onClick={() => { setCtxMenu(null); openEditHostModal(host); }}

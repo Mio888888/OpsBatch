@@ -5,19 +5,14 @@ pub enum ShellPlatform {
     Linux,
 }
 
-#[cfg(target_os = "windows")]
 pub fn current_shell_platform() -> ShellPlatform {
-    ShellPlatform::Windows
-}
-
-#[cfg(target_os = "macos")]
-pub fn current_shell_platform() -> ShellPlatform {
-    ShellPlatform::Macos
-}
-
-#[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-pub fn current_shell_platform() -> ShellPlatform {
-    ShellPlatform::Linux
+    if cfg!(target_os = "windows") {
+        ShellPlatform::Windows
+    } else if cfg!(target_os = "macos") {
+        ShellPlatform::Macos
+    } else {
+        ShellPlatform::Linux
+    }
 }
 
 pub fn select_local_shell<I, K, V, F>(platform: ShellPlatform, env: I, exists: F) -> String

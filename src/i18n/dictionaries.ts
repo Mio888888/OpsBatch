@@ -507,6 +507,7 @@ export const dictionaries = {
 
     'sftp.local': '本机',
     'sftp.remote': '远程',
+    'sftp.chooseLocalDir': '选择本地目录',
     'sftp.parentDir': '上级目录',
     'sftp.loadingFiles': '加载中…',
     'sftp.emptyDir': '空目录',
@@ -1341,6 +1342,7 @@ export const dictionaries = {
 
     'sftp.local': 'Local',
     'sftp.remote': 'Remote',
+    'sftp.chooseLocalDir': 'Choose local folder',
     'sftp.parentDir': 'Parent directory',
     'sftp.loadingFiles': 'Loading…',
     'sftp.emptyDir': 'Empty directory',

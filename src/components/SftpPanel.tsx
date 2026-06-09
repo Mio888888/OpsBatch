@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useSftpStore, type FileEntry } from '../stores/sftp';
 import PortForwardPanel from './PortForwardPanel';
 import { useTranslation } from '../i18n';
+import { FolderOpenOutlined } from './ui/icons';
 import type { FC, ReactNode } from 'react';
 
 const SFTP_FILE_ROW_HEIGHT = 23;
@@ -342,7 +343,15 @@ const FilePane: FC<FilePaneProps> = memo(({ side, hostId, onContextMenu }) => {
             placeholder="/"
           />
           {side === 'local' && (
-            <button className="sftp-btn-icon" onClick={() => { void authorizeLocalDirectory(); }} title="选择本地目录">…</button>
+            <button
+              type="button"
+              className="sftp-btn-icon sftp-local-dir-trigger"
+              onClick={() => { void authorizeLocalDirectory(); }}
+              title={tText('sftp.chooseLocalDir')}
+              aria-label={tText('sftp.chooseLocalDir')}
+            >
+              <FolderOpenOutlined />
+            </button>
           )}
           <button className="sftp-btn-icon" onClick={goUp} title={tText('sftp.parentDir')}>↑</button>
           <button className="sftp-btn-icon" onClick={() => refresh()} title={tText('common.refresh')}>↻</button>
@@ -390,7 +399,14 @@ const FilePane: FC<FilePaneProps> = memo(({ side, hostId, onContextMenu }) => {
         {!loading && !error && entries.length === 0 && (
           <div className="sftp-empty">
             {side === 'local' && !path ? (
-              <button className="sftp-btn" onClick={() => { void authorizeLocalDirectory(); }}>选择本地目录</button>
+              <button
+                type="button"
+                className="sftp-btn sftp-local-dir-empty-btn"
+                onClick={() => { void authorizeLocalDirectory(); }}
+              >
+                <span className="sftp-local-dir-empty-icon"><FolderOpenOutlined /></span>
+                <span>{tText('sftp.chooseLocalDir')}</span>
+              </button>
             ) : tText('sftp.emptyDir')}
           </div>
         )}

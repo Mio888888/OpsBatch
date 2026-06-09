@@ -230,6 +230,11 @@ pre {
   padding: 12px 0 94px;
 }
 
+.hero-copy,
+.hero-visual {
+  min-width: 0;
+}
+
 .eyebrow {
   margin: 0 0 14px;
   color: #6e6aa8;
@@ -435,6 +440,8 @@ h3 {
 
 .product-window {
   padding: 16px;
+  width: 100%;
+  overflow: hidden;
   transform: rotate(1.2deg);
 }
 
@@ -488,11 +495,13 @@ h3 {
   display: grid;
   grid-template-columns: 1.4fr 0.84fr;
   gap: 16px;
+  min-width: 0;
 }
 
 .terminal-panel {
   min-height: 260px;
   padding: 17px;
+  min-width: 0;
 }
 
 .terminal-tabs {
@@ -523,6 +532,7 @@ h3 {
 .monitor-card {
   min-height: 260px;
   padding: 17px;
+  min-width: 0;
   background: rgba(239, 244, 255, 0.78);
 }
 
@@ -591,6 +601,7 @@ h3 {
 .sftp-card {
   grid-column: 1 / -1;
   padding: 16px;
+  min-width: 0;
   background: rgba(255, 244, 220, 0.72);
 }
 
@@ -624,7 +635,6 @@ h3 {
 }
 
 .section-block,
-.workflow-section,
 .download-section {
   margin: 108px 0;
 }
@@ -663,6 +673,7 @@ h3 {
 .feature-card {
   min-height: 238px;
   padding: 30px;
+  min-width: 0;
   transition: transform 180ms ease, box-shadow 180ms ease;
 }
 
@@ -737,48 +748,8 @@ h3 {
 .feature-card:nth-child(3) .feature-icon { background: #e7ecff; }
 .feature-card:nth-child(4) .feature-icon { background: #ffe4dd; }
 
-.workflow-section {
-  display: grid;
-  grid-template-columns: minmax(0, 0.78fr) minmax(420px, 1fr);
-  gap: 72px;
-  align-items: center;
-}
-
 .workflow-copy p {
   max-width: 490px;
-}
-
-.workflow-board {
-  display: grid;
-  gap: 16px;
-  padding: 34px;
-  background: rgba(242, 246, 255, 0.72);
-}
-
-.workflow-node {
-  min-height: 62px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #3f4c70;
-  font-size: 17px;
-  font-weight: 900;
-  border-radius: 24px;
-  box-shadow: 10px 12px 24px rgba(103, 103, 153, 0.14), inset 5px 5px 11px rgba(255, 255, 255, 0.55), inset -6px -6px 12px rgba(111, 92, 138, 0.1);
-}
-
-.node-start { background: #dff9e9; }
-.node-command { background: #fff0bc; }
-.node-check { background: #ffe2d7; }
-.node-done { background: #e2e9ff; }
-
-.workflow-line {
-  width: 9px;
-  height: 22px;
-  margin: 0 auto;
-  background: #b8c6ff;
-  border-radius: 999px;
-  box-shadow: inset -2px -2px 5px rgba(80, 93, 151, 0.14), inset 2px 2px 5px rgba(255, 255, 255, 0.65);
 }
 
 .security-section {
@@ -832,26 +803,6 @@ h3 {
   color: #334062;
   font-size: 24px;
   line-height: 1.1;
-}
-
-.risk-track {
-  position: relative;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 20px;
-}
-
-.risk-track::before {
-  position: absolute;
-  top: 28px;
-  right: 10%;
-  left: 10%;
-  height: 10px;
-  pointer-events: none;
-  content: "";
-  background: linear-gradient(90deg, rgba(149, 224, 189, 0.55), rgba(255, 213, 111, 0.5), rgba(132, 168, 255, 0.5));
-  border-radius: 999px;
-  box-shadow: inset 2px 2px 6px rgba(90, 89, 130, 0.12), inset -3px -3px 8px rgba(255, 255, 255, 0.66);
 }
 
 .risk-step {
@@ -955,6 +906,7 @@ h3 {
 .download-panel {
   display: grid;
   gap: 18px;
+  min-width: 0;
 }
 
 .download-primary {
@@ -965,6 +917,7 @@ h3 {
 .download-options {
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .download-option {
@@ -974,6 +927,7 @@ h3 {
   gap: 14px;
   min-height: 48px;
   padding: 10px 2px;
+  min-width: 0;
   color: #4d5878;
   background: transparent;
   border-bottom: 1px solid rgba(102, 90, 125, 0.12);
@@ -1071,7 +1025,6 @@ h3 {
   }
 
   .hero-section,
-  .workflow-section,
   .download-section,
   .section-heading {
     grid-template-columns: 1fr;
@@ -1090,13 +1043,8 @@ h3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .security-shell,
-  .risk-track {
+  .security-shell {
     grid-template-columns: 1fr;
-  }
-
-  .risk-track::before {
-    display: none;
   }
 
   .product-window {
@@ -1159,7 +1107,6 @@ h3 {
 
   .section-block,
   .security-section,
-  .workflow-section,
   .download-section {
     margin: 52px 0;
   }
@@ -1169,9 +1116,68 @@ h3 {
     width: 100%;
   }
 
+  .trust-strip {
+    align-items: flex-start;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .trust-strip span {
+    max-width: 100%;
+    white-space: normal;
+  }
+
+  .hero-visual {
+    width: 100%;
+    overflow: hidden;
+  }
+
   .product-grid,
   .feature-grid {
     grid-template-columns: 1fr;
+  }
+
+  .product-window {
+    padding: 12px;
+    border-radius: 28px;
+  }
+
+  .window-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .mode-pill {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    width: 100%;
+    max-width: none;
+    overflow: visible;
+  }
+
+  .terminal-tabs {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .monitor-head,
+  .metric,
+  .process-list div,
+  .file-row {
+    min-width: 0;
+  }
+
+  .metric {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+  }
+
+  .process-list div {
+    flex-wrap: wrap;
+  }
+
+  .file-row {
+    overflow-wrap: anywhere;
   }
 
   .section-kicker h2 {
@@ -1201,20 +1207,25 @@ h3 {
   }
 
   .terminal-panel pre {
-    font-size: 12px;
+    max-width: 100%;
+    font-size: 11px;
   }
 
   .mode-pill span {
-    padding-inline: 10px;
+    flex: 1;
+    padding-inline: 8px;
+    font-size: 13px;
+    text-align: center;
   }
 
   .floating-badge {
     position: static;
+    width: fit-content;
+    max-width: 100%;
     margin-top: 12px;
   }
 
-  .download-section,
-  .workflow-board {
+  .download-section {
     padding: 22px;
   }
 

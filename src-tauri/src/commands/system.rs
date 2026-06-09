@@ -2,6 +2,12 @@ use serde::Serialize;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 #[derive(Debug, Serialize)]
 pub struct LocalPerformanceSnapshot {
     pub cpu_time_ms: Option<f64>,
@@ -59,19 +65,27 @@ fn read_process_cpu_time_ms() -> Option<f64> {
 
 #[cfg(target_os = "windows")]
 fn read_process_cpu_time_ms() -> Option<f64> {
-    let output = Command::new("powershell")
+    let mut command = Command::new("powershell");
+    command
         .args([
             "-NoProfile",
             "-Command",
-            &format!("(Get-Process -Id {}).TotalProcessorTime.TotalMilliseconds", std::process::id()),
+            &format!(
+                "(Get-Process -Id {}).TotalProcessorTime.TotalMilliseconds",
+                std::process::id()
+            ),
         ])
-        .output()
-        .ok()?;
+        .creation_flags(CREATE_NO_WINDOW);
+
+    let output = command.output().ok()?;
     if !output.status.success() {
         return None;
     }
 
-    String::from_utf8_lossy(&output.stdout).trim().parse::<f64>().ok()
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<f64>()
+        .ok()
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
@@ -101,20 +115,26 @@ fn read_process_memory_rss_mb() -> Option<u64> {
     let contents = std::fs::read_to_string("/proc/self/status").ok()?;
     contents.lines().find_map(|line| {
         let rest = line.strip_prefix("VmRSS:")?;
-        rest.split_whitespace().next()?.parse::<u64>().ok().map(|rss_kb| rss_kb / 1024)
+        rest.split_whitespace()
+            .next()?
+            .parse::<u64>()
+            .ok()
+            .map(|rss_kb| rss_kb / 1024)
     })
 }
 
 #[cfg(target_os = "windows")]
 fn read_process_memory_rss_mb() -> Option<u64> {
-    let output = Command::new("powershell")
+    let mut command = Command::new("powershell");
+    command
         .args([
             "-NoProfile",
             "-Command",
             &format!("(Get-Process -Id {}).WorkingSet64", std::process::id()),
         ])
-        .output()
-        .ok()?;
+        .creation_flags(CREATE_NO_WINDOW);
+
+    let output = command.output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -157,5 +177,8 @@ fn read_linux_clock_ticks() -> Option<u64> {
         return None;
     }
 
-    String::from_utf8_lossy(&output.stdout).trim().parse::<u64>().ok()
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u64>()
+        .ok()
 }

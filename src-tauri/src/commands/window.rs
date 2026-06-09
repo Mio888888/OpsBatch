@@ -82,8 +82,20 @@ fn is_safe_host_id(value: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
 }
 
+fn encode_route(route: &str) -> String {
+    route
+        .bytes()
+        .map(|byte| match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (byte as char).to_string()
+            }
+            _ => format!("%{byte:02X}"),
+        })
+        .collect()
+}
+
 fn spa_entry_for_route(route: &str) -> String {
-    format!("index.html#{}", route)
+    format!("index.html?route={}", encode_route(route))
 }
 
 #[tauri::command]
@@ -134,11 +146,14 @@ mod tests {
     }
 
     #[test]
-    fn spa_entry_keeps_route_in_hash_fragment() {
-        assert_eq!(spa_entry_for_route("/settings"), "index.html#/settings");
+    fn spa_entry_loads_index_and_passes_route_in_query() {
+        assert_eq!(
+            spa_entry_for_route("/settings"),
+            "index.html?route=%2Fsettings"
+        );
         assert_eq!(
             spa_entry_for_route("/batch-terminal?hostIds=a_b-1"),
-            "index.html#/batch-terminal?hostIds=a_b-1"
+            "index.html?route=%2Fbatch-terminal%3FhostIds%3Da_b-1"
         );
     }
 }

@@ -7,6 +7,18 @@ import MainLayout from './components/MainLayout';
 import WindowControls from './components/WindowControls';
 import './App.css';
 
+function applyInitialRouteToHash() {
+  if (typeof window === 'undefined') return;
+
+  const route = new URLSearchParams(window.location.search).get('route');
+  if (!route || !route.startsWith('/') || route.startsWith('//')) return;
+
+  window.history.replaceState(null, '', window.location.pathname);
+  window.location.hash = route;
+}
+
+applyInitialRouteToHash();
+
 const TerminalPage = lazy(() => import('./pages/Terminal/TerminalPage'));
 
 const EditorWindow = lazy(() => import('./pages/Editor/EditorWindow'));

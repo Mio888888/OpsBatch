@@ -82,20 +82,20 @@ fn is_safe_host_id(value: &str) -> bool {
             .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
 }
 
-fn encode_route(route: &str) -> String {
-    route
-        .bytes()
-        .map(|byte| match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                (byte as char).to_string()
-            }
-            _ => format!("%{byte:02X}"),
+fn is_safe_route(value: &str) -> bool {
+    value.starts_with('/')
+        && !value.starts_with("//")
+        && value.chars().all(|ch| {
+            ch.is_ascii_alphanumeric()
+                || matches!(ch, '/' | '?' | '&' | '=' | '-' | '_' | '.' | '~' | ',')
         })
-        .collect()
 }
 
-fn spa_entry_for_route(route: &str) -> String {
-    format!("index.html?route={}", encode_route(route))
+fn spa_entry_for_route(route: &str) -> Result<String, String> {
+    if !is_safe_route(route) {
+        return Err("route contains illegal characters".to_string());
+    }
+    Ok(format!("index.html#{route}"))
 }
 
 #[tauri::command]
@@ -124,7 +124,7 @@ pub fn open_managed_window(
 
     let (width, height, min_width, min_height) = window.size();
     let route = window.route(&host_ids)?;
-    let url = spa_entry_for_route(&route);
+    let url = spa_entry_for_route(&route)?;
     crate::commands::diagnostics::append_diagnostic_log(
         app.app_handle(),
         "window",
@@ -172,14 +172,16 @@ mod tests {
     }
 
     #[test]
-    fn spa_entry_loads_index_and_passes_route_in_query() {
+    fn spa_entry_loads_index_and_passes_route_in_hash() {
         assert_eq!(
-            spa_entry_for_route("/settings"),
-            "index.html?route=%2Fsettings"
+            spa_entry_for_route("/settings").unwrap(),
+            "index.html#/settings"
         );
         assert_eq!(
-            spa_entry_for_route("/batch-terminal?hostIds=a_b-1"),
-            "index.html?route=%2Fbatch-terminal%3FhostIds%3Da_b-1"
+            spa_entry_for_route("/batch-terminal?hostIds=a_b-1").unwrap(),
+            "index.html#/batch-terminal?hostIds=a_b-1"
         );
+        assert!(spa_entry_for_route("//evil.example").is_err());
+        assert!(spa_entry_for_route("/settings#nested").is_err());
     }
 }

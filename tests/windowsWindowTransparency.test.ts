@@ -33,10 +33,11 @@ test('managed child windows load the bundled SPA entry before routing', () => {
   const windowSource = readFileSync('src-tauri/src/commands/window.rs', 'utf8');
   const appSource = readFileSync('src/App.tsx', 'utf8');
 
-  assert.match(windowSource, /fn spa_entry_for_route\(route: &str\) -> String\s*\{\s*format!\("index\.html\?route=\{\}", encode_route\(route\)\)\s*\}/s);
-  assert.match(windowSource, /let url = spa_entry_for_route\(&route\);[\s\S]*WebviewUrl::App\(url\.into\(\)\)/);
-  assert.match(windowSource, /index\.html\?route=/);
-  assert.doesNotMatch(windowSource, /index\.html#/);
+  assert.match(windowSource, /fn spa_entry_for_route\(route: &str\) -> Result<String, String>\s*\{[\s\S]*Ok\(format!\("index\.html#\{route\}"\)\)/);
+  assert.match(windowSource, /let url = spa_entry_for_route\(&route\)\?;[\s\S]*WebviewUrl::App\(url\.into\(\)\)/);
+  assert.match(windowSource, /index\.html#/);
+  assert.doesNotMatch(windowSource, /index\.html\?route=/);
+  assert.match(windowSource, /fn is_safe_route\(value: &str\) -> bool/);
   assert.doesNotMatch(windowSource, /WebviewUrl::App\(route\.into\(\)\)/);
   assert.match(appSource, /import \{[^}]*HashRouter[^}]*\} from 'react-router-dom'/);
   assert.match(appSource, /applyInitialRouteToHash\(\);/);

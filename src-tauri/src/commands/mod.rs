@@ -16,6 +16,7 @@ pub mod mcp;
 pub mod proxyjump;
 pub mod quick_actions;
 pub mod rag;
+pub mod rdp;
 pub mod settings;
 pub mod sftp;
 pub mod system;

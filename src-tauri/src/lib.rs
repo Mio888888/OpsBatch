@@ -54,6 +54,7 @@ pub fn run() {
             let _ = local_fs.authorize_root(&app_data_dir);
             app.manage(local_fs);
             app.manage(commands::forward::ForwardManager::new());
+            app.manage(commands::rdp::RdpManager::new());
             app.manage(Arc::new(commands::mcp::McpManager::new()));
             let registry = ssh::SshConnectionRegistry::new();
             app.manage(registry);
@@ -224,6 +225,10 @@ pub fn run() {
             commands::settings::export_database_backup,
             // System
             commands::system::get_local_performance_snapshot,
+            // RDP
+            commands::rdp::rdp_connect,
+            commands::rdp::rdp_send_input,
+            commands::rdp::rdp_disconnect,
             // Terminal
             commands::terminal::terminal_connect,
             commands::terminal::terminal_connect_local,

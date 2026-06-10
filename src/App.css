@@ -9,6 +9,7 @@
 @import './styles/shared/page-layout.css';
 @import './styles/pages/workflow-dashboard.css';
 @import './styles/pages/library.css';
+@import './styles/pages/rdp.css';
 @import './styles/pages/settings.css';
 @import './styles/layout/responsive.css';
 @import './styles/foundation/scrollbar.css';

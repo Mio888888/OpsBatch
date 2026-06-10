@@ -182,7 +182,7 @@ fn missing_host_secret_message(
 ) -> String {
     match error {
         crate::keychain::SecretError::Missing => format!(
-            "主机 {} 的 SSH {} 未在系统钥匙串中找到，请重新编辑主机并保存凭据。",
+            "主机 {} 的{}未在系统钥匙串中找到，请重新编辑主机并保存凭据。",
             host_id, label
         ),
         other => other.to_string(),

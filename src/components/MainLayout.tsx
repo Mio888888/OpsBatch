@@ -212,6 +212,8 @@ interface HostFormValues {
 }
 
 const DEFAULT_GROUP_ID = '__default__';
+const DEFAULT_SSH_PORT = 22;
+const DEFAULT_RDP_PORT = 3389;
 const GROUP_DROP_ID_PREFIX = 'asset-group:';
 const HOST_DRAG_ID_PREFIX = 'asset-host:';
 const SECRET_PLACEHOLDER = '***keychain***';
@@ -241,6 +243,10 @@ function hostUsesStoredSecret(host: Pick<Host, 'authType' | 'password' | 'privat
 
 function hostFormStoresSecret(host: Pick<Host, 'password' | 'privateKey'>) {
   return Boolean(host.password || host.privateKey);
+}
+
+function isWindowsHost(host: Pick<Host, 'os'>) {
+  return host.os === 'windows';
 }
 
 function getGroupDropId(groupId: string) {
@@ -362,6 +368,7 @@ function DraggableHostTitle({ host, children }: DraggableHostTitleProps) {
 
 function getActiveMode(pathname: string) {
   if (pathname === '/terminal') return '/terminal';
+  if (pathname === '/rdp') return '/terminal';
   if (pathname === '/workflow') return '/workflow';
   if (pathname === '/github') return '/github';
   if (pathname === '/assets' || pathname === '/commands' || pathname === '/quick-actions') return '';
@@ -463,7 +470,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
   }, [assetPanelVisible, hosts.length, loadHosts]);
 
   const lastOpenHostRef = useRef('');
-  const openHostTerminal = useCallback(async (host: Host) => {
+  const openHostSession = useCallback(async (host: Host) => {
     if (lastOpenHostRef.current === host.id) return;
     if (hostUsesStoredSecret(host) && !(await requestKeychainNotice())) return;
     lastOpenHostRef.current = host.id;
@@ -471,7 +478,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       if (lastOpenHostRef.current === host.id) lastOpenHostRef.current = '';
     }, 300);
     closeAssetPanel();
-    navigate('/terminal', {
+    navigate(isWindowsHost(host) ? '/rdp' : '/terminal', {
       state: {
         openHost: {
           requestId: `${host.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -585,7 +592,8 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     setEditingHost(null);
     hostForm.resetFields();
     hostForm.setFieldsValue({
-      port: 22,
+      os: 'linux',
+      port: DEFAULT_SSH_PORT,
       authType: 'password',
       username: 'root',
       groupId: groupId ?? DEFAULT_GROUP_ID,
@@ -595,6 +603,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
   }, [hostForm]);
 
   const openEditHostModal = useCallback((host: Host) => {
+    const hostOs = host.os ?? 'linux';
     setEditingHost(host);
     hostForm.resetFields();
     console.info('[host-secret] open edit host modal', {
@@ -607,15 +616,44 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       name: host.name,
       ip: host.ip,
       port: host.port,
-      authType: host.authType,
+      authType: hostOs === 'windows' ? 'password' : host.authType,
       username: host.username,
       password: editableSecret(host.password),
-      privateKey: editableSecret(host.privateKey),
+      privateKey: hostOs === 'windows' ? undefined : editableSecret(host.privateKey),
+      os: hostOs,
       groupId: host.groupId ?? DEFAULT_GROUP_ID,
       remark: host.remark,
-      jumpChain: host.jumpChain ?? [],
+      jumpChain: hostOs === 'windows' ? [] : host.jumpChain ?? [],
     });
     setHostModalOpen(true);
+  }, [hostForm]);
+
+  const handleHostOsChange = useCallback((nextOs: Host['os']) => {
+    const currentPortValue = Number(hostForm.getFieldValue('port'));
+    const currentPort = Number.isFinite(currentPortValue) ? currentPortValue : 0;
+    const currentUsername = String(hostForm.getFieldValue('username') ?? '').trim();
+
+    hostForm.setFieldValue('os', nextOs);
+
+    if (nextOs === 'windows') {
+      if (!currentPort || currentPort === DEFAULT_SSH_PORT) {
+        hostForm.setFieldValue('port', DEFAULT_RDP_PORT);
+      }
+      if (!currentUsername || currentUsername === 'root') {
+        hostForm.setFieldValue('username', 'Administrator');
+      }
+      hostForm.setFieldValue('authType', 'password');
+      hostForm.setFieldValue('privateKey', undefined);
+      hostForm.setFieldValue('jumpChain', []);
+      return;
+    }
+
+    if (!currentPort || currentPort === DEFAULT_RDP_PORT) {
+      hostForm.setFieldValue('port', DEFAULT_SSH_PORT);
+    }
+    if (currentUsername === 'Administrator') {
+      hostForm.setFieldValue('username', 'root');
+    }
   }, [hostForm]);
 
   const closeHostModal = useCallback(() => {
@@ -627,23 +665,25 @@ export default function MainLayout({ children }: { children: ReactNode }) {
   const handleSaveHost = useCallback(async () => {
     try {
       const values = await hostForm.validateFields();
+      const os = values.os ?? 'linux';
+      const authType = os === 'windows' ? 'password' : values.authType;
       const normalizedHost: Omit<Host, 'id' | 'createdAt' | 'updatedAt'> = {
         name: values.name,
         ip: values.ip,
-        port: values.port,
-        authType: values.authType,
+        port: values.port ?? (os === 'windows' ? DEFAULT_RDP_PORT : DEFAULT_SSH_PORT),
+        authType,
         username: values.username,
         password: submittedSecret(values.password),
-        privateKey: submittedSecret(values.privateKey),
-        os: 'linux',
+        privateKey: os === 'windows' ? undefined : submittedSecret(values.privateKey),
+        os,
         tags: values.tags ?? [],
         groupId: values.groupId && values.groupId !== DEFAULT_GROUP_ID ? values.groupId : undefined,
         remark: values.remark ?? '',
-        jumpChain: values.jumpChain ?? [],
+        jumpChain: os === 'windows' ? [] : values.jumpChain ?? [],
       };
       console.info('[host-secret] submit host form', {
         hostId: editingHost?.id ?? '(new)',
-        authType: values.authType,
+        authType,
         editing: Boolean(editingHost),
         rawPassword: secretDebugState(values.password),
         submittedPassword: secretDebugState(normalizedHost.password),
@@ -712,12 +752,15 @@ export default function MainLayout({ children }: { children: ReactNode }) {
   }, []);
 
   const renderHostTitle = useCallback((host: Host) => {
+    const openLabel = isWindowsHost(host) ? t('assets.openRdp') : t('assets.openTerminal');
+    const openIcon = isWindowsHost(host) ? <CloudServerOutlined /> : <CodeOutlined />;
+
     return (
       <div
         className="asset-tree-host-title"
         onClick={(event) => {
           if (event.defaultPrevented || event.button !== 0 || event.ctrlKey) return;
-          void openHostTerminal(host);
+          void openHostSession(host);
         }}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -730,22 +773,22 @@ export default function MainLayout({ children }: { children: ReactNode }) {
             <span className="asset-tree-host-name">{host.name}</span>
             <span className="asset-tree-host-meta">{host.username}@{host.ip}:{host.port}</span>
             <div className="asset-tree-host-details">
-              <span>{host.os === 'linux' ? 'Linux' : 'Windows'}</span>
+              <span>{isWindowsHost(host) ? t('assets.windowsHost') : t('assets.linuxHost')}</span>
               {host.remark ? <span>{host.remark}</span> : null}
             </div>
           </div>
         </div>
         <div className="asset-tree-host-actions">
-          <Tooltip title={t('assets.openTerminal')}>
+          <Tooltip title={openLabel}>
             <button
               type="button"
               className="asset-tree-host-icon-button"
               onClick={(event) => {
                 event.stopPropagation();
-                void openHostTerminal(host);
+                void openHostSession(host);
               }}
             >
-              <CodeOutlined />
+              {openIcon}
             </button>
           </Tooltip>
           <Tooltip title={t('common.edit')}>
@@ -779,7 +822,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         </div>
       </div>
     );
-  }, [handleDeleteHost, openEditHostModal, openHostTerminal, t, tText]);
+  }, [handleDeleteHost, openEditHostModal, openHostSession, t, tText]);
 
   const assetTreeData = useMemo<HostTreeNode[]>(() => {
     const hostsByGroup = new Map<string, Host[]>();
@@ -1219,11 +1262,13 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                     const target = ctxMenu.target as { type: 'host'; hostId: string };
                     const host = hosts.find((h) => h.id === target.hostId);
                     if (!host) return null;
+                    const openLabel = isWindowsHost(host) ? t('assets.openRdp') : t('assets.openTerminal');
+                    const openIcon = isWindowsHost(host) ? <CloudServerOutlined /> : <CodeOutlined />;
                     return (
                       <>
                         <button type="button" className="asset-ctx-menu-item"
-                          onClick={() => { setCtxMenu(null); void openHostTerminal(host); }}
-                        ><CodeOutlined /> {t('assets.openTerminal')}</button>
+                          onClick={() => { setCtxMenu(null); void openHostSession(host); }}
+                        >{openIcon} {openLabel}</button>
                         <button type="button" className="asset-ctx-menu-item"
                           onClick={() => { setCtxMenu(null); openEditHostModal(host); }}
                         ><EditOutlined /> {t('common.edit')}</button>
@@ -1311,6 +1356,23 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                     <Form.Item name="name" label={t('assets.hostName')} rules={[{ required: true, message: tText('common.required') }]}>
                       <Input placeholder={tText('assets.hostNamePlaceholder')} />
                     </Form.Item>
+                    <Form.Item noStyle shouldUpdate>
+                      {({ getFieldValue }) => {
+                        const os = (getFieldValue('os') as Host['os'] | undefined) ?? 'linux';
+                        return (
+                          <Form.Item label={t('assets.system')}>
+                            <Select<Host['os']>
+                              value={os}
+                              options={[
+                                { value: 'linux', label: t('assets.linuxHost') },
+                                { value: 'windows', label: t('assets.windowsHost') },
+                              ]}
+                              onChange={handleHostOsChange}
+                            />
+                          </Form.Item>
+                        );
+                      }}
+                    </Form.Item>
                   </div>
                   <div className="asset-host-form-grid asset-host-form-grid-address">
                     <Form.Item name="ip" label={t('assets.hostAddress')} rules={[{ required: true, message: tText('common.required') }]}>
@@ -1323,19 +1385,34 @@ export default function MainLayout({ children }: { children: ReactNode }) {
 
                   {/* ── 认证 ── */}
                   <div className="asset-host-form-grid asset-host-form-grid-auth">
-                    <Form.Item name="authType" label={t('assets.auth')} rules={[{ required: true, message: tText('common.required') }]}>
-                      <Select options={[
-                        { value: 'password', label: t('assets.passwordAuth') },
-                        { value: 'key', label: t('assets.keyAuth') },
-                      ]} />
-                    </Form.Item>
-                    <Form.Item name="username" label={t('assets.username')} rules={[{ required: true, message: tText('common.required') }]}>
-                      <Input placeholder="root" />
+                    <Form.Item noStyle shouldUpdate>
+                      {({ getFieldValue }) => {
+                        const os = (getFieldValue('os') as Host['os'] | undefined) ?? 'linux';
+                        return (
+                          <Form.Item name="authType" label={t('assets.auth')} rules={[{ required: true, message: tText('common.required') }]}>
+                            <Select<Host['authType']> options={[
+                              { value: 'password', label: t('assets.passwordAuth') },
+                              ...(os === 'windows' ? [] : [{ value: 'key' as const, label: t('assets.keyAuth') }]),
+                            ]} />
+                          </Form.Item>
+                        );
+                      }}
                     </Form.Item>
                     <Form.Item noStyle shouldUpdate>
-                      {() => {
-                        const authType = hostForm.getFieldValue('authType');
-                        if (authType === 'key') {
+                      {({ getFieldValue }) => {
+                        const os = (getFieldValue('os') as Host['os'] | undefined) ?? 'linux';
+                        return (
+                          <Form.Item name="username" label={t('assets.username')} rules={[{ required: true, message: tText('common.required') }]}>
+                            <Input placeholder={os === 'windows' ? 'Administrator' : 'root'} />
+                          </Form.Item>
+                        );
+                      }}
+                    </Form.Item>
+                    <Form.Item noStyle shouldUpdate>
+                      {({ getFieldValue }) => {
+                        const os = (getFieldValue('os') as Host['os'] | undefined) ?? 'linux';
+                        const authType = getFieldValue('authType');
+                        if (os !== 'windows' && authType === 'key') {
                           return (
                             <Form.Item name="privateKey" label={t('assets.sshPrivateKey')}>
                               <Input.TextArea rows={1} placeholder={tText('assets.pastePrivateKey')} />
@@ -1365,13 +1442,21 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                   </div>
 
                   {/* ── 跳板链 ── */}
-                  <Form.Item name="jumpChain" label={t('assets.jumpChain')} extra={t('assets.jumpChainExtra')} className="asset-host-form-jump">
-                    <Select
-                      mode="multiple"
-                      allowClear
-                      placeholder={tText('assets.directNoJump')}
-                      options={hosts.map((h) => ({ value: h.id, label: `${h.name} (${h.ip})` }))}
-                    />
+                  <Form.Item noStyle shouldUpdate>
+                    {({ getFieldValue }) => {
+                      const os = (getFieldValue('os') as Host['os'] | undefined) ?? 'linux';
+                      if (os === 'windows') return null;
+                      return (
+                        <Form.Item name="jumpChain" label={t('assets.jumpChain')} extra={t('assets.jumpChainExtra')} className="asset-host-form-jump">
+                          <Select
+                            mode="multiple"
+                            allowClear
+                            placeholder={tText('assets.directNoJump')}
+                            options={hosts.filter((h) => h.os === 'linux').map((h) => ({ value: h.id, label: `${h.name} (${h.ip})` }))}
+                          />
+                        </Form.Item>
+                      );
+                    }}
                   </Form.Item>
                 </Form>
               </Modal>

@@ -20,6 +20,7 @@ function applyInitialRouteToHash() {
 applyInitialRouteToHash();
 
 const TerminalPage = lazy(() => import('./pages/Terminal/TerminalPage'));
+const RdpPage = lazy(() => import('./pages/Rdp/RdpPage'));
 
 const EditorWindow = lazy(() => import('./pages/Editor/EditorWindow'));
 const BatchTerminalWindow = lazy(() => import('./pages/Commands/BatchTerminalWindow'));
@@ -153,6 +154,7 @@ function AppContent() {
             <Route path="/quick-actions" element={<QuickActionsPage />} />
             <Route path="/workflow" element={<WorkflowPage />} />
             <Route path="/github" element={<GitHubPage />} />
+            <Route path="/rdp" element={<RdpPage />} />
           </Routes>
         </Suspense>
       )}
@@ -174,6 +176,7 @@ function App() {
 // Preload all lazy pages during idle time so navigation is instant.
 const prefetchPages = () => {
   void import('./pages/Terminal/TerminalPage');
+  void import('./pages/Rdp/RdpPage');
   void import('./pages/Editor/EditorWindow');
   void import('./pages/Commands/BatchTerminalWindow');
   void import('./pages/Transfer/BatchTransferWindow');

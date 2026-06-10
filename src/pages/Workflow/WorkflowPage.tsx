@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Button, Space, Modal, Form, Input, Tabs, message, Empty, Table } from '../../components/ui';
-import { PlusOutlined } from '../../components/ui/icons';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { Button, Modal, Form, Input, Tabs, message, Empty, Table } from '../../components/ui';
+import { PlusOutlined, ThunderboltOutlined } from '../../components/ui/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from '../../i18n';
 import { useWorkflowStore } from '../../stores/workflow';
@@ -46,6 +46,22 @@ export default function WorkflowPage() {
   const [confirmName, setConfirmName] = useState('');
   const [confirmDesc, setConfirmDesc] = useState('');
   const [confirmResolve, setConfirmResolve] = useState<((v: boolean) => void) | null>(null);
+
+  const workflowStats = useMemo(() => {
+    return {
+      total: workflows.length,
+      templates: templates.length,
+      scheduled: scheduledTasks.length,
+      running: executingWorkflowIds.length,
+    };
+  }, [workflows, templates.length, scheduledTasks.length, executingWorkflowIds.length]);
+
+  const renderTabLabel = (label: string, count: number) => (
+    <span className="workflow-tab-label">
+      <span>{label}</span>
+      <span className="workflow-tab-count">{count}</span>
+    </span>
+  );
 
   useEffect(() => {
     loadWorkflows();
@@ -183,21 +199,33 @@ export default function WorkflowPage() {
   }
 
   return (
-    <div className="page-container">
-      <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
+    <div className="page-container workflow-page">
+      <Tabs
+        activeKey={activeTab}
+        onChange={setActiveTab}
+        items={[
         {
           key: 'list',
-          label: tText('workflow.workflowTab'),
+          label: renderTabLabel(tText('workflow.workflowTab'), workflowStats.total),
           children: (
             <>
-              <div className="page-header">
-                <h2>{tText('workflow.title')}</h2>
-                <Space>
+              <div className="workflow-section-header">
+                <div>
+                  <span className="workflow-eyebrow">{tText('workflow.workflowTab')}</span>
+                  <h3>{tText('workflow.workflowListTitle')}</h3>
+                  <p>{tText('workflow.workflowListDesc')}</p>
+                </div>
+                <div className="workflow-section-actions">
+                  {workflowStats.running > 0 && (
+                    <span className="workflow-running-pill">
+                      <ThunderboltOutlined /> {tText('workflow.runningCount', { count: workflowStats.running })}
+                    </span>
+                  )}
                   <Button disabled={executingWorkflowIds.length > 0} onClick={() => setCreateFromTemplateModalOpen(true)}>{tText('workflow.createFromTemplate')}</Button>
                   <Button type="primary" icon={<PlusOutlined />} disabled={executingWorkflowIds.length > 0} onClick={() => setCreateModalOpen(true)}>
                     {tText('workflow.createWorkflow')}
                   </Button>
-                </Space>
+                </div>
               </div>
 
               <WorkflowList
@@ -281,22 +309,30 @@ export default function WorkflowPage() {
         },
         {
           key: 'templates',
-          label: tText('workflow.templateTab'),
+          label: renderTabLabel(tText('workflow.templateTab'), workflowStats.templates),
           children: (
             <>
-              <div className="page-header"><h2>{tText('workflow.workflowTemplates')}</h2></div>
+              <div className="workflow-section-header">
+                <div>
+                  <span className="workflow-eyebrow">{tText('workflow.templateTab')}</span>
+                  <h3>{tText('workflow.workflowTemplates')}</h3>
+                  <p>{tText('workflow.templateDesc')}</p>
+                </div>
+              </div>
               <TemplateManager templates={templates} onLoad={loadTemplates} onUseTemplate={handleCreateFromTemplate} />
             </>
           ),
         },
         {
           key: 'scheduled',
-          label: tText('workflow.scheduledTab'),
+          label: renderTabLabel(tText('workflow.scheduledTab'), workflowStats.scheduled),
           children: (
             <ScheduledTaskManager workflows={workflows} tasks={scheduledTasks} onLoad={loadScheduledTasks} />
           ),
         },
-      ]} />
+        ]}
+        className="workflow-tabs"
+      />
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Button, Table, Modal, Form, Input, Select, Switch, Empty, Card, Popconfirm, message } from '../../components/ui';
-import { PlusOutlined } from '../../components/ui/icons';
+import { Button, Form, Input, Modal, Popconfirm, Select, Switch, Table, message } from '../../components/ui';
+import { ClockCircleOutlined, DeleteOutlined, PlusOutlined } from '../../components/ui/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from '../../i18n';
 import type { WorkflowRecord } from '../../stores/workflow';
@@ -68,10 +68,20 @@ export default function ScheduledTaskManager({ workflows, tasks, onLoad }: Props
   };
 
   const columns = [
-    { title: tText('scheduledTask.nameCol'), dataIndex: 'name', width: 200 },
+    {
+      title: tText('scheduledTask.nameCol'),
+      dataIndex: 'name',
+      width: 220,
+      render: (name: string) => (
+        <span className="workflow-table-name">
+          <ClockCircleOutlined />
+          <span title={name}>{name}</span>
+        </span>
+      ),
+    },
     {
       title: tText('scheduledTask.ruleCol'), dataIndex: 'cron', width: 200,
-      render: (c: string) => <code style={{ fontSize: 12 }}>{c}</code>,
+      render: (c: string) => <code className="workflow-inline-code">{c}</code>,
     },
     {
       title: tText('scheduledTask.workflowCol'), dataIndex: 'workflow_id', width: 200,
@@ -93,7 +103,7 @@ export default function ScheduledTaskManager({ workflows, tasks, onLoad }: Props
       title: tText('common.action'), width: 80,
       render: (_: unknown, r: ScheduledTask) => (
         <Popconfirm title={tText('scheduledTask.confirmDeleteTask')} onConfirm={() => handleDelete(r.id)}>
-          <Button size="small" danger icon={<PlusOutlined />} />
+          <Button size="small" danger icon={<DeleteOutlined />} />
         </Popconfirm>
       ),
     },
@@ -101,23 +111,30 @@ export default function ScheduledTaskManager({ workflows, tasks, onLoad }: Props
 
   return (
     <>
-      <div className="page-header">
-        <h2>{tText('scheduledTask.title')}</h2>
+      <div className="workflow-section-header">
+        <div>
+          <span className="workflow-eyebrow">{tText('workflow.scheduledTab')}</span>
+          <h3>{tText('scheduledTask.title')}</h3>
+          <p>{tText('scheduledTask.description')}</p>
+        </div>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => { form.resetFields(); setModalOpen(true); }}>
           {tText('scheduledTask.createTask')}
         </Button>
       </div>
 
       {tasks.length > 0 ? (
-        <Table rowKey="id" columns={columns} dataSource={tasks} size="small" />
+        <div className="workflow-table-panel">
+          <Table rowKey="id" columns={columns} dataSource={tasks} size="small" />
+        </div>
       ) : (
-        <Card>
-          <Empty description={tText('scheduledTask.noTasks')} image={Empty.PRESENTED_IMAGE_SIMPLE}>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
-              {tText('scheduledTask.createTaskBtn')}
-            </Button>
-          </Empty>
-        </Card>
+        <div className="workflow-empty-card workflow-empty-card-compact">
+          <div className="workflow-empty-visual"><ClockCircleOutlined /></div>
+          <h3>{tText('scheduledTask.noTasks')}</h3>
+          <p>{tText('scheduledTask.emptyDesc')}</p>
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setModalOpen(true)}>
+            {tText('scheduledTask.createTaskBtn')}
+          </Button>
+        </div>
       )}
 
       <Modal title={tText('scheduledTask.createModal')} open={modalOpen} onOk={handleAdd} onCancel={() => setModalOpen(false)} destroyOnHidden>

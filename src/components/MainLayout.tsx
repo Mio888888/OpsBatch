@@ -586,7 +586,6 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     hostForm.resetFields();
     hostForm.setFieldsValue({
       port: 22,
-      os: 'linux',
       authType: 'password',
       username: 'root',
       groupId: groupId ?? DEFAULT_GROUP_ID,
@@ -612,7 +611,6 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       username: host.username,
       password: editableSecret(host.password),
       privateKey: editableSecret(host.privateKey),
-      os: host.os,
       groupId: host.groupId ?? DEFAULT_GROUP_ID,
       remark: host.remark,
       jumpChain: host.jumpChain ?? [],
@@ -637,7 +635,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         username: values.username,
         password: submittedSecret(values.password),
         privateKey: submittedSecret(values.privateKey),
-        os: values.os,
+        os: 'linux',
         tags: values.tags ?? [],
         groupId: values.groupId && values.groupId !== DEFAULT_GROUP_ID ? values.groupId : undefined,
         remark: values.remark ?? '',
@@ -1312,12 +1310,6 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                   <div className="asset-host-form-grid asset-host-form-grid-name">
                     <Form.Item name="name" label={t('assets.hostName')} rules={[{ required: true, message: tText('common.required') }]}>
                       <Input placeholder={tText('assets.hostNamePlaceholder')} />
-                    </Form.Item>
-                    <Form.Item name="os" label={t('assets.system')} rules={[{ required: true, message: tText('common.required') }]}>
-                      <Select options={[
-                        { value: 'linux', label: 'Linux' },
-                        { value: 'windows', label: 'Windows' },
-                      ]} />
                     </Form.Item>
                   </div>
                   <div className="asset-host-form-grid asset-host-form-grid-address">

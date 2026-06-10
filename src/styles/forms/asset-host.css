@@ -49,7 +49,7 @@
 }
 
 .asset-host-form-grid-name {
-  grid-template-columns: minmax(0, 1fr) 92px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .asset-host-form-grid-address {

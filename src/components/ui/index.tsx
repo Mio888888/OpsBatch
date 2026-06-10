@@ -505,8 +505,16 @@ function bindField(child: ReactElement, name: FieldName, context: FormContextVal
   };
 
   if (propName === 'checked') {
-    nextProps.onCheckedChange = (checked: boolean) => context.setValue(name, checked);
-    nextProps.onChange = (event: ChangeEvent<HTMLInputElement>) => context.setValue(name, event.target.checked);
+    if (child.type === Switch) {
+      nextProps.onCheckedChange = (checked: boolean) => context.setValue(name, checked);
+    } else {
+      nextProps.onChange = (eventOrChecked: ChangeEvent<HTMLInputElement> | boolean) => {
+        context.setValue(
+          name,
+          typeof eventOrChecked === 'boolean' ? eventOrChecked : eventOrChecked.target.checked,
+        );
+      };
+    }
   } else if (child.type === Select) {
     nextProps.onChange = (value: unknown) => context.setValue(name, value);
   } else {

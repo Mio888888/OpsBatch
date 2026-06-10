@@ -66,6 +66,14 @@ function GlobalLogRoute() {
   );
 }
 
+function RdpRoute() {
+  return (
+    <div className="rdp-route-root">
+      <RdpPage />
+    </div>
+  );
+}
+
 function SettingsRoute() {
   return (
     <SettingsWindowFrame>
@@ -109,7 +117,8 @@ function AppContent() {
   const isBatchTransfer = location.pathname === '/batch-transfer';
   const isSettings = location.pathname === '/settings';
   const isGlobalLog = location.pathname === '/global-log';
-  const isStandalone = isEditor || isBatchTerminal || isBatchTransfer || isSettings || isGlobalLog;
+  const isRdp = location.pathname === '/rdp';
+  const isStandalone = isEditor || isBatchTerminal || isBatchTransfer || isSettings || isGlobalLog || isRdp;
   const isTerminal = !isStandalone && (
     location.pathname === '/terminal'
     || location.pathname === '/assets'
@@ -133,6 +142,7 @@ function AppContent() {
           <Route path="/batch-transfer" element={<BatchTransferRoute />} />
           <Route path="/settings" element={<SettingsRoute />} />
           <Route path="/global-log" element={<GlobalLogRoute />} />
+          <Route path="/rdp" element={<RdpRoute />} />
         </Routes>
       </Suspense>
     );
@@ -154,7 +164,6 @@ function AppContent() {
             <Route path="/quick-actions" element={<QuickActionsPage />} />
             <Route path="/workflow" element={<WorkflowPage />} />
             <Route path="/github" element={<GitHubPage />} />
-            <Route path="/rdp" element={<RdpPage />} />
           </Routes>
         </Suspense>
       )}

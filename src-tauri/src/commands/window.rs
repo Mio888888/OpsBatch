@@ -5,6 +5,7 @@ enum ManagedWindow {
     BatchTransfer,
     Settings,
     GlobalLog,
+    Rdp,
 }
 
 impl ManagedWindow {
@@ -14,16 +15,18 @@ impl ManagedWindow {
             "batch-transfer" => Ok(Self::BatchTransfer),
             "settings" => Ok(Self::Settings),
             "global-log" => Ok(Self::GlobalLog),
+            "rdp" => Ok(Self::Rdp),
             _ => Err("window kind is not allowed".to_string()),
         }
     }
 
-    fn label(&self) -> &'static str {
+    fn label(&self, host_ids: &[String]) -> Result<String, String> {
         match self {
-            Self::BatchTerminal => "batch-terminal",
-            Self::BatchTransfer => "batch-transfer",
-            Self::Settings => "settings",
-            Self::GlobalLog => "global-log",
+            Self::BatchTerminal => Ok("batch-terminal".to_string()),
+            Self::BatchTransfer => Ok("batch-transfer".to_string()),
+            Self::Settings => Ok("settings".to_string()),
+            Self::GlobalLog => Ok("global-log".to_string()),
+            Self::Rdp => Ok(format!("rdp-{}", encode_single_host_id(host_ids)?)),
         }
     }
 
@@ -33,6 +36,7 @@ impl ManagedWindow {
             Self::BatchTransfer => format!("批量传输 ({})", host_count),
             Self::Settings => "设置".to_string(),
             Self::GlobalLog => "全局日志".to_string(),
+            Self::Rdp => "RDP 远程桌面".to_string(),
         }
     }
 
@@ -48,6 +52,7 @@ impl ManagedWindow {
             )),
             Self::Settings => Ok("/settings".to_string()),
             Self::GlobalLog => Ok("/global-log".to_string()),
+            Self::Rdp => Ok(format!("/rdp?hostId={}", encode_single_host_id(host_ids)?)),
         }
     }
 
@@ -57,11 +62,12 @@ impl ManagedWindow {
             Self::BatchTransfer => (900.0, 700.0, 700.0, 550.0),
             Self::Settings => (900.0, 680.0, 760.0, 560.0),
             Self::GlobalLog => (720.0, 600.0, 500.0, 400.0),
+            Self::Rdp => (1280.0, 820.0, 760.0, 560.0),
         }
     }
 
     fn requires_hosts(&self) -> bool {
-        matches!(self, Self::BatchTerminal | Self::BatchTransfer)
+        matches!(self, Self::BatchTerminal | Self::BatchTransfer | Self::Rdp)
     }
 }
 
@@ -73,6 +79,13 @@ fn encode_host_ids(host_ids: &[String]) -> Result<String, String> {
         return Err("host id contains illegal characters".to_string());
     }
     Ok(host_ids.join(","))
+}
+
+fn encode_single_host_id(host_ids: &[String]) -> Result<String, String> {
+    if host_ids.len() != 1 {
+        return Err("exactly one host id is required".to_string());
+    }
+    encode_host_ids(host_ids)
 }
 
 fn is_safe_host_id(value: &str) -> bool {
@@ -110,8 +123,8 @@ pub async fn open_managed_window(
         return Err("host ids are required".to_string());
     }
 
-    let label = window.label();
-    if let Some(existing) = app.get_webview_window(label) {
+    let label = window.label(&host_ids)?;
+    if let Some(existing) = app.get_webview_window(&label) {
         crate::commands::diagnostics::append_diagnostic_log(
             app.app_handle(),
             "window",
@@ -141,7 +154,7 @@ pub async fn open_managed_window(
         );
 
         let mut builder =
-            WebviewWindowBuilder::new(&app_for_create, label, WebviewUrl::App(url.into()))
+            WebviewWindowBuilder::new(&app_for_create, label.clone(), WebviewUrl::App(url.into()))
                 .title(title)
                 .inner_size(width, height)
                 .min_inner_size(min_width, min_height)
@@ -196,5 +209,24 @@ mod tests {
             spa_entry_for_route("/batch-terminal?hostIds=a_b-1"),
             "index.html?route=%2Fbatch-terminal%3FhostIds%3Da_b-1"
         );
+    }
+
+    #[test]
+    fn rdp_window_uses_single_host_route_and_label() {
+        let host_ids = vec!["host_123-abc".to_string()];
+        let window = ManagedWindow::parse("rdp").unwrap();
+
+        assert_eq!(window.label(&host_ids).unwrap(), "rdp-host_123-abc");
+        assert_eq!(window.route(&host_ids).unwrap(), "/rdp?hostId=host_123-abc");
+        assert!(window.requires_hosts());
+    }
+
+    #[test]
+    fn rdp_window_rejects_multiple_host_ids() {
+        let host_ids = vec!["host-1".to_string(), "host-2".to_string()];
+        let window = ManagedWindow::parse("rdp").unwrap();
+
+        assert!(window.label(&host_ids).is_err());
+        assert!(window.route(&host_ids).is_err());
     }
 }

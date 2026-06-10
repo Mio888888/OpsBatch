@@ -1,17 +1,36 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, WheelEvent as ReactWheelEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Button, Empty, Spin } from '../../components/ui';
 import { CloseOutlined, ReloadOutlined } from '../../components/ui/icons';
+import WindowControls from '../../components/WindowControls';
+import { useAssetsStore } from '../../stores/assets';
 import { useTranslation } from '../../i18n';
-import { clamp, getOpenHostRequest, getScancodeForKey } from './rdpProtocol';
+import { clamp, getOpenHostRequest, getScancodeForKey, type OpenHostRequest } from './rdpProtocol';
 import { useRdpConnection } from './useRdpConnection';
 
 export default function RdpPage() {
   const { t, tText } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
-  const hostRequest = useMemo(() => getOpenHostRequest(location.state), [location.state]);
+  const hosts = useAssetsStore((s) => s.hosts);
+  const hostsLoading = useAssetsStore((s) => s.loading);
+  const loadHosts = useAssetsStore((s) => s.loadHosts);
+  const stateHostRequest = useMemo(() => getOpenHostRequest(location.state), [location.state]);
+  const queryHostId = useMemo(() => new URLSearchParams(location.search).get('hostId')?.trim() ?? '', [location.search]);
+  const hostRequest = useMemo<OpenHostRequest | undefined>(() => {
+    if (stateHostRequest) return stateHostRequest;
+    if (!queryHostId) return undefined;
+    const host = hosts.find((item) => item.id === queryHostId);
+    if (!host) return undefined;
+    return {
+      requestId: `rdp-window-${host.id}`,
+      hostId: host.id,
+      name: host.name,
+      ip: host.ip,
+    };
+  }, [hosts, queryHostId, stateHostRequest]);
   const [connectNonce, setConnectNonce] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -33,6 +52,12 @@ export default function RdpPage() {
     connectNonce,
     invalidFrameMessage: tText('rdp.invalidFrame'),
   });
+
+  useEffect(() => {
+    if (!stateHostRequest && queryHostId && hosts.length === 0) {
+      void loadHosts();
+    }
+  }, [hosts.length, loadHosts, queryHostId, stateHostRequest]);
 
   const getRemotePoint = useCallback((event: { clientX: number; clientY: number }) => {
     const canvas = canvasRef.current;
@@ -125,12 +150,26 @@ export default function RdpPage() {
   if (!hostRequest) {
     return (
       <section className="rdp-page rdp-page-empty">
+        <header
+          className="rdp-toolbar rdp-toolbar-empty"
+          onMouseDown={(e) => {
+            const target = e.target as HTMLElement;
+            if (target.closest('button')) return;
+            void getCurrentWindow().startDragging();
+          }}
+        >
+          <WindowControls className="rdp-window-controls" />
+          <div className="rdp-target">
+            <span className="rdp-target-name">{t('rdp.windowTitle')}</span>
+            <span className="rdp-target-meta">{queryHostId || t('rdp.state.idle')}</span>
+          </div>
+        </header>
         <Empty
           image={Empty.PRESENTED_IMAGE_SIMPLE}
           description={(
             <div className="rdp-empty-copy">
-              <strong>{t('rdp.emptyTitle')}</strong>
-              <span>{t('rdp.emptySubtitle')}</span>
+              <strong>{hostsLoading ? t('rdp.loadingHost') : t('rdp.emptyTitle')}</strong>
+              <span>{hostsLoading ? t('rdp.loadingHostSubtitle') : t('rdp.emptySubtitle')}</span>
               <Button type="primary" onClick={() => navigate('/terminal?assets=1')}>
                 {t('rdp.openAssets')}
               </Button>
@@ -146,7 +185,15 @@ export default function RdpPage() {
 
   return (
     <section className="rdp-page">
-      <header className="rdp-toolbar">
+      <header
+        className="rdp-toolbar"
+        onMouseDown={(e) => {
+          const target = e.target as HTMLElement;
+          if (target.closest('button')) return;
+          void getCurrentWindow().startDragging();
+        }}
+      >
+        <WindowControls className="rdp-window-controls" />
         <div className="rdp-target">
           <span className="rdp-target-name">{hostRequest.name}</span>
           <span className="rdp-target-meta">

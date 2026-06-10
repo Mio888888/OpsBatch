@@ -114,6 +114,7 @@ impl Database {
                 group_id TEXT,
                 remark TEXT DEFAULT '',
                 status TEXT DEFAULT 'unknown',
+                rdp_settings TEXT DEFAULT '{}',
                 created_at TEXT DEFAULT (datetime('now', 'localtime')),
                 updated_at TEXT DEFAULT (datetime('now', 'localtime'))
             );
@@ -348,10 +349,11 @@ impl Database {
                     group_id TEXT,
                     remark TEXT DEFAULT '',
                     status TEXT DEFAULT 'unknown',
+                    rdp_settings TEXT DEFAULT '{}',
                     created_at TEXT DEFAULT (datetime('now', 'localtime')),
                     updated_at TEXT DEFAULT (datetime('now', 'localtime'))
                 );
-                INSERT INTO hosts_new SELECT id, name, ip, port, auth_type, 'root' as username, NULL as password, NULL as private_key, os, tags, group_id, remark, status, created_at, updated_at FROM hosts;
+                INSERT INTO hosts_new SELECT id, name, ip, port, auth_type, 'root' as username, NULL as password, NULL as private_key, os, tags, group_id, remark, status, '{}', created_at, updated_at FROM hosts;
                 DROP TABLE hosts;
                 ALTER TABLE hosts_new RENAME TO hosts;
                 "
@@ -429,6 +431,19 @@ impl Database {
             > 0;
         if !has_jump_chain {
             conn.execute_batch("ALTER TABLE hosts ADD COLUMN jump_chain TEXT DEFAULT '[]';")
+                .map_err(|e| e.to_string())?;
+        }
+
+        let has_rdp_settings: bool = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('hosts') WHERE name='rdp_settings'",
+                [],
+                |row| row.get::<_, i32>(0),
+            )
+            .unwrap_or(0)
+            > 0;
+        if !has_rdp_settings {
+            conn.execute_batch("ALTER TABLE hosts ADD COLUMN rdp_settings TEXT DEFAULT '{}';")
                 .map_err(|e| e.to_string())?;
         }
 

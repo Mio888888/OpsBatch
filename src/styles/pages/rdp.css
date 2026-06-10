@@ -1,3 +1,10 @@
+.rdp-route-root {
+  height: 100%;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--color-surface);
+}
+
 .rdp-page {
   height: 100%;
   min-height: 0;
@@ -8,9 +15,11 @@
 }
 
 .rdp-page-empty {
-  align-items: center;
-  justify-content: center;
   padding: 24px;
+}
+
+.rdp-page-empty .ui-empty {
+  flex: 1;
 }
 
 .rdp-empty-copy {
@@ -28,14 +37,29 @@
 }
 
 .rdp-toolbar {
-  min-height: 46px;
+  min-height: 40px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: var(--workbench-window-controls-width) minmax(0, 1fr) auto auto;
   align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
+  gap: 10px;
+  padding: 0 12px;
   background: var(--color-surface);
   border-bottom: 1px solid var(--color-border);
+  -webkit-app-region: drag;
+}
+
+.rdp-toolbar-empty {
+  width: calc(100% + 48px);
+  margin: -24px -24px 24px;
+}
+
+.rdp-window-controls,
+.rdp-toolbar-actions {
+  -webkit-app-region: no-drag;
+}
+
+.rdp-window-controls {
+  justify-self: start;
 }
 
 .rdp-target {
@@ -54,7 +78,7 @@
 
 .rdp-target-name {
   color: var(--color-text);
-  font-size: var(--font-size-body);
+  font-size: var(--font-size-small);
   font-weight: var(--font-weight-bold);
 }
 
@@ -190,12 +214,19 @@
 
 @media (max-width: 720px) {
   .rdp-toolbar {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: var(--workbench-window-controls-width) minmax(0, 1fr);
     align-items: stretch;
+    height: auto;
+    padding: 8px 12px;
   }
 
   .rdp-toolbar-actions {
+    grid-column: 1 / -1;
     justify-content: flex-start;
     flex-wrap: wrap;
+  }
+
+  .rdp-status-pill {
+    justify-self: start;
   }
 }

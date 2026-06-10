@@ -27,6 +27,7 @@ pub struct Host {
     pub remark: String,
     pub status: String,
     pub jump_chain: String,
+    pub rdp_settings: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -46,6 +47,7 @@ pub struct UpdateHost {
     pub group_id: Option<String>,
     pub remark: Option<String>,
     pub jump_chain: Option<String>,
+    pub rdp_settings: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -588,7 +590,7 @@ pub async fn list_hosts(db: tauri::State<'_, Database>) -> Result<Vec<Host>, Str
     tokio::task::spawn_blocking(move || {
         let conn = conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, ip, port, auth_type, username, password, private_key, os, tags, group_id, remark, status, jump_chain, created_at, updated_at FROM hosts ORDER BY name"
+            "SELECT id, name, ip, port, auth_type, username, password, private_key, os, tags, group_id, remark, status, jump_chain, COALESCE(rdp_settings, '{}'), created_at, updated_at FROM hosts ORDER BY name"
         ).map_err(|e| e.to_string())?;
 
         let hosts = stmt
@@ -608,8 +610,9 @@ pub async fn list_hosts(db: tauri::State<'_, Database>) -> Result<Vec<Host>, Str
                     remark: row.get(11)?,
                     status: row.get(12)?,
                     jump_chain: row.get::<_, Option<String>>(13)?.unwrap_or_else(|| "[]".to_string()),
-                    created_at: row.get(14)?,
-                    updated_at: row.get(15)?,
+                    rdp_settings: row.get::<_, Option<String>>(14)?.unwrap_or_else(|| "{}".to_string()),
+                    created_at: row.get(15)?,
+                    updated_at: row.get(16)?,
                 })
             })
             .map_err(|e| e.to_string())?
@@ -634,6 +637,7 @@ pub struct NewHost {
     pub group_id: Option<String>,
     pub remark: Option<String>,
     pub jump_chain: Option<String>,
+    pub rdp_settings: Option<String>,
 }
 
 #[tauri::command]
@@ -644,7 +648,7 @@ pub async fn add_host(db: tauri::State<'_, Database>, host: NewHost) -> Result<S
         let (password, private_key) = store_host_secrets(&id, host.password, host.private_key)?;
         let conn = conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
-            "INSERT INTO hosts (id, name, ip, port, auth_type, username, password, private_key, os, tags, group_id, remark, jump_chain) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            "INSERT INTO hosts (id, name, ip, port, auth_type, username, password, private_key, os, tags, group_id, remark, jump_chain, rdp_settings) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 id,
                 host.name,
@@ -659,6 +663,7 @@ pub async fn add_host(db: tauri::State<'_, Database>, host: NewHost) -> Result<S
                 host.group_id,
                 host.remark.unwrap_or_default(),
                 host.jump_chain.unwrap_or_else(|| "[]".into()),
+                host.rdp_settings.unwrap_or_else(|| "{}".into()),
             ],
         ).map_err(|e| e.to_string())?;
         Ok(id)
@@ -719,8 +724,8 @@ pub async fn update_host(
         {
             let conn = conn.lock().map_err(|e| e.to_string())?;
             conn.execute(
-                "UPDATE hosts SET name=?1, ip=?2, port=?3, auth_type=?4, username=?5, password=?6, private_key=?7, os=?8, tags=?9, group_id=?10, remark=?11, jump_chain=?12, updated_at=datetime('now','localtime') WHERE id=?13",
-                params![host.name, host.ip, host.port, host.auth_type, host.username, password, private_key, host.os, host.tags, host.group_id, host.remark, host.jump_chain.as_deref().unwrap_or("[]"), host.id],
+                "UPDATE hosts SET name=?1, ip=?2, port=?3, auth_type=?4, username=?5, password=?6, private_key=?7, os=?8, tags=?9, group_id=?10, remark=?11, jump_chain=?12, rdp_settings=?13, updated_at=datetime('now','localtime') WHERE id=?14",
+                params![host.name, host.ip, host.port, host.auth_type, host.username, password, private_key, host.os, host.tags, host.group_id, host.remark, host.jump_chain.as_deref().unwrap_or("[]"), host.rdp_settings.as_deref().unwrap_or("{}"), host.id],
             ).map_err(|e| e.to_string())?;
         }
         crate::commands::app_log::emit_log(

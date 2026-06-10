@@ -1,3 +1,5 @@
+mod audio;
+mod clipboard;
 mod config;
 mod frame;
 mod input;
@@ -8,6 +10,7 @@ mod types;
 
 use dashmap::DashMap;
 use rusqlite::params;
+use serde::Deserialize;
 use tauri::ipc::{Channel, Response};
 use tauri::Manager;
 use tokio::sync::{mpsc, oneshot};
@@ -20,7 +23,33 @@ use types::{RdpConnectionOptions, RdpCredentials};
 const DEFAULT_RDP_PORT: u16 = 3389;
 const DEFAULT_DESKTOP_WIDTH: u16 = 1280;
 const DEFAULT_DESKTOP_HEIGHT: u16 = 720;
+const MIN_DESKTOP_WIDTH: u16 = 640;
+const MIN_DESKTOP_HEIGHT: u16 = 480;
+const MAX_DESKTOP_WIDTH: u16 = 3840;
+const MAX_DESKTOP_HEIGHT: u16 = 2160;
 pub(super) const RDP_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+struct StoredRdpSettings {
+    domain: Option<String>,
+    desktop_width: Option<u16>,
+    desktop_height: Option<u16>,
+    enable_clipboard: Option<bool>,
+    enable_audio: Option<bool>,
+    map_disk: Option<bool>,
+    disk_path: Option<String>,
+}
+
+struct HostRdpFields {
+    host: String,
+    port: i32,
+    auth_type: String,
+    username: String,
+    password: Option<String>,
+    os: String,
+    settings: StoredRdpSettings,
+}
 
 pub(super) enum RdpSessionCommand {
     Input(RdpInputEvent),
@@ -127,18 +156,23 @@ pub async fn rdp_connect(
     request: RdpConnectRequest,
     frame_channel: Channel<Response>,
 ) -> Result<RdpConnectResponse, String> {
-    let (host, port, auth_type, username, password, os) =
-        load_host_rdp_fields(&app, &request.host_id)?;
-    if !os.trim().eq_ignore_ascii_case("windows") {
+    let host_fields = load_host_rdp_fields(&app, &request.host_id)?;
+    if !host_fields.os.trim().eq_ignore_ascii_case("windows") {
         return Err("RDP 连接仅支持 Windows 主机".to_string());
     }
-    if auth_type != "password" {
+    if host_fields.auth_type != "password" {
         return Err("RDP 当前仅支持密码认证".to_string());
     }
 
-    let password = crate::commands::hosts::resolve_host_password(&request.host_id, password)?;
-    let credentials = normalize_credentials(&username, password)?;
-    let options = normalize_rdp_options(&request, &host, Some(port))?;
+    let password =
+        crate::commands::hosts::resolve_host_password(&request.host_id, host_fields.password)?;
+    let credentials = normalize_credentials(&host_fields.username, password)?;
+    let options = normalize_rdp_options(
+        &request,
+        &host_fields.host,
+        Some(host_fields.port),
+        &host_fields.settings,
+    )?;
 
     app.state::<RdpManager>()
         .connect(app.clone(), options, credentials, frame_channel)
@@ -162,24 +196,24 @@ pub async fn rdp_disconnect(
     manager.disconnect(&session_id).await
 }
 
-fn load_host_rdp_fields(
-    app: &tauri::AppHandle,
-    host_id: &str,
-) -> Result<(String, i32, String, String, Option<String>, String), String> {
+fn load_host_rdp_fields(app: &tauri::AppHandle, host_id: &str) -> Result<HostRdpFields, String> {
     let db = app.state::<Database>();
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.query_row(
-        "SELECT ip, port, auth_type, username, password, os FROM hosts WHERE id=?1",
+        "SELECT ip, port, auth_type, username, password, os, COALESCE(rdp_settings, '{}') FROM hosts WHERE id=?1",
         params![host_id],
         |row| {
-            Ok((
-                row.get(0)?,
-                row.get(1)?,
-                row.get(2)?,
-                row.get(3)?,
-                row.get(4)?,
-                row.get(5)?,
-            ))
+            let settings_json = row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "{}".to_string());
+            let settings = serde_json::from_str(&settings_json).unwrap_or_default();
+            Ok(HostRdpFields {
+                host: row.get(0)?,
+                port: row.get(1)?,
+                auth_type: row.get(2)?,
+                username: row.get(3)?,
+                password: row.get(4)?,
+                os: row.get(5)?,
+                settings,
+            })
         },
     )
     .map_err(|e| format!("host not found: {}", e))
@@ -189,6 +223,7 @@ fn normalize_rdp_options(
     request: &RdpConnectRequest,
     host: &str,
     stored_port: Option<i32>,
+    settings: &StoredRdpSettings,
 ) -> Result<RdpConnectionOptions, String> {
     let host = host.trim();
     if host.is_empty() {
@@ -201,6 +236,23 @@ fn normalize_rdp_options(
         _ => DEFAULT_RDP_PORT,
     };
 
+    let width = settings
+        .desktop_width
+        .or(request.width)
+        .unwrap_or(DEFAULT_DESKTOP_WIDTH)
+        .clamp(MIN_DESKTOP_WIDTH, MAX_DESKTOP_WIDTH);
+    let height = settings
+        .desktop_height
+        .or(request.height)
+        .unwrap_or(DEFAULT_DESKTOP_HEIGHT)
+        .clamp(MIN_DESKTOP_HEIGHT, MAX_DESKTOP_HEIGHT);
+    let domain = settings
+        .domain
+        .clone()
+        .or_else(|| request.domain.clone())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
     Ok(RdpConnectionOptions {
         host_id: request.host_id.clone(),
         session_id: request
@@ -209,12 +261,11 @@ fn normalize_rdp_options(
             .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         host: host.to_string(),
         port,
-        width: request.width.unwrap_or(DEFAULT_DESKTOP_WIDTH).max(1),
-        height: request.height.unwrap_or(DEFAULT_DESKTOP_HEIGHT).max(1),
-        domain: request
-            .domain
-            .clone()
-            .filter(|value| !value.trim().is_empty()),
+        width,
+        height,
+        domain,
+        enable_clipboard: settings.enable_clipboard.unwrap_or(true),
+        enable_audio: settings.enable_audio.unwrap_or(false),
     })
 }
 

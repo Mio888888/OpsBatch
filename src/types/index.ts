@@ -1,3 +1,13 @@
+export interface RdpSettings {
+  domain?: string;
+  desktopWidth?: number;
+  desktopHeight?: number;
+  enableClipboard?: boolean;
+  enableAudio?: boolean;
+  mapDisk?: boolean;
+  diskPath?: string;
+}
+
 export interface Host {
   id: string;
   name: string;
@@ -12,6 +22,7 @@ export interface Host {
   remark: string;
   groupId?: string;
   jumpChain: string[];
+  rdpSettings?: RdpSettings;
   createdAt: string;
   updatedAt: string;
 }

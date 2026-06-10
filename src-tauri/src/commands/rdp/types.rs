@@ -29,6 +29,8 @@ pub(super) struct RdpConnectionOptions {
     pub width: u16,
     pub height: u16,
     pub domain: Option<String>,
+    pub enable_clipboard: bool,
+    pub enable_audio: bool,
 }
 
 #[derive(Debug, Clone)]

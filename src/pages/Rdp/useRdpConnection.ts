@@ -6,6 +6,7 @@ import {
   createRdpSessionId,
   decodeRdpFramePayload,
   disconnectRdpSession,
+  drainRdpFrameBatch,
   getDesktopRequestSize,
   getErrorMessage,
   type OpenHostRequest,
@@ -29,6 +30,7 @@ const RDP_CANVAS_CONTEXT_OPTIONS: CanvasRenderingContext2DSettings = {
   alpha: false,
   desynchronized: true,
 };
+const RDP_MAX_FRAMES_PER_PAINT = 8;
 
 export function useRdpConnection({
   hostRequest,
@@ -86,21 +88,27 @@ export function useRdpConnection({
   const flushFrames = useCallback(() => {
     drawFrameRequestRef.current = null;
     const frames = pendingFramesRef.current;
-    pendingFramesRef.current = [];
+    const batch = drainRdpFrameBatch(frames, RDP_MAX_FRAMES_PER_PAINT);
 
-    let drewFrame = false;
-    for (const frame of frames) {
-      drewFrame = drawFrame(frame) || drewFrame;
+    let drewFrameCount = 0;
+    for (const frame of batch) {
+      if (drawFrame(frame)) {
+        drewFrameCount += 1;
+      }
     }
 
-    if (drewFrame && !hasFrameRef.current) {
+    if (frames.length > 0) {
+      drawFrameRequestRef.current = window.requestAnimationFrame(flushFrames);
+    }
+
+    if (drewFrameCount > 0 && !hasFrameRef.current) {
       hasFrameRef.current = true;
       setHasFrame(true);
     }
-    if (drewFrame) {
+    if (drewFrameCount > 0) {
       const now = performance.now();
       const stats = frameStatsRef.current;
-      stats.frames += 1;
+      stats.frames += drewFrameCount;
       if (stats.lastUpdate === 0) {
         stats.lastUpdate = now;
       }

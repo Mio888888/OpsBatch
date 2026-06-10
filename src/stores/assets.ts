@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
-import type { Host, AssetGroup, HostMonitorNetwork, HostMonitorSnapshot, Tag } from '../types';
+import type { Host, AssetGroup, HostMonitorNetwork, HostMonitorSnapshot, RdpSettings, Tag } from '../types';
 
 interface BackendHost {
   id: string;
@@ -17,6 +17,7 @@ interface BackendHost {
   remark: string;
   status: string;
   jump_chain: string;
+  rdp_settings?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -70,6 +71,62 @@ function mapHostMonitorNetwork(network: BackendHostMonitorNetwork): HostMonitorN
     rxBytes: network.rx_bytes,
     txBytes: network.tx_bytes,
   };
+}
+
+function parseRdpSettings(value?: string | null): RdpSettings | undefined {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as Partial<RdpSettings>;
+    const settings: RdpSettings = {};
+    if (typeof parsed.domain === 'string' && parsed.domain.trim()) {
+      settings.domain = parsed.domain.trim();
+    }
+    if (typeof parsed.desktopWidth === 'number' && Number.isFinite(parsed.desktopWidth)) {
+      settings.desktopWidth = parsed.desktopWidth;
+    }
+    if (typeof parsed.desktopHeight === 'number' && Number.isFinite(parsed.desktopHeight)) {
+      settings.desktopHeight = parsed.desktopHeight;
+    }
+    if (typeof parsed.enableClipboard === 'boolean') {
+      settings.enableClipboard = parsed.enableClipboard;
+    }
+    if (typeof parsed.enableAudio === 'boolean') {
+      settings.enableAudio = parsed.enableAudio;
+    }
+    if (typeof parsed.mapDisk === 'boolean') {
+      settings.mapDisk = parsed.mapDisk;
+    }
+    if (typeof parsed.diskPath === 'string' && parsed.diskPath.trim()) {
+      settings.diskPath = parsed.diskPath.trim();
+    }
+    return Object.keys(settings).length > 0 ? settings : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function serializeRdpSettings(settings?: RdpSettings): string {
+  const normalized: RdpSettings = {};
+  if (settings?.domain?.trim()) normalized.domain = settings.domain.trim();
+  if (typeof settings?.desktopWidth === 'number' && Number.isFinite(settings.desktopWidth)) {
+    normalized.desktopWidth = settings.desktopWidth;
+  }
+  if (typeof settings?.desktopHeight === 'number' && Number.isFinite(settings.desktopHeight)) {
+    normalized.desktopHeight = settings.desktopHeight;
+  }
+  if (typeof settings?.enableClipboard === 'boolean') {
+    normalized.enableClipboard = settings.enableClipboard;
+  }
+  if (typeof settings?.enableAudio === 'boolean') {
+    normalized.enableAudio = settings.enableAudio;
+  }
+  if (typeof settings?.mapDisk === 'boolean') {
+    normalized.mapDisk = settings.mapDisk;
+  }
+  if (settings?.diskPath?.trim()) {
+    normalized.diskPath = settings.diskPath.trim();
+  }
+  return JSON.stringify(normalized);
 }
 
 interface AssetsState {
@@ -131,6 +188,7 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
         groupId: h.group_id ?? undefined,
         remark: h.remark,
         jumpChain: JSON.parse(h.jump_chain || '[]'),
+        rdpSettings: parseRdpSettings(h.rdp_settings),
         createdAt: h.created_at,
         updatedAt: h.updated_at,
       }));
@@ -157,6 +215,7 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
       group_id: host.groupId ?? null,
       remark: host.remark,
       jump_chain: JSON.stringify(host.jumpChain ?? []),
+      rdp_settings: serializeRdpSettings(host.rdpSettings),
     };
     try {
       await invoke('add_host', { host: backend });
@@ -181,6 +240,7 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
       group_id: host.groupId ?? null,
       remark: host.remark,
       jump_chain: JSON.stringify(host.jumpChain ?? []),
+      rdp_settings: serializeRdpSettings(host.rdpSettings),
     };
     console.info('[host-secret] invoke update_host', {
       hostId: host.id,

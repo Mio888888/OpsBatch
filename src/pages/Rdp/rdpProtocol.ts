@@ -129,6 +129,14 @@ export function decodeRdpFramePayload(message: ArrayBuffer | Uint8Array): RdpFra
   };
 }
 
+export function drainRdpFrameBatch<T>(queue: T[], budget: number): T[] {
+  if (!Number.isFinite(budget) || budget <= 0 || queue.length === 0) {
+    return [];
+  }
+
+  return queue.splice(0, Math.min(queue.length, Math.floor(budget)));
+}
+
 export function getScancodeForKey(key: string): { code: number; extended: boolean } | undefined {
   const map: Record<string, { code: number; extended: boolean }> = {
     Backspace: { code: 0x0e, extended: false },

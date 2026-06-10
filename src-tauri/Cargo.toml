@@ -21,9 +21,11 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 tokio = { version = "1", features = ["full"] }
 russh = { version = "=0.61.1", features = ["aws-lc-rs"] }
 russh-sftp = "2.3"
-ironrdp = { version = "0.15", features = ["connector", "session", "input", "graphics"] }
+ironrdp = { version = "0.15", features = ["connector", "session", "input", "graphics", "svc", "cliprdr", "rdpsnd"] }
 ironrdp-tokio = { version = "0.9", features = ["reqwest"] }
 ironrdp-tls = { version = "0.2", features = ["rustls"] }
+arboard = { version = "3.6", default-features = false }
+rodio = { version = "0.22", default-features = false, features = ["playback"] }
 portable-pty = "0.9"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4"] }

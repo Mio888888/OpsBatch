@@ -39,11 +39,17 @@ pub(super) fn build_ironrdp_config(
         enable_server_pointer: false,
         request_data: None,
         autologon: true,
-        enable_audio_playback: false,
-        compression_type: Some(CompressionType::Rdp6),
+        enable_audio_playback: options.enable_audio,
+        compression_type: Some(CompressionType::Rdp61),
         pointer_software_rendering: true,
         multitransport_flags: None,
-        performance_flags: PerformanceFlags::default(),
+        performance_flags: PerformanceFlags::DISABLE_WALLPAPER
+            | PerformanceFlags::DISABLE_FULLWINDOWDRAG
+            | PerformanceFlags::DISABLE_MENUANIMATIONS
+            | PerformanceFlags::DISABLE_THEMING
+            | PerformanceFlags::DISABLE_CURSOR_SHADOW
+            | PerformanceFlags::DISABLE_CURSORSETTINGS
+            | PerformanceFlags::ENABLE_FONT_SMOOTHING,
         desktop_scale_factor: 0,
         hardware_id: None,
         license_cache: None,

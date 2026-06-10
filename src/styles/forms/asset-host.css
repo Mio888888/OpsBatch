@@ -64,6 +64,10 @@
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
 }
 
+.asset-host-form-grid-rdp {
+  grid-template-columns: minmax(0, 1fr) 96px 96px;
+}
+
 .asset-host-form .ui-form-item {
   min-width: 0;
   margin: 0;
@@ -110,8 +114,93 @@
   position: relative;
 }
 
+.asset-host-tabs .ui-tabs-list {
+  margin-bottom: 10px;
+}
+
+.asset-host-tabs .ui-tabs-content {
+  min-height: 234px;
+}
+
+.asset-host-tab-pane {
+  display: grid;
+  gap: 10px;
+}
+
+.asset-host-rdp-settings {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.asset-host-rdp-settings-header {
+  display: grid;
+  gap: 3px;
+}
+
+.asset-host-rdp-settings-header span {
+  color: var(--color-text);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-bold);
+}
+
+.asset-host-rdp-settings-header small {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-compact);
+}
+
+[data-theme-tone="dark"] .asset-host-rdp-settings {
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-settings-card-bg));
+  border-color: var(--color-settings-border);
+}
+
+.asset-host-rdp-options {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px 12px;
+  align-items: center;
+  padding-top: 2px;
+}
+
+.asset-host-rdp-option.ui-form-item {
+  width: 38px;
+  margin: 0;
+}
+
+.asset-host-rdp-option-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.asset-host-rdp-option-copy span {
+  color: var(--color-text);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+}
+
+.asset-host-rdp-option-copy small {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-compact);
+}
+
 .asset-host-form .ui-form-extra {
   color: var(--color-text-muted);
   font-size: var(--font-size-small);
   line-height: var(--line-height-compact);
+}
+
+@media (max-width: 620px) {
+  .asset-host-form-grid-name,
+  .asset-host-form-grid-address,
+  .asset-host-form-grid-auth,
+  .asset-host-form-grid-meta,
+  .asset-host-form-grid-rdp {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

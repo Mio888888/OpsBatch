@@ -1,8 +1,11 @@
+use std::net::SocketAddr;
 use std::time::Duration;
 
-use ironrdp::connector::{ClientConnector, ServerName};
+use ironrdp::cliprdr::CliprdrClient;
+use ironrdp::connector::{ClientConnector, Config, ServerName};
 use ironrdp::graphics::image_processing::PixelFormat;
 use ironrdp::input::Database as InputDatabase;
+use ironrdp::rdpsnd::client::Rdpsnd;
 use ironrdp::session::image::DecodedImage;
 use ironrdp::session::{ActiveStage, ActiveStageOutput, GracefulDisconnectReason};
 use ironrdp_tokio::reqwest::ReqwestNetworkClient;
@@ -12,6 +15,10 @@ use tauri::Emitter;
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 
+use super::audio::PcmAudioHandler;
+use super::clipboard::{
+    text_clipboard_formats, ClipboardAction, ClipboardBridge, TextClipboardBackend,
+};
 use super::config::build_ironrdp_config;
 use super::frame::{build_frame_message, FramePacer, QueuedFrame};
 use super::input::input_operations;
@@ -24,12 +31,14 @@ use super::{RdpSessionCommand, RDP_CONNECT_TIMEOUT};
 type RdpFramed = MovableTokioFramed<ironrdp_tls::TlsStream<TcpStream>>;
 const RDP_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 const RDP_METRICS_INTERVAL: Duration = Duration::from_secs(1);
+const RDP_CLIPBOARD_POLL_INTERVAL: Duration = Duration::from_millis(300);
 
 struct ConnectedRdpSession {
     framed: RdpFramed,
     active_stage: ActiveStage,
     image: DecodedImage,
     input: InputDatabase,
+    clipboard: Option<ClipboardBridge>,
     width: u16,
     height: u16,
 }
@@ -150,8 +159,10 @@ async fn connect_rdp_session(
         .local_addr()
         .map_err(|e| format!("获取本地 RDP 地址失败: {e}"))?;
     let config = build_ironrdp_config(options, credentials)?;
+    let clipboard = options.enable_clipboard.then(ClipboardBridge::new);
     let mut framed = TokioFramed::new(tcp);
-    let mut connector = ClientConnector::new(config, client_addr);
+    let mut connector =
+        build_client_connector_with_clipboard(config, client_addr, options, clipboard.clone())?;
 
     let should_upgrade = tokio::time::timeout(
         RDP_CONNECT_TIMEOUT,
@@ -202,9 +213,49 @@ async fn connect_rdp_session(
         active_stage,
         image,
         input: InputDatabase::new(),
+        clipboard,
         width,
         height,
     })
+}
+
+#[cfg(test)]
+pub(super) fn build_client_connector(
+    config: Config,
+    client_addr: SocketAddr,
+    options: &RdpConnectionOptions,
+) -> Result<ClientConnector, String> {
+    build_client_connector_with_clipboard(config, client_addr, options, None)
+}
+
+fn build_client_connector_with_clipboard(
+    config: Config,
+    client_addr: SocketAddr,
+    options: &RdpConnectionOptions,
+    clipboard: Option<ClipboardBridge>,
+) -> Result<ClientConnector, String> {
+    let mut connector = ClientConnector::new(config, client_addr);
+    if options.enable_clipboard {
+        let bridge = clipboard.unwrap_or_else(ClipboardBridge::new);
+        connector.attach_static_channel(CliprdrClient::new(Box::new(TextClipboardBackend::new(
+            bridge,
+        ))));
+    }
+    if options.enable_audio {
+        connector.attach_static_channel(Rdpsnd::new(Box::new(PcmAudioHandler::new())));
+    }
+    Ok(connector)
+}
+
+#[cfg(test)]
+pub(super) fn rdp_static_channel_names(connector: &ClientConnector) -> Vec<String> {
+    let mut names = connector
+        .static_channels
+        .values()
+        .filter_map(|channel| channel.channel_name().as_str().map(str::to_string))
+        .collect::<Vec<_>>();
+    names.sort();
+    names
 }
 
 async fn run_active_session(
@@ -216,6 +267,8 @@ async fn run_active_session(
 ) -> Result<(), String> {
     let mut frame_pacer = FramePacer::new(RDP_FRAME_INTERVAL);
     let mut metrics = RdpMetrics::new(tokio::time::Instant::now());
+    let mut clipboard_interval = tokio::time::interval(RDP_CLIPBOARD_POLL_INTERVAL);
+    clipboard_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         let frame_deadline = frame_pacer.next_deadline();
@@ -242,9 +295,13 @@ async fn run_active_session(
                 if !handle_stage_outputs(app, session_id, session, &frame_channel, &mut frame_pacer, &mut metrics, outputs).await? {
                     return Ok(());
                 }
+                flush_clipboard_actions(session).await?;
             }
             _ = sleep_until_deadline(frame_deadline), if frame_deadline.is_some() => {
                 flush_due_graphics_update(&frame_channel, session, &mut frame_pacer, &mut metrics)?;
+            }
+            _ = clipboard_interval.tick(), if session.clipboard.is_some() => {
+                poll_local_clipboard(session).await?;
             }
         }
         metrics.emit_if_due(app, session_id, tokio::time::Instant::now());
@@ -255,6 +312,51 @@ async fn sleep_until_deadline(deadline: Option<tokio::time::Instant>) {
     if let Some(deadline) = deadline {
         tokio::time::sleep_until(deadline).await;
     }
+}
+
+async fn poll_local_clipboard(session: &mut ConnectedRdpSession) -> Result<(), String> {
+    if let Some(clipboard) = session.clipboard.clone() {
+        clipboard.poll_local_clipboard();
+    }
+    flush_clipboard_actions(session).await
+}
+
+async fn flush_clipboard_actions(session: &mut ConnectedRdpSession) -> Result<(), String> {
+    let Some(clipboard) = session.clipboard.as_ref() else {
+        return Ok(());
+    };
+
+    for action in clipboard.drain_actions() {
+        let messages = {
+            let cliprdr = session
+                .active_stage
+                .get_svc_processor_mut::<CliprdrClient>()
+                .ok_or_else(|| "RDP 剪贴板通道不可用".to_string())?;
+            match action {
+                ClipboardAction::AdvertiseText(enabled) => cliprdr
+                    .initiate_copy(&text_clipboard_formats(enabled))
+                    .map_err(|e| format!("生成 RDP 剪贴板格式列表失败: {e}"))?,
+                ClipboardAction::RequestRemoteText(format) => cliprdr
+                    .initiate_paste(format)
+                    .map_err(|e| format!("生成 RDP 剪贴板粘贴请求失败: {e}"))?,
+                ClipboardAction::SendTextResponse(response) => cliprdr
+                    .submit_format_data(response)
+                    .map_err(|e| format!("生成 RDP 剪贴板文本响应失败: {e}"))?,
+            }
+        };
+
+        let frame = session
+            .active_stage
+            .process_svc_processor_messages(messages)
+            .map_err(|e| format!("编码 RDP 剪贴板帧失败: {e}"))?;
+        session
+            .framed
+            .write_all(&frame)
+            .await
+            .map_err(|e| format!("发送 RDP 剪贴板帧失败: {e}"))?;
+    }
+
+    Ok(())
 }
 
 async fn process_input_event(
@@ -400,16 +502,19 @@ fn send_graphics_update(
     metrics: &mut RdpMetrics,
     frame: QueuedFrame,
 ) -> Result<(), String> {
-    let message = build_frame_message(
-        session.width,
-        session.height,
-        session.image.data(),
-        frame.region,
-    )?;
-    metrics.record_sent_frame(message.len(), frame.coalesced_updates);
-    frame_channel
-        .send(Response::new(message))
-        .map_err(|e| format!("发送 RDP 图像帧失败: {e}"))
+    let mut coalesced_updates = frame.coalesced_updates;
+
+    for region in frame.regions {
+        let message =
+            build_frame_message(session.width, session.height, session.image.data(), region)?;
+        metrics.record_sent_frame(message.len(), coalesced_updates);
+        coalesced_updates = 0;
+        frame_channel
+            .send(Response::new(message))
+            .map_err(|e| format!("发送 RDP 图像帧失败: {e}"))?;
+    }
+
+    Ok(())
 }
 
 fn emit_status(app: &tauri::AppHandle, session_id: &str, state: &str, message: Option<String>) {

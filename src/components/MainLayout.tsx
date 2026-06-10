@@ -26,6 +26,8 @@ import {
   Popconfirm,
   Select,
   Spin,
+  Switch,
+  Tabs,
   Tooltip,
   Tree,
   TreeSelect,
@@ -209,11 +211,22 @@ interface HostFormValues {
   groupId?: string;
   remark?: string;
   jumpChain?: string[];
+  rdpDomain?: string;
+  rdpDesktopWidth?: number;
+  rdpDesktopHeight?: number;
+  rdpEnableClipboard?: boolean;
+  rdpEnableAudio?: boolean;
+  rdpMapDisk?: boolean;
+  rdpDiskPath?: string;
 }
 
 const DEFAULT_GROUP_ID = '__default__';
 const DEFAULT_SSH_PORT = 22;
 const DEFAULT_RDP_PORT = 3389;
+const MIN_RDP_DESKTOP_WIDTH = 640;
+const MIN_RDP_DESKTOP_HEIGHT = 480;
+const MAX_RDP_DESKTOP_WIDTH = 3840;
+const MAX_RDP_DESKTOP_HEIGHT = 2160;
 const GROUP_DROP_ID_PREFIX = 'asset-group:';
 const HOST_DRAG_ID_PREFIX = 'asset-host:';
 const SECRET_PLACEHOLDER = '***keychain***';
@@ -247,6 +260,29 @@ function hostFormStoresSecret(host: Pick<Host, 'password' | 'privateKey'>) {
 
 function isWindowsHost(host: Pick<Host, 'os'>) {
   return host.os === 'windows';
+}
+
+function normalizeRdpDesktopValue(value: unknown, min: number, max: number) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
+
+function buildRdpSettings(values: HostFormValues, os: Host['os']): Host['rdpSettings'] {
+  if (os !== 'windows') return undefined;
+  const domain = values.rdpDomain?.trim();
+  const desktopWidth = normalizeRdpDesktopValue(values.rdpDesktopWidth, MIN_RDP_DESKTOP_WIDTH, MAX_RDP_DESKTOP_WIDTH);
+  const desktopHeight = normalizeRdpDesktopValue(values.rdpDesktopHeight, MIN_RDP_DESKTOP_HEIGHT, MAX_RDP_DESKTOP_HEIGHT);
+  const settings: NonNullable<Host['rdpSettings']> = {};
+  if (domain) settings.domain = domain;
+  if (desktopWidth) settings.desktopWidth = desktopWidth;
+  if (desktopHeight) settings.desktopHeight = desktopHeight;
+  settings.enableClipboard = values.rdpEnableClipboard ?? true;
+  settings.enableAudio = values.rdpEnableAudio ?? false;
+  settings.mapDisk = values.rdpMapDisk ?? false;
+  if (settings.mapDisk && values.rdpDiskPath?.trim()) {
+    settings.diskPath = values.rdpDiskPath.trim();
+  }
+  return Object.keys(settings).length > 0 ? settings : undefined;
 }
 
 function getGroupDropId(groupId: string) {
@@ -405,6 +441,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
   const [assetExpandedKeys, setAssetExpandedKeys] = useState<Key[]>([]);
   const [userCollapsedKeys, setUserCollapsedKeys] = useState<Set<string>>(new Set());
   const [hostModalOpen, setHostModalOpen] = useState(false);
+  const [hostModalTab, setHostModalTab] = useState('basic');
   const [editingHost, setEditingHost] = useState<Host | null>(null);
   const [cloudImportOpen, setCloudImportOpen] = useState(false);
   const [hostForm] = Form.useForm<HostFormValues>();
@@ -477,8 +514,18 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     window.setTimeout(() => {
       if (lastOpenHostRef.current === host.id) lastOpenHostRef.current = '';
     }, 300);
+    if (isWindowsHost(host)) {
+      try {
+        await invoke('open_managed_window', { kind: 'rdp', hostIds: [host.id] });
+        closeAssetPanel();
+      } catch (e: unknown) {
+        message.error(tText('common.operationFailed', { error: String(e) }));
+      }
+      return;
+    }
+
     closeAssetPanel();
-    navigate(isWindowsHost(host) ? '/rdp' : '/terminal', {
+    navigate('/terminal', {
       state: {
         openHost: {
           requestId: `${host.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -488,7 +535,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         },
       },
     });
-  }, [closeAssetPanel, navigate, requestKeychainNotice]);
+  }, [closeAssetPanel, navigate, requestKeychainNotice, tText]);
 
   const hostIdSet = useMemo(() => new Set(hosts.map((h) => h.id)), [hosts]);
 
@@ -598,7 +645,15 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       username: 'root',
       groupId: groupId ?? DEFAULT_GROUP_ID,
       remark: '',
+      rdpDomain: '',
+      rdpDesktopWidth: 1280,
+      rdpDesktopHeight: 720,
+      rdpEnableClipboard: true,
+      rdpEnableAudio: false,
+      rdpMapDisk: false,
+      rdpDiskPath: '',
     });
+    setHostModalTab('basic');
     setHostModalOpen(true);
   }, [hostForm]);
 
@@ -624,7 +679,15 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       groupId: host.groupId ?? DEFAULT_GROUP_ID,
       remark: host.remark,
       jumpChain: hostOs === 'windows' ? [] : host.jumpChain ?? [],
+      rdpDomain: host.rdpSettings?.domain ?? '',
+      rdpDesktopWidth: host.rdpSettings?.desktopWidth ?? 1280,
+      rdpDesktopHeight: host.rdpSettings?.desktopHeight ?? 720,
+      rdpEnableClipboard: host.rdpSettings?.enableClipboard ?? true,
+      rdpEnableAudio: host.rdpSettings?.enableAudio ?? false,
+      rdpMapDisk: host.rdpSettings?.mapDisk ?? false,
+      rdpDiskPath: host.rdpSettings?.diskPath ?? '',
     });
+    setHostModalTab('basic');
     setHostModalOpen(true);
   }, [hostForm]);
 
@@ -645,6 +708,21 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       hostForm.setFieldValue('authType', 'password');
       hostForm.setFieldValue('privateKey', undefined);
       hostForm.setFieldValue('jumpChain', []);
+      if (!hostForm.getFieldValue('rdpDesktopWidth')) {
+        hostForm.setFieldValue('rdpDesktopWidth', 1280);
+      }
+      if (!hostForm.getFieldValue('rdpDesktopHeight')) {
+        hostForm.setFieldValue('rdpDesktopHeight', 720);
+      }
+      if (hostForm.getFieldValue('rdpEnableClipboard') === undefined) {
+        hostForm.setFieldValue('rdpEnableClipboard', true);
+      }
+      if (hostForm.getFieldValue('rdpEnableAudio') === undefined) {
+        hostForm.setFieldValue('rdpEnableAudio', false);
+      }
+      if (hostForm.getFieldValue('rdpMapDisk') === undefined) {
+        hostForm.setFieldValue('rdpMapDisk', false);
+      }
       return;
     }
 
@@ -654,6 +732,9 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     if (currentUsername === 'Administrator') {
       hostForm.setFieldValue('username', 'root');
     }
+    hostForm.setFieldValue('rdpDomain', '');
+    hostForm.setFieldValue('rdpDiskPath', '');
+    setHostModalTab('basic');
   }, [hostForm]);
 
   const closeHostModal = useCallback(() => {
@@ -680,6 +761,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         groupId: values.groupId && values.groupId !== DEFAULT_GROUP_ID ? values.groupId : undefined,
         remark: values.remark ?? '',
         jumpChain: os === 'windows' ? [] : values.jumpChain ?? [],
+        rdpSettings: buildRdpSettings(values, os),
       };
       console.info('[host-secret] submit host form', {
         hostId: editingHost?.id ?? '(new)',
@@ -1351,110 +1433,136 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                 destroyOnHidden
               >
                 <Form form={hostForm} layout="vertical" className="asset-host-form">
-                  {/* ── 连接信息 ── */}
-                  <div className="asset-host-form-grid asset-host-form-grid-name">
-                    <Form.Item name="name" label={t('assets.hostName')} rules={[{ required: true, message: tText('common.required') }]}>
-                      <Input placeholder={tText('assets.hostNamePlaceholder')} />
-                    </Form.Item>
-                    <Form.Item noStyle shouldUpdate>
-                      {({ getFieldValue }) => {
-                        const os = (getFieldValue('os') as Host['os'] | undefined) ?? 'linux';
-                        return (
-                          <Form.Item label={t('assets.system')}>
-                            <Select<Host['os']>
-                              value={os}
-                              options={[
-                                { value: 'linux', label: t('assets.linuxHost') },
-                                { value: 'windows', label: t('assets.windowsHost') },
-                              ]}
-                              onChange={handleHostOsChange}
-                            />
-                          </Form.Item>
-                        );
-                      }}
-                    </Form.Item>
-                  </div>
-                  <div className="asset-host-form-grid asset-host-form-grid-address">
-                    <Form.Item name="ip" label={t('assets.hostAddress')} rules={[{ required: true, message: tText('common.required') }]}>
-                      <Input placeholder={tText('assets.hostAddressPlaceholder')} />
-                    </Form.Item>
-                    <Form.Item name="port" label={t('assets.port')} rules={[{ required: true, message: tText('common.required') }]}>
-                      <InputNumber min={1} max={65535} />
-                    </Form.Item>
-                  </div>
-
-                  {/* ── 认证 ── */}
-                  <div className="asset-host-form-grid asset-host-form-grid-auth">
-                    <Form.Item noStyle shouldUpdate>
-                      {({ getFieldValue }) => {
-                        const os = (getFieldValue('os') as Host['os'] | undefined) ?? 'linux';
-                        return (
-                          <Form.Item name="authType" label={t('assets.auth')} rules={[{ required: true, message: tText('common.required') }]}>
-                            <Select<Host['authType']> options={[
-                              { value: 'password', label: t('assets.passwordAuth') },
-                              ...(os === 'windows' ? [] : [{ value: 'key' as const, label: t('assets.keyAuth') }]),
-                            ]} />
-                          </Form.Item>
-                        );
-                      }}
-                    </Form.Item>
-                    <Form.Item noStyle shouldUpdate>
-                      {({ getFieldValue }) => {
-                        const os = (getFieldValue('os') as Host['os'] | undefined) ?? 'linux';
-                        return (
-                          <Form.Item name="username" label={t('assets.username')} rules={[{ required: true, message: tText('common.required') }]}>
-                            <Input placeholder={os === 'windows' ? 'Administrator' : 'root'} />
-                          </Form.Item>
-                        );
-                      }}
-                    </Form.Item>
-                    <Form.Item noStyle shouldUpdate>
-                      {({ getFieldValue }) => {
-                        const os = (getFieldValue('os') as Host['os'] | undefined) ?? 'linux';
-                        const authType = getFieldValue('authType');
-                        if (os !== 'windows' && authType === 'key') {
-                          return (
-                            <Form.Item name="privateKey" label={t('assets.sshPrivateKey')}>
-                              <Input.TextArea rows={1} placeholder={tText('assets.pastePrivateKey')} />
-                            </Form.Item>
-                          );
-                        }
-                        return (
-                          <Form.Item name="password" label={t('assets.password')}>
-                            <Input.Password placeholder={editingHost ? tText('assets.passwordKeepPlaceholder') : tText('assets.passwordPlaceholder')} />
-                          </Form.Item>
-                        );
-                      }}
-                    </Form.Item>
-                  </div>
-
-                  {/* ── 元数据 ── */}
-                  <div className="asset-host-form-grid asset-host-form-grid-meta">
-                    <Form.Item name="groupId" label={t('assets.group')}>
-                      <TreeSelect
-                        options={groupTreeData}
-                        placeholder={tText('assets.selectGroup')}
-                      />
-                    </Form.Item>
-                    <Form.Item name="remark" label={t('assets.remark')}>
-                      <Input placeholder={tText('assets.remarkPlaceholder')} />
-                    </Form.Item>
-                  </div>
-
-                  {/* ── 跳板链 ── */}
                   <Form.Item noStyle shouldUpdate>
                     {({ getFieldValue }) => {
                       const os = (getFieldValue('os') as Host['os'] | undefined) ?? 'linux';
-                      if (os === 'windows') return null;
+                      const mapDisk = Boolean(getFieldValue('rdpMapDisk'));
+                      const basicTab = (
+                        <div className="asset-host-tab-pane">
+                          <div className="asset-host-form-grid asset-host-form-grid-name">
+                            <Form.Item name="name" label={t('assets.hostName')} rules={[{ required: true, message: tText('common.required') }]}>
+                              <Input placeholder={tText('assets.hostNamePlaceholder')} />
+                            </Form.Item>
+                            <Form.Item label={t('assets.system')}>
+                              <Select<Host['os']>
+                                value={os}
+                                options={[
+                                  { value: 'linux', label: t('assets.linuxHost') },
+                                  { value: 'windows', label: t('assets.windowsHost') },
+                                ]}
+                                onChange={handleHostOsChange}
+                              />
+                            </Form.Item>
+                          </div>
+                          <div className="asset-host-form-grid asset-host-form-grid-address">
+                            <Form.Item name="ip" label={t('assets.hostAddress')} rules={[{ required: true, message: tText('common.required') }]}>
+                              <Input placeholder={tText('assets.hostAddressPlaceholder')} />
+                            </Form.Item>
+                            <Form.Item name="port" label={t('assets.port')} rules={[{ required: true, message: tText('common.required') }]}>
+                              <InputNumber min={1} max={65535} />
+                            </Form.Item>
+                          </div>
+                          <div className="asset-host-form-grid asset-host-form-grid-auth">
+                            <Form.Item name="authType" label={t('assets.auth')} rules={[{ required: true, message: tText('common.required') }]}>
+                              <Select<Host['authType']> options={[
+                                { value: 'password', label: t('assets.passwordAuth') },
+                                ...(os === 'windows' ? [] : [{ value: 'key' as const, label: t('assets.keyAuth') }]),
+                              ]} />
+                            </Form.Item>
+                            <Form.Item name="username" label={t('assets.username')} rules={[{ required: true, message: tText('common.required') }]}>
+                              <Input placeholder={os === 'windows' ? 'Administrator' : 'root'} />
+                            </Form.Item>
+                            {os !== 'windows' && getFieldValue('authType') === 'key' ? (
+                              <Form.Item name="privateKey" label={t('assets.sshPrivateKey')}>
+                                <Input.TextArea rows={1} placeholder={tText('assets.pastePrivateKey')} />
+                              </Form.Item>
+                            ) : (
+                              <Form.Item name="password" label={t('assets.password')}>
+                                <Input.Password placeholder={editingHost ? tText('assets.passwordKeepPlaceholder') : tText('assets.passwordPlaceholder')} />
+                              </Form.Item>
+                            )}
+                          </div>
+                          <div className="asset-host-form-grid asset-host-form-grid-meta">
+                            <Form.Item name="groupId" label={t('assets.group')}>
+                              <TreeSelect
+                                options={groupTreeData}
+                                placeholder={tText('assets.selectGroup')}
+                              />
+                            </Form.Item>
+                            <Form.Item name="remark" label={t('assets.remark')}>
+                              <Input placeholder={tText('assets.remarkPlaceholder')} />
+                            </Form.Item>
+                          </div>
+
+                          {os === 'windows' ? null : (
+                            <Form.Item name="jumpChain" label={t('assets.jumpChain')} extra={t('assets.jumpChainExtra')} className="asset-host-form-jump">
+                              <Select
+                                mode="multiple"
+                                allowClear
+                                placeholder={tText('assets.directNoJump')}
+                                options={hosts.filter((h) => h.os === 'linux').map((h) => ({ value: h.id, label: `${h.name} (${h.ip})` }))}
+                              />
+                            </Form.Item>
+                          )}
+                        </div>
+                      );
+                      const rdpTab = (
+                        <div className="asset-host-tab-pane asset-host-rdp-settings">
+                          <div className="asset-host-rdp-settings-header">
+                            <span>{t('assets.rdpAdvanced')}</span>
+                            <small>{t('assets.rdpAdvancedExtra')}</small>
+                          </div>
+                          <div className="asset-host-form-grid asset-host-form-grid-rdp">
+                            <Form.Item name="rdpDomain" label={t('assets.rdpDomain')}>
+                              <Input placeholder={tText('assets.rdpDomainPlaceholder')} />
+                            </Form.Item>
+                            <Form.Item name="rdpDesktopWidth" label={t('assets.rdpDesktopWidth')}>
+                              <InputNumber min={MIN_RDP_DESKTOP_WIDTH} max={MAX_RDP_DESKTOP_WIDTH} />
+                            </Form.Item>
+                            <Form.Item name="rdpDesktopHeight" label={t('assets.rdpDesktopHeight')}>
+                              <InputNumber min={MIN_RDP_DESKTOP_HEIGHT} max={MAX_RDP_DESKTOP_HEIGHT} />
+                            </Form.Item>
+                          </div>
+                          <div className="asset-host-rdp-options">
+                            <Form.Item name="rdpEnableClipboard" valuePropName="checked" className="asset-host-rdp-option">
+                              <Switch />
+                            </Form.Item>
+                            <div className="asset-host-rdp-option-copy">
+                              <span>{t('assets.rdpEnableClipboard')}</span>
+                              <small>{t('assets.rdpEnableClipboardExtra')}</small>
+                            </div>
+                            <Form.Item name="rdpEnableAudio" valuePropName="checked" className="asset-host-rdp-option">
+                              <Switch />
+                            </Form.Item>
+                            <div className="asset-host-rdp-option-copy">
+                              <span>{t('assets.rdpEnableAudio')}</span>
+                              <small>{t('assets.rdpEnableAudioExtra')}</small>
+                            </div>
+                            <Form.Item name="rdpMapDisk" valuePropName="checked" className="asset-host-rdp-option">
+                              <Switch />
+                            </Form.Item>
+                            <div className="asset-host-rdp-option-copy">
+                              <span>{t('assets.rdpMapDisk')}</span>
+                              <small>{t('assets.rdpMapDiskExtra')}</small>
+                            </div>
+                          </div>
+                          {mapDisk ? (
+                            <Form.Item name="rdpDiskPath" label={t('assets.rdpDiskPath')}>
+                              <Input placeholder={tText('assets.rdpDiskPathPlaceholder')} />
+                            </Form.Item>
+                          ) : null}
+                        </div>
+                      );
                       return (
-                        <Form.Item name="jumpChain" label={t('assets.jumpChain')} extra={t('assets.jumpChainExtra')} className="asset-host-form-jump">
-                          <Select
-                            mode="multiple"
-                            allowClear
-                            placeholder={tText('assets.directNoJump')}
-                            options={hosts.filter((h) => h.os === 'linux').map((h) => ({ value: h.id, label: `${h.name} (${h.ip})` }))}
-                          />
-                        </Form.Item>
+                        <Tabs
+                          activeKey={hostModalTab}
+                          onChange={setHostModalTab}
+                          className="asset-host-tabs"
+                          items={[
+                            { key: 'basic', label: t('assets.hostBasicInfo'), children: basicTab },
+                            ...(os === 'windows' ? [{ key: 'rdp', label: t('assets.rdpAdvancedTab'), children: rdpTab }] : []),
+                          ]}
+                        />
                       );
                     }}
                   </Form.Item>

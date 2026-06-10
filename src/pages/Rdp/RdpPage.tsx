@@ -22,6 +22,8 @@ export default function RdpPage() {
     connectionState,
     statusMessage,
     hasFrame,
+    presentedFps,
+    metrics,
     sendInput,
     disconnectActive,
   } = useRdpConnection({
@@ -150,6 +152,8 @@ export default function RdpPage() {
           <span className="rdp-target-meta">
             {hostRequest.ip}
             {connection ? ` · ${connection.width}x${connection.height}` : null}
+            {presentedFps !== null ? ` · ${presentedFps} FPS` : null}
+            {metrics ? ` · srv ${metrics.serverUpdatesPerSecond}/s · tx ${metrics.sentFramesPerSecond}/s · ${metrics.sentMbytesPerSecond.toFixed(1)} MB/s` : null}
           </span>
         </div>
         <span className={`rdp-status-pill rdp-status-pill-${showError ? 'error' : connectionState}`}>

@@ -47,8 +47,16 @@ pub struct RdpStatusPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RdpFramePayload {
+pub struct RdpMetricsPayload {
     pub session_id: String,
+    pub server_updates_per_second: u32,
+    pub sent_frames_per_second: u32,
+    pub coalesced_updates_per_second: u32,
+    pub sent_mbytes_per_second: f64,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct RdpFramePayload {
     pub width: u16,
     pub height: u16,
     pub x: u16,
@@ -58,7 +66,7 @@ pub struct RdpFramePayload {
     pub rgba: Vec<u8>,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct RectRegion {
     pub x: u16,
     pub y: u16,
@@ -83,6 +91,24 @@ impl RectRegion {
             y: rect.top,
             width: rect.width(),
             height: rect.height(),
+        }
+    }
+
+    pub(super) fn union(self, other: Self) -> Self {
+        let left = self.x.min(other.x);
+        let top = self.y.min(other.y);
+        let right = u32::from(self.x)
+            .saturating_add(u32::from(self.width))
+            .max(u32::from(other.x).saturating_add(u32::from(other.width)));
+        let bottom = u32::from(self.y)
+            .saturating_add(u32::from(self.height))
+            .max(u32::from(other.y).saturating_add(u32::from(other.height)));
+
+        Self {
+            x: left,
+            y: top,
+            width: u16::try_from(right.saturating_sub(u32::from(left))).unwrap_or(u16::MAX),
+            height: u16::try_from(bottom.saturating_sub(u32::from(top))).unwrap_or(u16::MAX),
         }
     }
 }

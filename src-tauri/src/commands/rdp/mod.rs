@@ -8,6 +8,7 @@ mod types;
 
 use dashmap::DashMap;
 use rusqlite::params;
+use tauri::ipc::{Channel, Response};
 use tauri::Manager;
 use tokio::sync::{mpsc, oneshot};
 
@@ -53,6 +54,7 @@ impl RdpManager {
         app: tauri::AppHandle,
         options: RdpConnectionOptions,
         credentials: RdpCredentials,
+        frame_channel: Channel<Response>,
     ) -> Result<RdpConnectResponse, String> {
         if let Some((_, existing)) = self.sessions.remove(&options.session_id) {
             let _ = existing.sender.send(RdpSessionCommand::Disconnect);
@@ -68,6 +70,7 @@ impl RdpManager {
             credentials,
             command_rx,
             ready_tx,
+            frame_channel,
         ));
 
         let ready = match tokio::time::timeout(RDP_CONNECT_TIMEOUT, ready_rx).await {
@@ -122,6 +125,7 @@ impl RdpManager {
 pub async fn rdp_connect(
     app: tauri::AppHandle,
     request: RdpConnectRequest,
+    frame_channel: Channel<Response>,
 ) -> Result<RdpConnectResponse, String> {
     let (host, port, auth_type, username, password, os) =
         load_host_rdp_fields(&app, &request.host_id)?;
@@ -137,7 +141,7 @@ pub async fn rdp_connect(
     let options = normalize_rdp_options(&request, &host, Some(port))?;
 
     app.state::<RdpManager>()
-        .connect(app.clone(), options, credentials)
+        .connect(app.clone(), options, credentials, frame_channel)
         .await
 }
 

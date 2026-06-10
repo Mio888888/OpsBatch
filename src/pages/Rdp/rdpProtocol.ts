@@ -20,15 +20,22 @@ export interface RdpStatusPayload {
   message?: string | null;
 }
 
-export interface RdpFramePayload {
+export interface RdpMetricsPayload {
   sessionId: string;
+  serverUpdatesPerSecond: number;
+  sentFramesPerSecond: number;
+  coalescedUpdatesPerSecond: number;
+  sentMbytesPerSecond: number;
+}
+
+export interface RdpFramePayload {
   width: number;
   height: number;
   x: number;
   y: number;
   regionWidth: number;
   regionHeight: number;
-  rgba: number[];
+  rgba: Uint8ClampedArray;
 }
 
 export type RdpConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'terminated' | 'error' | string;
@@ -39,6 +46,12 @@ export type RdpInputEvent =
   | { type: 'wheel'; x: number; y: number; delta: number; vertical: boolean }
   | { type: 'key_scancode'; code: number; extended: boolean; down: boolean }
   | { type: 'unicode'; character: string; down: boolean };
+
+const MIN_DESKTOP_WIDTH = 640;
+const MIN_DESKTOP_HEIGHT = 480;
+const MAX_DESKTOP_WIDTH = 1920;
+const MAX_DESKTOP_HEIGHT = 1080;
+const RDP_FRAME_HEADER_BYTES = 16;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object';
@@ -74,10 +87,45 @@ export function getDesktopRequestSize(stage: HTMLElement | null) {
   const fallbackHeight = Math.max(480, (window.innerHeight || 800) - 76);
   const width = Math.round(rect?.width || fallbackWidth);
   const height = Math.round(rect?.height || fallbackHeight);
+  const scale = Math.min(1, MAX_DESKTOP_WIDTH / width, MAX_DESKTOP_HEIGHT / height);
 
   return {
-    width: clamp(width, 640, 3840),
-    height: clamp(height, 480, 2160),
+    width: clamp(Math.round(width * scale), MIN_DESKTOP_WIDTH, MAX_DESKTOP_WIDTH),
+    height: clamp(Math.round(height * scale), MIN_DESKTOP_HEIGHT, MAX_DESKTOP_HEIGHT),
+  };
+}
+
+export function decodeRdpFramePayload(message: ArrayBuffer | Uint8Array): RdpFramePayload {
+  const view = message instanceof Uint8Array
+    ? new DataView(message.buffer, message.byteOffset, message.byteLength)
+    : new DataView(message);
+  if (view.byteLength < RDP_FRAME_HEADER_BYTES) {
+    throw new Error('RDP frame header is incomplete');
+  }
+
+  const width = view.getUint16(0, true);
+  const height = view.getUint16(2, true);
+  const x = view.getUint16(4, true);
+  const y = view.getUint16(6, true);
+  const regionWidth = view.getUint16(8, true);
+  const regionHeight = view.getUint16(10, true);
+  const rgbaLength = view.getUint32(12, true);
+  const expectedLength = regionWidth * regionHeight * 4;
+  const bodyOffset = (message instanceof Uint8Array ? message.byteOffset : 0) + RDP_FRAME_HEADER_BYTES;
+  const buffer = message instanceof Uint8Array ? message.buffer : message;
+
+  if (rgbaLength !== expectedLength || view.byteLength !== RDP_FRAME_HEADER_BYTES + rgbaLength) {
+    throw new Error('RDP frame payload size is invalid');
+  }
+
+  return {
+    width,
+    height,
+    x,
+    y,
+    regionWidth,
+    regionHeight,
+    rgba: new Uint8ClampedArray(buffer, bodyOffset, rgbaLength),
   };
 }
 

@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import {
   createRdpSessionId,
+  decodeRdpFramePayload,
   disconnectRdpSession,
   getDesktopRequestSize,
   getErrorMessage,
@@ -12,6 +13,7 @@ import {
   type RdpConnectionState,
   type RdpFramePayload,
   type RdpInputEvent,
+  type RdpMetricsPayload,
   type RdpStatusPayload,
 } from './rdpProtocol';
 
@@ -22,6 +24,11 @@ interface UseRdpConnectionOptions {
   connectNonce: number;
   invalidFrameMessage: string;
 }
+
+const RDP_CANVAS_CONTEXT_OPTIONS: CanvasRenderingContext2DSettings = {
+  alpha: false,
+  desynchronized: true,
+};
 
 export function useRdpConnection({
   hostRequest,
@@ -34,11 +41,33 @@ export function useRdpConnection({
   const [connectionState, setConnectionState] = useState<RdpConnectionState>('idle');
   const [statusMessage, setStatusMessage] = useState<string | undefined>();
   const [hasFrame, setHasFrame] = useState(false);
+  const [presentedFps, setPresentedFps] = useState<number | null>(null);
+  const [metrics, setMetrics] = useState<RdpMetricsPayload | null>(null);
   const activeSessionIdRef = useRef<string | null>(null);
+  const hasFrameRef = useRef(false);
+  const pendingFramesRef = useRef<RdpFramePayload[]>([]);
+  const drawFrameRequestRef = useRef<number | null>(null);
+  const frameStatsRef = useRef({ frames: 0, lastUpdate: 0 });
+  const canvasContextRef = useRef<CanvasRenderingContext2D | null>(null);
+
+  const getCanvasContext = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+
+    const cached = canvasContextRef.current;
+    if (cached?.canvas === canvas) {
+      return { canvas, context: cached };
+    }
+
+    const context = canvas.getContext('2d', RDP_CANVAS_CONTEXT_OPTIONS);
+    canvasContextRef.current = context;
+    return context ? { canvas, context } : null;
+  }, [canvasRef]);
 
   const drawFrame = useCallback((payload: RdpFramePayload) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
+    const canvasContext = getCanvasContext();
+    if (!canvasContext) return false;
+    const { canvas, context } = canvasContext;
 
     if (canvas.width !== payload.width) canvas.width = payload.width;
     if (canvas.height !== payload.height) canvas.height = payload.height;
@@ -46,20 +75,50 @@ export function useRdpConnection({
     const expectedLength = payload.regionWidth * payload.regionHeight * 4;
     if (payload.rgba.length !== expectedLength) {
       setStatusMessage(invalidFrameMessage);
-      return;
+      return false;
     }
 
-    const context = canvas.getContext('2d');
-    if (!context) return;
-
-    const imageData = new ImageData(
-      new Uint8ClampedArray(payload.rgba),
-      payload.regionWidth,
-      payload.regionHeight,
-    );
+    const imageData = new ImageData(payload.rgba, payload.regionWidth, payload.regionHeight);
     context.putImageData(imageData, payload.x, payload.y);
-    setHasFrame(true);
-  }, [canvasRef, invalidFrameMessage]);
+    return true;
+  }, [getCanvasContext, invalidFrameMessage]);
+
+  const flushFrames = useCallback(() => {
+    drawFrameRequestRef.current = null;
+    const frames = pendingFramesRef.current;
+    pendingFramesRef.current = [];
+
+    let drewFrame = false;
+    for (const frame of frames) {
+      drewFrame = drawFrame(frame) || drewFrame;
+    }
+
+    if (drewFrame && !hasFrameRef.current) {
+      hasFrameRef.current = true;
+      setHasFrame(true);
+    }
+    if (drewFrame) {
+      const now = performance.now();
+      const stats = frameStatsRef.current;
+      stats.frames += 1;
+      if (stats.lastUpdate === 0) {
+        stats.lastUpdate = now;
+      }
+      const elapsed = now - stats.lastUpdate;
+      if (elapsed >= 1000) {
+        setPresentedFps(Math.round((stats.frames * 1000) / elapsed));
+        stats.frames = 0;
+        stats.lastUpdate = now;
+      }
+    }
+  }, [drawFrame]);
+
+  const enqueueFrame = useCallback((payload: RdpFramePayload) => {
+    pendingFramesRef.current.push(payload);
+    if (drawFrameRequestRef.current !== null) return;
+
+    drawFrameRequestRef.current = window.requestAnimationFrame(flushFrames);
+  }, [flushFrames]);
 
   const sendInput = useCallback((event: RdpInputEvent) => {
     const sessionId = activeSessionIdRef.current;
@@ -83,6 +142,12 @@ export function useRdpConnection({
       setConnectionState('idle');
       setStatusMessage(undefined);
       setHasFrame(false);
+      setPresentedFps(null);
+      setMetrics(null);
+      hasFrameRef.current = false;
+      pendingFramesRef.current = [];
+      frameStatsRef.current = { frames: 0, lastUpdate: 0 };
+      canvasContextRef.current = null;
       return undefined;
     }
 
@@ -96,12 +161,19 @@ export function useRdpConnection({
     setConnectionState('connecting');
     setStatusMessage(undefined);
     setHasFrame(false);
+    setPresentedFps(null);
+    setMetrics(null);
+    hasFrameRef.current = false;
+    pendingFramesRef.current = [];
+    frameStatsRef.current = { frames: 0, lastUpdate: 0 };
 
     const canvas = canvasRef.current;
     if (canvas) {
       canvas.width = width;
       canvas.height = height;
-      canvas.getContext('2d')?.clearRect(0, 0, width, height);
+      const context = canvas.getContext('2d', RDP_CANVAS_CONTEXT_OPTIONS);
+      canvasContextRef.current = context;
+      context?.clearRect(0, 0, width, height);
     }
 
     const start = async () => {
@@ -112,10 +184,20 @@ export function useRdpConnection({
       });
       unlistenFns.push(statusUnlisten);
 
-      const frameUnlisten = await listen<RdpFramePayload>(`rdp-frame-${sessionId}`, (event) => {
-        if (!disposed) drawFrame(event.payload);
+      const metricsUnlisten = await listen<RdpMetricsPayload>(`rdp-metrics-${sessionId}`, (event) => {
+        if (disposed) return;
+        setMetrics(event.payload);
       });
-      unlistenFns.push(frameUnlisten);
+      unlistenFns.push(metricsUnlisten);
+
+      const frameChannel = new Channel<ArrayBuffer | Uint8Array>((message) => {
+        if (disposed) return;
+        try {
+          enqueueFrame(decodeRdpFramePayload(message));
+        } catch {
+          setStatusMessage(invalidFrameMessage);
+        }
+      });
 
       if (disposed) return;
 
@@ -126,6 +208,7 @@ export function useRdpConnection({
           width,
           height,
         },
+        frameChannel,
       });
 
       if (disposed) {
@@ -152,16 +235,23 @@ export function useRdpConnection({
     return () => {
       disposed = true;
       unlistenFns.forEach((unlisten) => unlisten());
+      if (drawFrameRequestRef.current !== null) {
+        window.cancelAnimationFrame(drawFrameRequestRef.current);
+        drawFrameRequestRef.current = null;
+      }
+      pendingFramesRef.current = [];
       activeSessionIdRef.current = null;
       void disconnectRdpSession(sessionId);
     };
-  }, [canvasRef, connectNonce, drawFrame, hostRequest, stageRef]);
+  }, [canvasRef, connectNonce, enqueueFrame, hostRequest, invalidFrameMessage, stageRef]);
 
   return {
     connection,
     connectionState,
     statusMessage,
     hasFrame,
+    presentedFps,
+    metrics,
     sendInput,
     disconnectActive,
   };

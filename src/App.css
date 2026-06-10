@@ -1,3 +1,13 @@
+@font-face {
+  font-family: 'HarmonyOS Sans SC';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src:
+    url('./assets/font/HarmonyOS_Sans_SC_Medium.woff2') format('woff2'),
+    url('./assets/font/HarmonyOS_Sans_SC_Medium.woff') format('woff');
+}
+
 :root {
   --workbench-topbar-height: 38px;
   --workbench-titlebar-side-width: 236px;
@@ -33,8 +43,16 @@
   --radius-lg: 14px;
   --radius-xl: 18px;
   --window-radius: 20px;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
-    'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+  --font-sans: 'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+    'Segoe UI Symbol';
+  --font-sans-macos: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
+    'HarmonyOS Sans SC', 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji',
+    'Segoe UI Emoji', 'Segoe UI Symbol';
+  --font-sans-windows: 'HarmonyOS Sans SC', 'Segoe UI Variable', 'Segoe UI',
+    'Microsoft YaHei UI', 'Microsoft YaHei', Arial, sans-serif, 'Apple Color Emoji',
+    'Segoe UI Emoji', 'Segoe UI Symbol';
+  font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.5;
   -webkit-text-size-adjust: 100%;
@@ -42,8 +60,15 @@
   background-color: transparent;
 }
 
+:root[data-platform="macos"] {
+  font-family: var(--font-sans-macos);
+}
+
 :root[data-platform="windows"] {
   --window-radius: 0;
+  font-family: var(--font-sans-windows);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: auto;
   background-color: var(--color-workbench-bg);
   -webkit-text-size-adjust: 100%;
 }
@@ -62,6 +87,16 @@ html[data-platform="windows"] .workbench-topbar,
 html[data-platform="windows"] .workbench-shell,
 html[data-platform="windows"] .workbench-asset-panel,
 html[data-platform="windows"] .workbench-main-panel,
+html[data-platform="windows"] .standalone-window-frame,
+html[data-platform="windows"] .standalone-window-titlebar,
+html[data-platform="windows"] .standalone-window-content,
+html[data-platform="windows"] .settings-window-frame,
+html[data-platform="windows"] .settings-window-content,
+html[data-platform="windows"] .terminal-page-shell-active,
+html[data-platform="windows"] .terminal-panel-body,
+html[data-platform="windows"] .terminal-panel-main,
+html[data-platform="windows"] .terminal-view,
+html[data-platform="windows"] .terminal-context-menu,
 html[data-platform="windows"] .asset-ctx-menu {
   will-change: auto !important;
 }
@@ -6509,7 +6544,7 @@ body.bottom-panel-resizing * {
 }
 
 .command-exec-dialog-content {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-sans);
   font-size: 13px;
   color: var(--terminal-fg, #e0e0e0);
   padding: 20px 24px 16px;

@@ -18,7 +18,9 @@ export interface ThemeState {
   loaded: boolean;
 }
 
-export const DEFAULT_TERMINAL_FONT_FAMILY = '"Cascadia Code", Menlo, Monaco, "Courier New", monospace';
+const LEGACY_TERMINAL_FONT_FAMILY = '"Cascadia Code", Menlo, Monaco, "Courier New", monospace';
+export const DEFAULT_TERMINAL_FONT_FAMILY =
+  '"Cascadia Code", Consolas, "Lucida Console", Menlo, Monaco, "Courier New", monospace';
 
 const defaults: ThemeState = {
   themeMode: 'manual',
@@ -177,6 +179,7 @@ export function shouldReduceMotion(): boolean {
 
 export function normalizeTerminalFontFamily(value?: string | null): string {
   const trimmed = value?.trim();
+  if (trimmed === LEGACY_TERMINAL_FONT_FAMILY) return defaults.terminalFontFamily;
   return trimmed || defaults.terminalFontFamily;
 }
 

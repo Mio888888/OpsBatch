@@ -17,13 +17,20 @@ tauri = { version = "2", features = ["macos-private-api"] }
 tauri-plugin-dialog = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+bytes = "1"
 rusqlite = { version = "0.31", features = ["bundled"] }
 tokio = { version = "1", features = ["full"] }
 russh = { version = "=0.61.1", features = ["aws-lc-rs"] }
 russh-sftp = "2.3"
-ironrdp = { version = "0.15", features = ["connector", "session", "input", "graphics", "svc", "cliprdr", "rdpsnd"] }
+ironrdp = { version = "0.15", features = ["connector", "session", "input", "graphics", "svc", "dvc", "displaycontrol", "cliprdr", "rdpsnd"] }
+ironrdp-egfx = "0.1"
+ironrdp-dvc = { version = "0.6", features = ["opsbatch-diagnostics"] }
 ironrdp-tokio = { version = "0.9", features = ["reqwest"] }
 ironrdp-tls = { version = "0.2", features = ["rustls"] }
+webrtc = "0.17.1"
+media = { package = "webrtc-media", version = "0.17.1" }
+interceptor = "0.17.1"
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
 arboard = { version = "3.6", default-features = false }
 rodio = { version = "0.22", default-features = false, features = ["playback"] }
 portable-pty = "0.9"
@@ -46,6 +53,8 @@ keyring = { version = "3", features = ["windows-native", "sync-secret-service", 
 security-framework = "3"
 
 [patch.crates-io]
+ironrdp-egfx = { path = "vendor/ironrdp-egfx-0.1.0" }
+ironrdp-dvc = { path = "vendor/ironrdp-dvc-0.6.0" }
 ironrdp-connector = { path = "vendor/ironrdp-connector-0.9.0" }
 picky = { path = "vendor/picky-7.0.0-rc.23" }
 picky-krb = { path = "vendor/picky-krb-0.12.3" }

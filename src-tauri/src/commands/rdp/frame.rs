@@ -2,13 +2,16 @@ use std::time::Duration;
 
 use tokio::time::Instant;
 
-use super::types::{RdpFramePayload, RectRegion};
+#[cfg(test)]
+use super::types::RdpFramePayload;
+use super::types::{RdpBitmapFrame, RectRegion};
 
 pub(super) const FRAME_HEADER_LEN: usize = 16;
 const BYTES_PER_PIXEL: usize = 4;
 const MAX_PENDING_REGIONS: usize = 24;
 const MERGE_AREA_MULTIPLIER: u64 = 2;
 
+#[cfg(test)]
 pub(super) fn build_frame_payload(
     width: u16,
     height: u16,
@@ -69,6 +72,53 @@ pub(super) fn build_frame_message(
     }
 
     Ok(message)
+}
+
+pub(super) fn build_region_frame_message(frame: &RdpBitmapFrame) -> Result<Vec<u8>, String> {
+    validate_region_frame(frame)?;
+
+    let rgba_len =
+        u32::try_from(frame.rgba.len()).map_err(|_| "RDP framebuffer 更新区域过大".to_string())?;
+    let mut message = Vec::with_capacity(FRAME_HEADER_LEN + frame.rgba.len());
+
+    message.extend_from_slice(&frame.width.to_le_bytes());
+    message.extend_from_slice(&frame.height.to_le_bytes());
+    message.extend_from_slice(&frame.x.to_le_bytes());
+    message.extend_from_slice(&frame.y.to_le_bytes());
+    message.extend_from_slice(&frame.region_width.to_le_bytes());
+    message.extend_from_slice(&frame.region_height.to_le_bytes());
+    message.extend_from_slice(&rgba_len.to_le_bytes());
+    message.extend_from_slice(&frame.rgba);
+
+    Ok(message)
+}
+
+fn validate_region_frame(frame: &RdpBitmapFrame) -> Result<(), String> {
+    if frame.region_width == 0 || frame.region_height == 0 {
+        return Err("RDP framebuffer 更新区域为空".to_string());
+    }
+    let expected_len =
+        usize::from(frame.region_width) * usize::from(frame.region_height) * BYTES_PER_PIXEL;
+    if frame.rgba.len() != expected_len {
+        return Err(format!(
+            "RDP framebuffer 区域大小不匹配: expected={}, actual={}",
+            expected_len,
+            frame.rgba.len()
+        ));
+    }
+    let right = frame
+        .x
+        .checked_add(frame.region_width)
+        .ok_or_else(|| "RDP framebuffer 更新区域超出范围".to_string())?;
+    let bottom = frame
+        .y
+        .checked_add(frame.region_height)
+        .ok_or_else(|| "RDP framebuffer 更新区域超出范围".to_string())?;
+    if right > frame.width || bottom > frame.height {
+        return Err("RDP framebuffer 更新区域超出画面尺寸".to_string());
+    }
+
+    Ok(())
 }
 
 fn validate_frame_region(

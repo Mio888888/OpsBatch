@@ -3,29 +3,37 @@ use std::time::Duration;
 
 use ironrdp::cliprdr::CliprdrClient;
 use ironrdp::connector::{ClientConnector, Config, ServerName};
+use ironrdp::dvc::DrdynvcClient;
 use ironrdp::graphics::image_processing::PixelFormat;
 use ironrdp::input::Database as InputDatabase;
+#[cfg(test)]
+use ironrdp::pdu::nego::ResponseFlags;
 use ironrdp::rdpsnd::client::Rdpsnd;
 use ironrdp::session::image::DecodedImage;
 use ironrdp::session::{ActiveStage, ActiveStageOutput, GracefulDisconnectReason};
 use ironrdp_tokio::reqwest::ReqwestNetworkClient;
 use ironrdp_tokio::{FramedWrite as _, MovableTokioFramed, TokioFramed};
 use tauri::ipc::{Channel, Response};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 
-use super::audio::PcmAudioHandler;
+use super::audio::{PcmAudioHandler, WebRtcAudioHandler};
 use super::clipboard::{
     text_clipboard_formats, ClipboardAction, ClipboardBridge, TextClipboardBackend,
 };
 use super::config::build_ironrdp_config;
-use super::frame::{build_frame_message, FramePacer, QueuedFrame};
+use super::dynamic_channels::{display_control_client, geometry_sink, input_sink};
+use super::egfx::RdpEgfxBridge;
+use super::frame::{build_frame_message, build_region_frame_message, FramePacer, QueuedFrame};
 use super::input::input_operations;
+use super::rdpevor::{video_control_channel, video_data_channel};
 use super::types::{
-    RdpConnectResponse, RdpConnectionOptions, RdpCredentials, RdpMetricsPayload, RdpStatusPayload,
+    RdpBitmapFrame, RdpConnectResponse, RdpConnectionOptions, RdpCredentials, RdpEncodedAudioFrame,
+    RdpEncodedVideoFrame, RdpMetricsPayload, RdpStatusDetail, RdpStatusPayload, RdpTransportMode,
     RectRegion,
 };
+use super::webrtc::RdpWebRtcManager;
 use super::{RdpSessionCommand, RDP_CONNECT_TIMEOUT};
 
 type RdpFramed = MovableTokioFramed<ironrdp_tls::TlsStream<TcpStream>>;
@@ -39,8 +47,20 @@ struct ConnectedRdpSession {
     image: DecodedImage,
     input: InputDatabase,
     clipboard: Option<ClipboardBridge>,
+    encoded_video_rx: Vec<mpsc::UnboundedReceiver<RdpEncodedVideoFrame>>,
+    bitmap_rx: Vec<mpsc::UnboundedReceiver<RdpBitmapFrame>>,
+    status_rx: Vec<mpsc::UnboundedReceiver<RdpStatusDetail>>,
+    encoded_audio_rx: Option<mpsc::UnboundedReceiver<RdpEncodedAudioFrame>>,
     width: u16,
     height: u16,
+}
+
+struct ConnectorBundle {
+    connector: ClientConnector,
+    encoded_video_rx: Vec<mpsc::UnboundedReceiver<RdpEncodedVideoFrame>>,
+    bitmap_rx: Vec<mpsc::UnboundedReceiver<RdpBitmapFrame>>,
+    status_rx: Vec<mpsc::UnboundedReceiver<RdpStatusDetail>>,
+    encoded_audio_rx: Option<mpsc::UnboundedReceiver<RdpEncodedAudioFrame>>,
 }
 
 #[derive(Debug)]
@@ -50,6 +70,14 @@ struct RdpMetrics {
     sent_frames: u32,
     coalesced_updates: u32,
     sent_bytes: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg(test)]
+pub(super) struct NegotiationResponseFlagsDiagnostics {
+    pub(super) bits: u8,
+    pub(super) extended_client_data: bool,
+    pub(super) dynvc_gfx: bool,
 }
 
 impl RdpMetrics {
@@ -99,6 +127,17 @@ impl RdpMetrics {
     }
 }
 
+#[cfg(test)]
+pub(super) fn negotiation_response_flags_diagnostics(
+    flags: ResponseFlags,
+) -> NegotiationResponseFlagsDiagnostics {
+    NegotiationResponseFlagsDiagnostics {
+        bits: flags.bits(),
+        extended_client_data: flags.contains(ResponseFlags::EXTENDED_CLIENT_DATA_SUPPORTED),
+        dynvc_gfx: flags.contains(ResponseFlags::DYNVC_GFX_PROTOCOL_SUPPORTED),
+    }
+}
+
 pub(super) async fn run_rdp_session(
     app: tauri::AppHandle,
     options: RdpConnectionOptions,
@@ -109,12 +148,27 @@ pub(super) async fn run_rdp_session(
 ) {
     let session_id = options.session_id.clone();
     let mut ready = Some(ready);
-    emit_status(&app, &session_id, "connecting", None);
+    let connecting_message = if options.transport_mode == RdpTransportMode::H264Direct {
+        "正在进行 RDP TCP、TLS、NLA 与 EGFX 握手"
+    } else {
+        "正在进行 RDP TCP、TLS 与 NLA 握手"
+    };
+    emit_status(
+        &app,
+        &session_id,
+        "connecting",
+        Some(connecting_message.to_string()),
+    );
 
     let mut session = match connect_rdp_session(&options, &credentials).await {
         Ok(session) => session,
         Err(error) => {
+            eprintln!(
+                "[RDP][backend][{}] session_connect_error error={}",
+                session_id, error
+            );
             emit_status(&app, &session_id, "error", Some(error.clone()));
+            let _ = app.state::<RdpWebRtcManager>().close(&session_id).await;
             if let Some(tx) = ready.take() {
                 let _ = tx.send(Err(error));
             }
@@ -136,10 +190,16 @@ pub(super) async fn run_rdp_session(
     if let Err(error) =
         run_active_session(&app, &session_id, &mut session, command_rx, frame_channel).await
     {
+        eprintln!(
+            "[RDP][backend][{}] active_session_error error={}",
+            session_id, error
+        );
+        let _ = app.state::<RdpWebRtcManager>().close(&session_id).await;
         emit_status(&app, &session_id, "error", Some(error));
         return;
     }
 
+    let _ = app.state::<RdpWebRtcManager>().close(&session_id).await;
     emit_status(&app, &session_id, "disconnected", None);
 }
 
@@ -161,9 +221,13 @@ async fn connect_rdp_session(
     let config = build_ironrdp_config(options, credentials)?;
     let clipboard = options.enable_clipboard.then(ClipboardBridge::new);
     let mut framed = TokioFramed::new(tcp);
-    let mut connector =
-        build_client_connector_with_clipboard(config, client_addr, options, clipboard.clone())?;
-
+    let ConnectorBundle {
+        mut connector,
+        encoded_video_rx,
+        bitmap_rx,
+        status_rx,
+        encoded_audio_rx,
+    } = build_client_connector_with_clipboard(config, client_addr, options, clipboard.clone())?;
     let should_upgrade = tokio::time::timeout(
         RDP_CONNECT_TIMEOUT,
         ironrdp_tokio::connect_begin(&mut framed, &mut connector),
@@ -202,7 +266,6 @@ async fn connect_rdp_session(
     .await
     .map_err(|_| "RDP NLA/CredSSP 握手超时".to_string())?
     .map_err(|e| format!("RDP NLA/CredSSP 握手失败: {}", e.report()))?;
-
     let width = connection_result.desktop_size.width;
     let height = connection_result.desktop_size.height;
     let active_stage = ActiveStage::new(connection_result);
@@ -214,6 +277,10 @@ async fn connect_rdp_session(
         image,
         input: InputDatabase::new(),
         clipboard,
+        encoded_video_rx,
+        bitmap_rx,
+        status_rx,
+        encoded_audio_rx,
         width,
         height,
     })
@@ -226,6 +293,17 @@ pub(super) fn build_client_connector(
     options: &RdpConnectionOptions,
 ) -> Result<ClientConnector, String> {
     build_client_connector_with_clipboard(config, client_addr, options, None)
+        .map(|bundle| bundle.connector)
+}
+
+#[cfg(test)]
+pub(super) fn h264_direct_encoded_video_receiver_count_for_tests(
+    config: Config,
+    client_addr: SocketAddr,
+    options: &RdpConnectionOptions,
+) -> Result<usize, String> {
+    build_client_connector_with_clipboard(config, client_addr, options, None)
+        .map(|bundle| bundle.encoded_video_rx.len())
 }
 
 fn build_client_connector_with_clipboard(
@@ -233,8 +311,12 @@ fn build_client_connector_with_clipboard(
     client_addr: SocketAddr,
     options: &RdpConnectionOptions,
     clipboard: Option<ClipboardBridge>,
-) -> Result<ClientConnector, String> {
+) -> Result<ConnectorBundle, String> {
     let mut connector = ClientConnector::new(config, client_addr);
+    let mut encoded_video_rx = Vec::new();
+    let mut bitmap_rx = Vec::new();
+    let mut status_rx = Vec::new();
+    let mut encoded_audio_rx = None;
     if options.enable_clipboard {
         let bridge = clipboard.unwrap_or_else(ClipboardBridge::new);
         connector.attach_static_channel(CliprdrClient::new(Box::new(TextClipboardBackend::new(
@@ -242,9 +324,53 @@ fn build_client_connector_with_clipboard(
         ))));
     }
     if options.enable_audio {
-        connector.attach_static_channel(Rdpsnd::new(Box::new(PcmAudioHandler::new())));
+        if options.transport_mode == RdpTransportMode::H264Direct {
+            let (audio_handler, receiver) = WebRtcAudioHandler::new(options.session_id.clone());
+            connector.attach_static_channel(Rdpsnd::new(Box::new(audio_handler)));
+            encoded_audio_rx = Some(receiver);
+        } else {
+            connector.attach_static_channel(Rdpsnd::new(Box::new(PcmAudioHandler::new())));
+        }
     }
-    Ok(connector)
+    if options.transport_mode == RdpTransportMode::H264Direct {
+        let (egfx_client, egfx_receiver, egfx_bitmap_rx, egfx_status_rx) =
+            RdpEgfxBridge::new(options.session_id.clone());
+        let (rdpevor_data, rdpevor_receiver) = video_data_channel(options.session_id.clone());
+        connector.attach_static_channel(
+            DrdynvcClient::new()
+                .with_diagnostics_label(options.session_id.clone())
+                .with_dynamic_channel(egfx_client)
+                .with_dynamic_channel(display_control_client(options.session_id.clone()))
+                .with_listener(video_control_channel(options.session_id.clone()))
+                .with_listener(rdpevor_data)
+                .with_listener(geometry_sink(options.session_id.clone()))
+                .with_listener(input_sink(options.session_id.clone())),
+        );
+        encoded_video_rx.push(egfx_receiver);
+        encoded_video_rx.push(rdpevor_receiver);
+        bitmap_rx.push(egfx_bitmap_rx);
+        status_rx.push(egfx_status_rx);
+    }
+    Ok(ConnectorBundle {
+        connector,
+        encoded_video_rx,
+        bitmap_rx,
+        status_rx,
+        encoded_audio_rx,
+    })
+}
+
+#[cfg(test)]
+pub(super) fn build_h264_direct_drdynvc_for_tests(session_id: &str) -> DrdynvcClient {
+    let (egfx_client, _, _, _) = RdpEgfxBridge::new(session_id.to_string());
+    DrdynvcClient::new()
+        .with_diagnostics_label(session_id.to_string())
+        .with_dynamic_channel(egfx_client)
+        .with_dynamic_channel(display_control_client(session_id.to_string()))
+        .with_listener(video_control_channel(session_id.to_string()))
+        .with_listener(video_data_channel(session_id.to_string()).0)
+        .with_listener(geometry_sink(session_id.to_string()))
+        .with_listener(input_sink(session_id.to_string()))
 }
 
 #[cfg(test)]
@@ -280,7 +406,11 @@ async fn run_active_session(
                             return Ok(());
                         }
                     }
-                    Some(RdpSessionCommand::Disconnect) | None => {
+                    Some(RdpSessionCommand::Disconnect) => {
+                        flush_pending_graphics_update(&frame_channel, session, &mut frame_pacer, &mut metrics)?;
+                        return Ok(());
+                    }
+                    None => {
                         flush_pending_graphics_update(&frame_channel, session, &mut frame_pacer, &mut metrics)?;
                         return Ok(());
                     }
@@ -291,7 +421,7 @@ async fn run_active_session(
                 let outputs = session
                     .active_stage
                     .process(&mut session.image, action, &payload)
-                    .map_err(|e| format!("处理 RDP 帧失败: {e}"))?;
+                    .map_err(|e| format!("处理 RDP 帧失败: {}", e.report()))?;
                 if !handle_stage_outputs(app, session_id, session, &frame_channel, &mut frame_pacer, &mut metrics, outputs).await? {
                     return Ok(());
                 }
@@ -305,7 +435,119 @@ async fn run_active_session(
             }
         }
         metrics.emit_if_due(app, session_id, tokio::time::Instant::now());
+        forward_status_details(app, session_id, session).await?;
+        forward_bitmap_frames(&frame_channel, session, &mut metrics)?;
+        forward_encoded_video_frames(app, session).await?;
+        forward_encoded_audio_frames(app, session).await?;
     }
+}
+
+fn forward_bitmap_frames(
+    frame_channel: &Channel<Response>,
+    session: &mut ConnectedRdpSession,
+    metrics: &mut RdpMetrics,
+) -> Result<(), String> {
+    if session.bitmap_rx.is_empty() {
+        return Ok(());
+    }
+
+    let mut frames = Vec::new();
+    for bitmap_rx in &mut session.bitmap_rx {
+        while let Ok(frame) = bitmap_rx.try_recv() {
+            frames.push(frame);
+        }
+    }
+
+    for frame in frames {
+        let message = build_region_frame_message(&frame)?;
+        metrics.record_server_update();
+        metrics.record_sent_frame(message.len(), 1);
+        frame_channel
+            .send(Response::new(message))
+            .map_err(|e| format!("发送 RDPGFX bitmap 图像帧失败: {e}"))?;
+    }
+
+    Ok(())
+}
+
+async fn forward_status_details(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    session: &mut ConnectedRdpSession,
+) -> Result<(), String> {
+    if session.status_rx.is_empty() {
+        return Ok(());
+    }
+
+    let mut details = Vec::new();
+    for status_rx in &mut session.status_rx {
+        while let Ok(detail) = status_rx.try_recv() {
+            details.push(detail);
+        }
+    }
+
+    for detail in details {
+        let (state, message) = match &detail {
+            RdpStatusDetail::H264DirectUnavailable { reason } => {
+                ("h264DirectUnavailable", Some(reason.clone()))
+            }
+        };
+        emit_status_with_detail(app, session_id, state, message, Some(detail));
+    }
+
+    Ok(())
+}
+
+async fn forward_encoded_video_frames(
+    app: &tauri::AppHandle,
+    session: &mut ConnectedRdpSession,
+) -> Result<(), String> {
+    if session.encoded_video_rx.is_empty() {
+        return Ok(());
+    }
+
+    let mut frames = Vec::new();
+    for encoded_video_rx in &mut session.encoded_video_rx {
+        while let Ok(frame) = encoded_video_rx.try_recv() {
+            frames.push(frame);
+        }
+    }
+
+    if frames.is_empty() {
+        return Ok(());
+    }
+
+    let manager = app.state::<RdpWebRtcManager>();
+    for frame in frames {
+        manager.write_video_frame(frame).await?;
+    }
+
+    Ok(())
+}
+
+async fn forward_encoded_audio_frames(
+    app: &tauri::AppHandle,
+    session: &mut ConnectedRdpSession,
+) -> Result<(), String> {
+    let Some(encoded_audio_rx) = session.encoded_audio_rx.as_mut() else {
+        return Ok(());
+    };
+
+    let mut frames = Vec::new();
+    while let Ok(frame) = encoded_audio_rx.try_recv() {
+        frames.push(frame);
+    }
+
+    if frames.is_empty() {
+        return Ok(());
+    }
+
+    let manager = app.state::<RdpWebRtcManager>();
+    for frame in frames {
+        manager.write_audio_frame(frame).await?;
+    }
+
+    Ok(())
 }
 
 async fn sleep_until_deadline(deadline: Option<tokio::time::Instant>) {
@@ -518,10 +760,21 @@ fn send_graphics_update(
 }
 
 fn emit_status(app: &tauri::AppHandle, session_id: &str, state: &str, message: Option<String>) {
+    emit_status_with_detail(app, session_id, state, message, None);
+}
+
+fn emit_status_with_detail(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    state: &str,
+    message: Option<String>,
+    detail: Option<RdpStatusDetail>,
+) {
     let payload = RdpStatusPayload {
         session_id: session_id.to_string(),
         state: state.to_string(),
         message,
+        detail,
     };
     let _ = app.emit(&format!("rdp-status-{}", session_id), payload);
 }

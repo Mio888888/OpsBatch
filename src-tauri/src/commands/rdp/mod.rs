@@ -1,12 +1,16 @@
 mod audio;
 mod clipboard;
 mod config;
+mod dynamic_channels;
+mod egfx;
 mod frame;
 mod input;
 mod protocol;
+mod rdpevor;
 #[cfg(test)]
 mod tests;
 mod types;
+pub mod webrtc;
 
 use dashmap::DashMap;
 use rusqlite::params;
@@ -18,7 +22,8 @@ use tokio::sync::{mpsc, oneshot};
 use crate::db::Database;
 
 pub use types::{RdpConnectRequest, RdpConnectResponse, RdpInputEvent};
-use types::{RdpConnectionOptions, RdpCredentials};
+use types::{RdpConnectionOptions, RdpCredentials, RdpTransportMode, RdpVideoNegotiation};
+pub use webrtc::RdpWebRtcManager;
 
 const DEFAULT_RDP_PORT: u16 = 3389;
 const DEFAULT_DESKTOP_WIDTH: u16 = 1280;
@@ -105,14 +110,26 @@ impl RdpManager {
         let ready = match tokio::time::timeout(RDP_CONNECT_TIMEOUT, ready_rx).await {
             Ok(Ok(Ok(ready))) => ready,
             Ok(Ok(Err(error))) => {
+                eprintln!(
+                    "[RDP][backend][{}] manager_connect_ready_error error={}",
+                    session_id, error
+                );
                 task.abort();
                 return Err(error);
             }
             Ok(Err(_)) => {
+                eprintln!(
+                    "[RDP][backend][{}] manager_connect_task_exited_before_ready",
+                    session_id
+                );
                 task.abort();
                 return Err("RDP 连接任务在握手完成前退出".to_string());
             }
             Err(_) => {
+                eprintln!(
+                    "[RDP][backend][{}] manager_connect_ready_timeout",
+                    session_id
+                );
                 task.abort();
                 return Err("RDP 连接超时".to_string());
             }
@@ -173,6 +190,9 @@ pub async fn rdp_connect(
         Some(host_fields.port),
         &host_fields.settings,
     )?;
+    if let RdpVideoNegotiation::Unsupported { reason } = probe_h264_direct_support(&options) {
+        return Err(format!("RDP H.264 直通暂不可用: {reason}"));
+    }
 
     app.state::<RdpManager>()
         .connect(app.clone(), options, credentials, frame_channel)
@@ -253,6 +273,9 @@ fn normalize_rdp_options(
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
 
+    let transport_mode = request.transport_mode.unwrap_or_default();
+    let default_enable_audio = transport_mode == RdpTransportMode::H264Direct;
+
     Ok(RdpConnectionOptions {
         host_id: request.host_id.clone(),
         session_id: request
@@ -265,8 +288,17 @@ fn normalize_rdp_options(
         height,
         domain,
         enable_clipboard: settings.enable_clipboard.unwrap_or(true),
-        enable_audio: settings.enable_audio.unwrap_or(false),
+        enable_audio: settings.enable_audio.unwrap_or(default_enable_audio),
+        transport_mode,
     })
+}
+
+fn probe_h264_direct_support(options: &RdpConnectionOptions) -> RdpVideoNegotiation {
+    if options.transport_mode != RdpTransportMode::H264Direct {
+        return RdpVideoNegotiation::LegacyBitmap;
+    }
+
+    RdpVideoNegotiation::H264Direct
 }
 
 fn normalize_credentials(

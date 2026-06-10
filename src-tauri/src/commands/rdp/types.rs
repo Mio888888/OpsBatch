@@ -9,6 +9,7 @@ pub struct RdpConnectRequest {
     pub width: Option<u16>,
     pub height: Option<u16>,
     pub domain: Option<String>,
+    pub transport_mode: Option<RdpTransportMode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -31,6 +32,7 @@ pub(super) struct RdpConnectionOptions {
     pub domain: Option<String>,
     pub enable_clipboard: bool,
     pub enable_audio: bool,
+    pub transport_mode: RdpTransportMode,
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +47,14 @@ pub struct RdpStatusPayload {
     pub session_id: String,
     pub state: String,
     pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<RdpStatusDetail>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum RdpStatusDetail {
+    H264DirectUnavailable { reason: String },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +67,29 @@ pub struct RdpMetricsPayload {
     pub sent_mbytes_per_second: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RdpTransportMode {
+    LegacyBitmap,
+    H264Direct,
+}
+
+impl Default for RdpTransportMode {
+    fn default() -> Self {
+        Self::LegacyBitmap
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "state", rename_all = "camelCase")]
+#[allow(dead_code)]
+pub enum RdpVideoNegotiation {
+    LegacyBitmap,
+    H264Direct,
+    Unsupported { reason: String },
+}
+
+#[cfg(test)]
 #[derive(Debug, Clone)]
 pub(super) struct RdpFramePayload {
     pub width: u16,
@@ -66,6 +99,53 @@ pub(super) struct RdpFramePayload {
     pub region_width: u16,
     pub region_height: u16,
     pub rgba: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RdpEncodedVideoFrame {
+    pub session_id: String,
+    pub codec: RdpEncodedVideoCodec,
+    pub frame_id: u32,
+    pub timestamp_ms: u64,
+    pub is_keyframe: bool,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RdpBitmapFrame {
+    pub session_id: String,
+    pub surface_id: u16,
+    pub width: u16,
+    pub height: u16,
+    pub x: u16,
+    pub y: u16,
+    pub region_width: u16,
+    pub region_height: u16,
+    pub rgba: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RdpEncodedVideoCodec {
+    /// AVC format carried by RDPGFX: each H.264 NAL unit has a 4-byte big-endian length prefix.
+    H264AvcLengthPrefixed,
+    /// Annex B H.264 sample carried by RDPEVOR TSMM_VIDEO_DATA.
+    H264AnnexB,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct RdpEncodedAudioFrame {
+    pub session_id: String,
+    pub codec: RdpEncodedAudioCodec,
+    pub timestamp_ms: u64,
+    pub sample_rate: u32,
+    pub channels: u16,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RdpEncodedAudioCodec {
+    /// G.711 mu-law. Browser WebRTC stacks commonly negotiate this as audio/PCMU.
+    Pcmu,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

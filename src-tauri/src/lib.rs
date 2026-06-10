@@ -3,6 +3,7 @@ mod db;
 mod keychain;
 mod security;
 mod ssh;
+mod tls;
 
 use std::sync::Arc;
 use tauri::webview::PageLoadEvent;
@@ -11,6 +12,8 @@ use tauri::Listener;
 use tauri::Manager;
 
 pub fn run() {
+    tls::install_default_crypto_provider();
+
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .on_page_load(|webview, payload| {
@@ -55,6 +58,7 @@ pub fn run() {
             app.manage(local_fs);
             app.manage(commands::forward::ForwardManager::new());
             app.manage(commands::rdp::RdpManager::new());
+            app.manage(commands::rdp::RdpWebRtcManager::new());
             app.manage(Arc::new(commands::mcp::McpManager::new()));
             let registry = ssh::SshConnectionRegistry::new();
             app.manage(registry);
@@ -229,6 +233,9 @@ pub fn run() {
             commands::rdp::rdp_connect,
             commands::rdp::rdp_send_input,
             commands::rdp::rdp_disconnect,
+            commands::rdp::webrtc::rdp_webrtc_create_offer,
+            commands::rdp::webrtc::rdp_webrtc_set_answer,
+            commands::rdp::webrtc::rdp_webrtc_close,
             // Terminal
             commands::terminal::terminal_connect,
             commands::terminal::terminal_connect_local,

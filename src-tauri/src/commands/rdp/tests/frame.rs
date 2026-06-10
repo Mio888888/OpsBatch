@@ -1,7 +1,10 @@
 use std::time::Duration;
 
-use super::super::frame::{build_frame_message, build_frame_payload, FramePacer, FRAME_HEADER_LEN};
-use super::super::types::RectRegion;
+use super::super::frame::{
+    build_frame_message, build_frame_payload, build_region_frame_message, FramePacer,
+    FRAME_HEADER_LEN,
+};
+use super::super::types::{RdpBitmapFrame, RectRegion};
 
 #[test]
 fn build_frame_payload_copies_only_requested_region() {
@@ -45,6 +48,35 @@ fn build_frame_message_packs_header_and_rgba_bytes() {
         &message[FRAME_HEADER_LEN..],
         &[4, 5, 6, 255, 7, 8, 9, 255, 13, 14, 15, 255, 16, 17, 18, 255]
     );
+}
+
+#[test]
+fn build_region_frame_message_packs_decoded_bitmap_region() {
+    let frame = RdpBitmapFrame {
+        session_id: "rdp-test".to_string(),
+        surface_id: 1,
+        width: 1280,
+        height: 720,
+        x: 10,
+        y: 20,
+        region_width: 2,
+        region_height: 1,
+        rgba: vec![1, 2, 3, 255, 4, 5, 6, 255],
+    };
+
+    let message = build_region_frame_message(&frame).unwrap();
+
+    assert_eq!(u16::from_le_bytes([message[0], message[1]]), 1280);
+    assert_eq!(u16::from_le_bytes([message[2], message[3]]), 720);
+    assert_eq!(u16::from_le_bytes([message[4], message[5]]), 10);
+    assert_eq!(u16::from_le_bytes([message[6], message[7]]), 20);
+    assert_eq!(u16::from_le_bytes([message[8], message[9]]), 2);
+    assert_eq!(u16::from_le_bytes([message[10], message[11]]), 1);
+    assert_eq!(
+        u32::from_le_bytes([message[12], message[13], message[14], message[15]]),
+        8
+    );
+    assert_eq!(&message[FRAME_HEADER_LEN..], &[1, 2, 3, 255, 4, 5, 6, 255]);
 }
 
 #[test]

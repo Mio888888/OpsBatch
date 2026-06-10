@@ -7,7 +7,7 @@ import { CloseOutlined, ReloadOutlined } from '../../components/ui/icons';
 import WindowControls from '../../components/WindowControls';
 import { useAssetsStore } from '../../stores/assets';
 import { useTranslation } from '../../i18n';
-import { clamp, getOpenHostRequest, getScancodeForKey, type OpenHostRequest } from './rdpProtocol';
+import { clamp, getOpenHostRequest, getRdpOverlayText, getScancodeForKey, type OpenHostRequest } from './rdpProtocol';
 import { useRdpConnection } from './useRdpConnection';
 
 export default function RdpPage() {
@@ -33,6 +33,7 @@ export default function RdpPage() {
   }, [hosts, queryHostId, stateHostRequest]);
   const [connectNonce, setConnectNonce] = useState(0);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const pendingMoveRef = useRef<{ x: number; y: number } | null>(null);
   const moveFrameRef = useRef<number | null>(null);
@@ -43,14 +44,17 @@ export default function RdpPage() {
     hasFrame,
     presentedFps,
     metrics,
+    renderMode,
     sendInput,
     disconnectActive,
   } = useRdpConnection({
     hostRequest,
     stageRef,
     canvasRef,
+    videoRef,
     connectNonce,
     invalidFrameMessage: tText('rdp.invalidFrame'),
+    transportMode: 'h264Direct',
   });
 
   useEffect(() => {
@@ -60,17 +64,20 @@ export default function RdpPage() {
   }, [hosts.length, loadHosts, queryHostId, stateHostRequest]);
 
   const getRemotePoint = useCallback((event: { clientX: number; clientY: number }) => {
-    const canvas = canvasRef.current;
-    if (!canvas || canvas.width === 0 || canvas.height === 0) return null;
+    const target = renderMode === 'h264Direct' ? videoRef.current : canvasRef.current;
+    if (!target) return null;
 
-    const rect = canvas.getBoundingClientRect();
+    const rect = target.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return null;
+    const remoteWidth = connection?.width ?? (canvasRef.current?.width || 0);
+    const remoteHeight = connection?.height ?? (canvasRef.current?.height || 0);
+    if (remoteWidth === 0 || remoteHeight === 0) return null;
 
     return {
-      x: clamp(Math.floor((event.clientX - rect.left) * (canvas.width / rect.width)), 0, canvas.width - 1),
-      y: clamp(Math.floor((event.clientY - rect.top) * (canvas.height / rect.height)), 0, canvas.height - 1),
+      x: clamp(Math.floor((event.clientX - rect.left) * (remoteWidth / rect.width)), 0, remoteWidth - 1),
+      y: clamp(Math.floor((event.clientY - rect.top) * (remoteHeight / rect.height)), 0, remoteHeight - 1),
     };
-  }, []);
+  }, [connection?.height, connection?.width, renderMode]);
 
   const scheduleMouseMove = useCallback((point: { x: number; y: number }) => {
     pendingMoveRef.current = point;
@@ -182,6 +189,9 @@ export default function RdpPage() {
 
   const showConnecting = connectionState === 'connecting' || (connectionState === 'connected' && !hasFrame);
   const showError = connectionState === 'error' || connectionState === 'terminated';
+  const overlayText = showConnecting
+    ? getRdpOverlayText({ connectionState, hasFrame, statusMessage, renderMode })
+    : null;
 
   return (
     <section className="rdp-page">
@@ -199,6 +209,7 @@ export default function RdpPage() {
           <span className="rdp-target-meta">
             {hostRequest.ip}
             {connection ? ` · ${connection.width}x${connection.height}` : null}
+            {connection ? ` · ${renderMode === 'h264Direct' ? 'H.264' : 'bitmap'}` : null}
             {presentedFps !== null ? ` · ${presentedFps} FPS` : null}
             {metrics ? ` · srv ${metrics.serverUpdatesPerSecond}/s · tx ${metrics.sentFramesPerSecond}/s · ${metrics.sentMbytesPerSecond.toFixed(1)} MB/s` : null}
           </span>
@@ -238,13 +249,22 @@ export default function RdpPage() {
         onKeyUp={(event) => handleKey(event, false)}
         onContextMenu={(event) => event.preventDefault()}
       >
-        <canvas ref={canvasRef} className="rdp-canvas" />
+        <canvas
+          ref={canvasRef}
+          className={`rdp-canvas ${renderMode === 'h264Direct' ? 'rdp-render-hidden' : ''}`}
+        />
+        <video
+          ref={videoRef}
+          className={`rdp-video ${renderMode === 'h264Direct' ? '' : 'rdp-render-hidden'}`}
+          autoPlay
+          playsInline
+        />
         {showConnecting && (
           <div className="rdp-overlay">
             <Spin />
             <div>
-              <strong>{t('rdp.connectingTitle')}</strong>
-              <span>{statusMessage || t('rdp.connectingSubtitle')}</span>
+              <strong>{overlayText?.title ?? t('rdp.connectingTitle')}</strong>
+              <span>{overlayText?.subtitle ?? t('rdp.connectingSubtitle')}</span>
             </div>
           </div>
         )}

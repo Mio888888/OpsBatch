@@ -1,14 +1,21 @@
 use ironrdp::connector::{BitmapConfig, Config, Credentials, DesktopSize};
-use ironrdp::pdu::gcc::KeyboardType;
+use ironrdp::pdu::gcc::{ClientEarlyCapabilityFlags, KeyboardType};
 use ironrdp::pdu::rdp::capability_sets::{client_codecs_capabilities, MajorPlatformType};
 use ironrdp::pdu::rdp::client_info::{CompressionType, PerformanceFlags, TimezoneInfo};
 
-use super::types::{RdpConnectionOptions, RdpCredentials};
+use super::types::{RdpConnectionOptions, RdpCredentials, RdpTransportMode};
 
 pub(super) fn build_ironrdp_config(
     options: &RdpConnectionOptions,
     credentials: &RdpCredentials,
 ) -> Result<Config, String> {
+    let enable_graphics_pipeline = options.transport_mode == RdpTransportMode::H264Direct;
+    let client_early_capability_flags = if enable_graphics_pipeline {
+        ClientEarlyCapabilityFlags::SUPPORT_DYN_VC_GFX_PROTOCOL
+    } else {
+        ClientEarlyCapabilityFlags::empty()
+    };
+
     Ok(Config {
         credentials: Credentials::UsernamePassword {
             username: credentials.username.clone(),
@@ -40,6 +47,7 @@ pub(super) fn build_ironrdp_config(
         request_data: None,
         autologon: true,
         enable_audio_playback: options.enable_audio,
+        disable_video_optimizations: !enable_graphics_pipeline,
         compression_type: Some(CompressionType::Rdp61),
         pointer_software_rendering: true,
         multitransport_flags: None,
@@ -56,6 +64,8 @@ pub(super) fn build_ironrdp_config(
         timezone_info: TimezoneInfo::default(),
         alternate_shell: String::new(),
         work_dir: String::new(),
+        client_early_capability_flags,
+        enable_graphics_pipeline,
     })
 }
 

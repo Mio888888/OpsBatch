@@ -228,6 +228,10 @@ pub struct Config {
     pub autologon: bool,
     /// If true, the INFO_NOAUDIOPLAYBACK flag is set in the [`ClientInfoPdu`](ironrdp_pdu::rdp::ClientInfoPdu)
     pub enable_audio_playback: bool,
+    /// If true, the INFO_VIDEO_DISABLE flag is set in the [`ClientInfoPdu`](ironrdp_pdu::rdp::ClientInfoPdu).
+    ///
+    /// Disable this for RDPGFX/H.264 sessions so the server is allowed to use video-optimized graphics paths.
+    pub disable_video_optimizations: bool,
     pub performance_flags: PerformanceFlags,
 
     pub license_cache: Option<Arc<dyn LicenseCache>>,
@@ -258,6 +262,12 @@ pub struct Config {
     /// [\[MS-RDPBCGR\] 2.2.1.3.7]: https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-rdpbcgr/861f2bbb-6ca2-4c5a-8c44-0714fa901e70
     /// [`MultiTransportChannelData`]: ironrdp_pdu::gcc::MultiTransportChannelData
     pub multitransport_flags: Option<gcc::MultiTransportFlags>,
+
+    /// Extra Client Core early capability flags to advertise in GCC.
+    pub client_early_capability_flags: gcc::ClientEarlyCapabilityFlags,
+
+    /// Convenience marker for callers that require the RDP graphics pipeline.
+    pub enable_graphics_pipeline: bool,
 }
 
 ironrdp_core::assert_impl!(Config: Send, Sync);

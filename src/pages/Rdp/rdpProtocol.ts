@@ -14,11 +14,32 @@ export interface RdpConnectResponse {
   height: number;
 }
 
+export type RdpTransportMode = 'legacyBitmap' | 'h264Direct';
+
+export interface RdpWebRtcOffer {
+  sdp: string;
+  sdpType: RTCSdpType;
+}
+
+export interface RdpRenderModeState {
+  renderMode: RdpTransportMode;
+  usesVideoElement: boolean;
+}
+
+export interface RdpOverlayText {
+  title: string;
+  subtitle: string;
+}
+
 export interface RdpStatusPayload {
   sessionId: string;
   state: RdpConnectionState;
   message?: string | null;
+  detail?: RdpStatusDetail;
 }
+
+export type RdpStatusDetail =
+  | { type: 'h264DirectUnavailable'; reason: string };
 
 export interface RdpMetricsPayload {
   sessionId: string;
@@ -137,6 +158,119 @@ export function drainRdpFrameBatch<T>(queue: T[], budget: number): T[] {
   return queue.splice(0, Math.min(queue.length, Math.floor(budget)));
 }
 
+export function resolveRdpRenderMode({
+  requested,
+  webRtcReady,
+  bitmapFallbackActive = false,
+}: {
+  requested: RdpTransportMode;
+  webRtcReady: boolean;
+  bitmapFallbackActive?: boolean;
+}): RdpRenderModeState {
+  if (bitmapFallbackActive) {
+    return {
+      renderMode: 'legacyBitmap',
+      usesVideoElement: false,
+    };
+  }
+
+  if (requested === 'h264Direct' && webRtcReady) {
+    return {
+      renderMode: 'h264Direct',
+      usesVideoElement: true,
+    };
+  }
+
+  return {
+    renderMode: 'legacyBitmap',
+    usesVideoElement: false,
+  };
+}
+
+export function shouldAttachRdpVideoTrack(kind: string) {
+  return kind === 'video';
+}
+
+export function isH264DirectUnavailableStatus(
+  payload: RdpStatusPayload,
+): payload is RdpStatusPayload & { detail: { type: 'h264DirectUnavailable'; reason: string } } {
+  return payload.detail?.type === 'h264DirectUnavailable';
+}
+
+export function resolveH264UnavailableFallback(
+  payload: RdpStatusPayload,
+  activeTransportMode: RdpTransportMode,
+) {
+  if (!isH264DirectUnavailableStatus(payload) || activeTransportMode !== 'h264Direct') {
+    return null;
+  }
+
+  return {
+    nextTransportMode: 'legacyBitmap' as const,
+    requiresFreshSession: true,
+    statusMessage: `${payload.detail.reason} 正在切换到 legacy bitmap。`,
+  };
+}
+
+export function getRdpHandshakeStatusMessage(transportMode: RdpTransportMode) {
+  return transportMode === 'h264Direct'
+    ? '正在进行 RDP TCP、TLS、NLA 与 EGFX 握手'
+    : '正在进行 RDP TCP、TLS 与 NLA 握手';
+}
+
+export function getRdpStartupStatusMessage(transportMode: RdpTransportMode) {
+  return transportMode === 'h264Direct'
+    ? '正在创建 WebRTC H.264/音频通道'
+    : getRdpHandshakeStatusMessage(transportMode);
+}
+
+export function getRdpOverlayText({
+  connectionState,
+  hasFrame,
+  statusMessage,
+  renderMode = 'h264Direct',
+}: {
+  connectionState: RdpConnectionState;
+  hasFrame: boolean;
+  statusMessage?: string;
+  renderMode?: RdpTransportMode;
+}): RdpOverlayText {
+  if (connectionState === 'connected' && !hasFrame) {
+    return {
+      title: '正在等待远程画面',
+      subtitle: statusMessage || (
+        renderMode === 'h264Direct'
+          ? 'RDP 已连接，正在等待 RDPGFX H.264 首帧。'
+          : 'RDP 已连接，正在等待 bitmap/ClearCodec 首帧。'
+      ),
+    };
+  }
+
+  return {
+    title: '正在建立 RDP 连接',
+    subtitle: statusMessage || '正在进行 TCP、TLS 与 NLA 握手，请稍候。',
+  };
+}
+
+export async function withRdpTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
+
 export function getScancodeForKey(key: string): { code: number; extended: boolean } | undefined {
   const map: Record<string, { code: number; extended: boolean }> = {
     Backspace: { code: 0x0e, extended: false },
@@ -170,5 +304,13 @@ export async function disconnectRdpSession(sessionId: string) {
     await invoke('rdp_disconnect', { sessionId });
   } catch {
     // 会话可能尚未完成握手或已由后端关闭，清理阶段忽略即可。
+  }
+}
+
+export async function closeRdpWebRtcSession(sessionId: string) {
+  try {
+    await invoke('rdp_webrtc_close', { sessionId });
+  } catch {
+    // WebRTC 会话可能没有创建成功，清理阶段忽略即可。
   }
 }

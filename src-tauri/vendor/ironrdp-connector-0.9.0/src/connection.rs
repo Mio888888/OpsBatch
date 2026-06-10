@@ -29,6 +29,7 @@ pub struct ConnectionResult {
     pub connection_activation: ConnectionActivationSequence,
     /// The bulk compression type that was negotiated, if any.
     pub compression_type: Option<rdp::client_info::CompressionType>,
+    pub negotiation_response_flags: nego::ResponseFlags,
 }
 
 #[derive(Default, Debug)]
@@ -43,41 +44,52 @@ pub enum ClientConnectorState {
     },
     EnhancedSecurityUpgrade {
         selected_protocol: nego::SecurityProtocol,
+        response_flags: nego::ResponseFlags,
     },
     Credssp {
         selected_protocol: nego::SecurityProtocol,
+        response_flags: nego::ResponseFlags,
     },
     BasicSettingsExchangeSendInitial {
         selected_protocol: nego::SecurityProtocol,
+        response_flags: nego::ResponseFlags,
     },
     BasicSettingsExchangeWaitResponse {
         connect_initial: mcs::ConnectInitial,
+        response_flags: nego::ResponseFlags,
     },
     ChannelConnection {
         io_channel_id: u16,
+        response_flags: nego::ResponseFlags,
         channel_connection: ChannelConnectionSequence,
     },
     SecureSettingsExchange {
         io_channel_id: u16,
         user_channel_id: u16,
+        response_flags: nego::ResponseFlags,
     },
     ConnectTimeAutoDetection {
         io_channel_id: u16,
         user_channel_id: u16,
+        response_flags: nego::ResponseFlags,
     },
     LicensingExchange {
         io_channel_id: u16,
         user_channel_id: u16,
+        response_flags: nego::ResponseFlags,
         license_exchange: LicenseExchangeSequence,
     },
     MultitransportBootstrapping {
         io_channel_id: u16,
         user_channel_id: u16,
+        response_flags: nego::ResponseFlags,
     },
     CapabilitiesExchange {
+        response_flags: nego::ResponseFlags,
         connection_activation: ConnectionActivationSequence,
     },
     ConnectionFinalization {
+        response_flags: nego::ResponseFlags,
         connection_activation: ConnectionActivationSequence,
     },
     Connected {
@@ -316,36 +328,57 @@ impl Sequence for ClientConnector {
 
                 (
                     Written::Nothing,
-                    ClientConnectorState::EnhancedSecurityUpgrade { selected_protocol },
+                    ClientConnectorState::EnhancedSecurityUpgrade {
+                        selected_protocol,
+                        response_flags: flags,
+                    },
                 )
             }
 
             //== Upgrade to Enhanced RDP Security ==//
             // NOTE: we assume the selected protocol is never the standard RDP security (RC4).
             // User code should match this variant and perform the appropriate upgrade (TLS handshake, etc).
-            ClientConnectorState::EnhancedSecurityUpgrade { selected_protocol } => {
+            ClientConnectorState::EnhancedSecurityUpgrade {
+                selected_protocol,
+                response_flags,
+            } => {
                 let next_state = if selected_protocol
                     .intersects(nego::SecurityProtocol::HYBRID | nego::SecurityProtocol::HYBRID_EX)
                 {
                     debug!("Begin NLA using CredSSP");
-                    ClientConnectorState::Credssp { selected_protocol }
+                    ClientConnectorState::Credssp {
+                        selected_protocol,
+                        response_flags,
+                    }
                 } else {
                     debug!("CredSSP is disabled, skipping NLA");
-                    ClientConnectorState::BasicSettingsExchangeSendInitial { selected_protocol }
+                    ClientConnectorState::BasicSettingsExchangeSendInitial {
+                        selected_protocol,
+                        response_flags,
+                    }
                 };
 
                 (Written::Nothing, next_state)
             }
 
             //== CredSSP ==//
-            ClientConnectorState::Credssp { selected_protocol } => (
+            ClientConnectorState::Credssp {
+                selected_protocol,
+                response_flags,
+            } => (
                 Written::Nothing,
-                ClientConnectorState::BasicSettingsExchangeSendInitial { selected_protocol },
+                ClientConnectorState::BasicSettingsExchangeSendInitial {
+                    selected_protocol,
+                    response_flags,
+                },
             ),
 
             //== Basic Settings Exchange ==//
             // Exchange basic settings including Core Data, Security Data and Network Data.
-            ClientConnectorState::BasicSettingsExchangeSendInitial { selected_protocol } => {
+            ClientConnectorState::BasicSettingsExchangeSendInitial {
+                selected_protocol,
+                response_flags,
+            } => {
                 debug!("Basic Settings Exchange");
 
                 let client_gcc_blocks =
@@ -360,10 +393,16 @@ impl Sequence for ClientConnector {
 
                 (
                     Written::from_size(written)?,
-                    ClientConnectorState::BasicSettingsExchangeWaitResponse { connect_initial },
+                    ClientConnectorState::BasicSettingsExchangeWaitResponse {
+                        connect_initial,
+                        response_flags,
+                    },
                 )
             }
-            ClientConnectorState::BasicSettingsExchangeWaitResponse { connect_initial } => {
+            ClientConnectorState::BasicSettingsExchangeWaitResponse {
+                connect_initial,
+                response_flags,
+            } => {
                 let x224_payload = decode::<X224<crate::x224::X224Data<'_>>>(input)
                     .map_err(ConnectorError::decode)
                     .map(|p| p.0)?;
@@ -415,6 +454,7 @@ impl Sequence for ClientConnector {
                     Written::Nothing,
                     ClientConnectorState::ChannelConnection {
                         io_channel_id,
+                        response_flags,
                         channel_connection: if skip_channel_join {
                             ChannelConnectionSequence::skip_channel_join()
                         } else {
@@ -428,6 +468,7 @@ impl Sequence for ClientConnector {
             // Connect every individual channel.
             ClientConnectorState::ChannelConnection {
                 io_channel_id,
+                response_flags,
                 mut channel_connection,
             } => {
                 debug!("Channel Connection");
@@ -440,10 +481,12 @@ impl Sequence for ClientConnector {
                     ClientConnectorState::SecureSettingsExchange {
                         io_channel_id,
                         user_channel_id,
+                        response_flags,
                     }
                 } else {
                     ClientConnectorState::ChannelConnection {
                         io_channel_id,
+                        response_flags,
                         channel_connection,
                     }
                 };
@@ -462,6 +505,7 @@ impl Sequence for ClientConnector {
             ClientConnectorState::SecureSettingsExchange {
                 io_channel_id,
                 user_channel_id,
+                response_flags,
             } => {
                 debug!("Secure Settings Exchange");
 
@@ -476,6 +520,7 @@ impl Sequence for ClientConnector {
                     ClientConnectorState::ConnectTimeAutoDetection {
                         io_channel_id,
                         user_channel_id,
+                        response_flags,
                     },
                 )
             }
@@ -485,11 +530,13 @@ impl Sequence for ClientConnector {
             ClientConnectorState::ConnectTimeAutoDetection {
                 io_channel_id,
                 user_channel_id,
+                response_flags,
             } => (
                 Written::Nothing,
                 ClientConnectorState::LicensingExchange {
                     io_channel_id,
                     user_channel_id,
+                    response_flags,
                     license_exchange: LicenseExchangeSequence::new(
                         io_channel_id,
                         self.config.credentials.username().unwrap_or("").to_owned(),
@@ -509,6 +556,7 @@ impl Sequence for ClientConnector {
             ClientConnectorState::LicensingExchange {
                 io_channel_id,
                 user_channel_id,
+                response_flags,
                 mut license_exchange,
             } => {
                 debug!("Licensing Exchange");
@@ -519,11 +567,13 @@ impl Sequence for ClientConnector {
                     ClientConnectorState::MultitransportBootstrapping {
                         io_channel_id,
                         user_channel_id,
+                        response_flags,
                     }
                 } else {
                     ClientConnectorState::LicensingExchange {
                         io_channel_id,
                         user_channel_id,
+                        response_flags,
                         license_exchange,
                     }
                 };
@@ -536,9 +586,11 @@ impl Sequence for ClientConnector {
             ClientConnectorState::MultitransportBootstrapping {
                 io_channel_id,
                 user_channel_id,
+                response_flags,
             } => (
                 Written::Nothing,
                 ClientConnectorState::CapabilitiesExchange {
+                    response_flags,
                     connection_activation: ConnectionActivationSequence::new(
                         self.config.clone(),
                         io_channel_id,
@@ -550,13 +602,17 @@ impl Sequence for ClientConnector {
             //== Capabilities Exchange ==/
             // The server sends the set of capabilities it supports to the client.
             ClientConnectorState::CapabilitiesExchange {
+                response_flags,
                 mut connection_activation,
             } => {
                 let written = connection_activation.step(input, output)?;
                 match connection_activation.connection_activation_state() {
                     ConnectionActivationState::ConnectionFinalization { .. } => (
                         written,
-                        ClientConnectorState::ConnectionFinalization { connection_activation },
+                        ClientConnectorState::ConnectionFinalization {
+                            response_flags,
+                            connection_activation,
+                        },
                     ),
                     _ => return Err(general_err!("invalid state (this is a bug)")),
                 }
@@ -566,12 +622,16 @@ impl Sequence for ClientConnector {
             // Client and server exchange a few PDUs in order to finalize the connection.
             // Client may send PDUs one after the other without waiting for a response in order to speed up the process.
             ClientConnectorState::ConnectionFinalization {
+                response_flags,
                 mut connection_activation,
             } => {
                 let written = connection_activation.step(input, output)?;
 
                 let next_state = if !connection_activation.connection_activation_state().is_terminal() {
-                    ClientConnectorState::ConnectionFinalization { connection_activation }
+                    ClientConnectorState::ConnectionFinalization {
+                        response_flags,
+                        connection_activation,
+                    }
                 } else {
                     match connection_activation.connection_activation_state() {
                         ConnectionActivationState::Finalized {
@@ -592,6 +652,7 @@ impl Sequence for ClientConnector {
                                 pointer_software_rendering,
                                 connection_activation,
                                 compression_type: self.config.compression_type,
+                                negotiation_response_flags: response_flags,
                             },
                         },
                         _ => return Err(general_err!("invalid state (this is a bug)")),
@@ -695,7 +756,8 @@ fn create_gcc_blocks<'a>(
                     let mut early_capability_flags = ClientEarlyCapabilityFlags::VALID_CONNECTION_TYPE
                         | ClientEarlyCapabilityFlags::SUPPORT_ERR_INFO_PDU
                         | ClientEarlyCapabilityFlags::STRONG_ASYMMETRIC_KEYS
-                        | ClientEarlyCapabilityFlags::SUPPORT_SKIP_CHANNELJOIN;
+                        | ClientEarlyCapabilityFlags::SUPPORT_SKIP_CHANNELJOIN
+                        | config.client_early_capability_flags;
 
                     // TODO(#136): support for ClientEarlyCapabilityFlags::SUPPORT_STATUS_INFO_PDU
 
@@ -763,9 +825,12 @@ fn create_client_info_pdu(config: &Config, client_addr: &SocketAddr) -> rdp::Cli
         | ClientInfoFlags::DISABLE_CTRL_ALT_DEL
         | ClientInfoFlags::LOGON_NOTIFY
         | ClientInfoFlags::LOGON_ERRORS
-        | ClientInfoFlags::VIDEO_DISABLE
         | ClientInfoFlags::ENABLE_WINDOWS_KEY
         | ClientInfoFlags::MAXIMIZE_SHELL;
+
+    if config.disable_video_optimizations {
+        flags |= ClientInfoFlags::VIDEO_DISABLE;
+    }
 
     if config.autologon {
         flags |= ClientInfoFlags::AUTOLOGON;

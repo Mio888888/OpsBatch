@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main", "editor", "batch-terminal", "batch-transfer", "settings", "global-log"],
+  "windows": ["main", "editor", "batch-terminal", "batch-transfer", "settings", "global-log", "rdp-*"],
   "permissions": [
     "core:default",
     "core:event:allow-emit",

@@ -1,0 +1,27 @@
+/* SFTP Skeleton Loading */
+.sftp-skeleton {
+  padding: 8px;
+  animation: sftp-pulse 1.5s ease-in-out infinite;
+}
+
+.sftp-skeleton-bar {
+  height: 12px;
+  background: var(--terminal-border);
+  border-radius: 3px;
+  margin-bottom: 8px;
+}
+
+.sftp-skeleton-row {
+  display: flex;
+  gap: 8px;
+}
+
+.sftp-skeleton-block {
+  background: var(--terminal-border);
+  border-radius: 4px;
+}
+
+@keyframes sftp-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}

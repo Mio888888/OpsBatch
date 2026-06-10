@@ -1,0 +1,247 @@
+/* ==========================================================================
+   Port Forward Panel
+   ========================================================================== */
+
+.pf-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  flex-shrink: 0;
+}
+
+.pf-title {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  color: #5eead4;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.pf-add-btn {
+  padding: 1px 8px;
+  font-size: var(--font-size-caption);
+  font-family: var(--font-terminal);
+  color: #80caff;
+  background: transparent;
+  border: 1px solid rgba(128, 202, 255, 0.2);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s, border-color 0.12s;
+}
+
+.pf-add-btn:hover {
+  background: rgba(128, 202, 255, 0.1);
+  border-color: #80caff;
+}
+
+/* Form */
+.pf-form {
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.pf-form-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pf-form-select {
+  padding: 2px 6px;
+  font-size: var(--font-size-support);
+  font-family: var(--font-terminal);
+  color: #d7deea;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  outline: none;
+}
+
+.pf-form-input {
+  flex: 1;
+  min-width: 0;
+  padding: 2px 6px;
+  font-size: var(--font-size-support);
+  font-family: var(--font-terminal);
+  color: #d7deea;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  outline: none;
+}
+
+.pf-form-input:focus {
+  border-color: rgba(128, 202, 255, 0.4);
+}
+
+.pf-form-arrow {
+  color: #526071;
+  font-size: var(--font-size-support);
+}
+
+.pf-form-submit {
+  padding: 2px 10px;
+  font-size: var(--font-size-caption);
+  font-family: var(--font-terminal);
+  color: #111;
+  background: #80caff;
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.pf-form-submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* List */
+.pf-list {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.pf-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 60px;
+  color: #526071;
+  font-size: var(--font-size-support);
+}
+
+.pf-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+
+.pf-item:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.pf-item-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pf-item-type {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  font-size: var(--font-size-micro);
+  font-weight: var(--font-weight-bold);
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+.pf-type-local {
+  color: #4ade80;
+  background: rgba(74, 222, 128, 0.12);
+}
+
+.pf-type-remote {
+  color: #fb923c;
+  background: rgba(251, 146, 60, 0.12);
+}
+
+.pf-type-dynamic {
+  color: #c084fc;
+  background: rgba(192, 132, 252, 0.12);
+}
+
+.pf-item-addr {
+  font-size: var(--font-size-support);
+  font-family: var(--font-terminal);
+  color: #d7deea;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pf-item-label {
+  font-size: var(--font-size-caption);
+  color: #526071;
+  white-space: nowrap;
+}
+
+.pf-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.pf-item-status {
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+}
+
+.pf-status-active {
+  color: #4ade80;
+}
+
+.pf-status-suspended {
+  color: #526071;
+}
+
+.pf-status-error {
+  color: #f87171;
+}
+
+.pf-item-stats {
+  font-size: var(--font-size-caption);
+  font-family: var(--font-terminal);
+  color: #526071;
+}
+
+.pf-item-error {
+  color: #f87171;
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-support);
+}
+
+.pf-item-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.pf-action-btn {
+  padding: 0 4px;
+  font-size: var(--font-size-caption);
+  color: #526071;
+  background: transparent;
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.pf-action-btn:hover {
+  color: #80caff;
+  background: rgba(128, 202, 255, 0.1);
+}
+
+.pf-action-remove:hover {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+}

@@ -1,0 +1,12 @@
+/* ============================================
+   Route Loading
+   ============================================ */
+
+.route-loading {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #526071;
+  font-size: var(--font-size-body);
+}

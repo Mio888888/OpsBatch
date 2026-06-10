@@ -1,0 +1,104 @@
+/* ==========================================================================
+   Dark Mode — Settings & Form Overrides
+   ========================================================================== */
+
+[data-theme-tone="dark"] .ui-input,
+[data-theme-tone="dark"] .ui-textarea,
+[data-theme-tone="dark"] .ui-select-trigger,
+[data-theme-tone="dark"] .ui-select-native {
+  color: var(--color-text);
+  background: var(--color-settings-input-bg);
+  border-color: var(--color-settings-input-border);
+}
+
+[data-theme-tone="dark"] .ui-input:focus,
+[data-theme-tone="dark"] .ui-textarea:focus,
+[data-theme-tone="dark"] .ui-select-trigger:focus {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px rgba(90, 167, 255, 0.12);
+}
+
+[data-theme-tone="dark"] .ui-input-prefix {
+  color: var(--color-text-muted);
+  background: var(--color-settings-input-bg);
+  border-color: var(--color-settings-input-border);
+}
+
+[data-theme-tone="dark"] .ui-input-prefix .ui-input {
+  color: var(--color-text);
+  background: transparent;
+}
+
+[data-theme-tone="dark"] .ui-input-prefix:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+[data-theme-tone="dark"] .ui-card {
+  background: var(--color-settings-card-bg);
+  border-color: var(--color-settings-border);
+}
+
+[data-theme-tone="dark"] .ui-card-header {
+  border-bottom-color: var(--color-settings-border);
+}
+
+[data-theme-tone="dark"] .ui-button {
+  color: var(--color-text);
+  background: var(--color-settings-card-bg);
+  border-color: var(--color-settings-input-border);
+}
+
+[data-theme-tone="dark"] .ui-button:hover:not(:disabled) {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+[data-theme-tone="dark"] .ui-button-primary {
+  color: #fff;
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+[data-theme-tone="dark"] .ui-button-primary:hover:not(:disabled) {
+  color: #fff;
+  background: var(--color-primary-strong);
+}
+
+[data-theme-tone="dark"] .ui-switch {
+  background: #4b5563;
+}
+
+[data-theme-tone="dark"] .ui-tag {
+  color: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme-tone="dark"] .ui-table th {
+  color: var(--color-text-secondary);
+  background: var(--color-surface-soft);
+}
+
+[data-theme-tone="dark"] .ui-table td {
+  border-bottom-color: var(--color-border);
+  color: var(--color-text);
+}
+
+[data-theme-tone="dark"] .ui-divider {
+  border-top-color: var(--color-settings-border);
+}
+
+[data-theme-tone="dark"] .ui-input-addon-after {
+  color: var(--color-text-muted);
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--color-settings-input-border);
+}
+
+[data-theme-tone="dark"] .settings-theme-thumb-border {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme-tone="dark"] .settings-resource-item:hover {
+  border-color: rgba(90, 167, 255, 0.32);
+}

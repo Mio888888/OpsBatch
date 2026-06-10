@@ -1,0 +1,180 @@
+/* ── TreeselectJS overrides ── */
+.ui-tree-select.treeselect,
+.ui-tree-select-dropdown.treeselect-list {
+  --treeselectjs-border-color: var(--color-border-strong);
+  --treeselectjs-bg: var(--color-surface);
+  --treeselectjs-border-focus: var(--color-primary);
+  --treeselectjs-icon: var(--color-text-muted);
+  --treeselectjs-icon-hover: var(--color-primary);
+  --treeselectjs-item-focus-bg: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  --treeselectjs-item-selected-bg: var(--color-settings-nav-active-bg);
+  --treeselectjs-item-counter: var(--color-text-muted);
+  --treeselectjs-item-disabled-text: var(--color-text-muted);
+}
+
+.ui-tree-select.treeselect {
+  position: relative;
+  width: 100%;
+  display: inline-block;
+  vertical-align: top;
+  font-size: var(--font-size-body);
+}
+
+.ui-tree-select .treeselect-input {
+  width: 100%;
+  min-height: 32px;
+  padding: 4px 54px 4px 11px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+[data-theme-tone="dark"] .ui-tree-select .treeselect-input {
+  background: var(--color-settings-input-bg);
+  border-color: var(--color-settings-input-border);
+}
+
+.ui-tree-select .treeselect-input:hover {
+  border-color: var(--color-primary);
+}
+
+.ui-tree-select .treeselect-input--focused {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+.ui-tree-select .treeselect-input--opened.treeselect-input--bottom,
+.ui-tree-select .treeselect-input--opened.treeselect-input--top {
+  border-color: var(--color-primary);
+  border-radius: var(--radius-md);
+}
+
+.ui-tree-select .treeselect-input__tags {
+  min-width: 0;
+  width: 100%;
+  height: 22px;
+  flex-wrap: nowrap;
+  gap: 0;
+}
+
+.ui-tree-select .treeselect-input__tags-count,
+.ui-tree-select .treeselect-input__tags-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-control-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-tree-select .treeselect-input--value-not-selected .treeselect-input__edit {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-control-sm);
+}
+
+.ui-tree-select .treeselect-input__edit {
+  background: transparent;
+  cursor: pointer;
+}
+
+.ui-tree-select .treeselect-input__operators {
+  top: 50%;
+  right: 7px;
+  align-items: center;
+  gap: 4px;
+  max-width: 44px;
+  transform: translateY(-50%);
+}
+
+.ui-tree-select .treeselect-input__clear,
+.ui-tree-select .treeselect-input__arrow {
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+}
+
+.ui-tree-select .treeselect-input__clear:hover {
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+}
+
+.ui-tree-select .treeselect-input__clear svg,
+.ui-tree-select .treeselect-input__arrow svg {
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+}
+
+.ui-tree-select .treeselect-list,
+.ui-tree-select-dropdown.treeselect-list {
+  z-index: 1202;
+  max-height: 256px;
+  box-sizing: border-box;
+  margin-top: 4px;
+  padding: 6px;
+  overflow: auto;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.ui-tree-select .treeselect-list--bottom,
+.ui-tree-select .treeselect-list--top,
+.ui-tree-select-dropdown.treeselect-list--bottom,
+.ui-tree-select-dropdown.treeselect-list--top {
+  border-radius: var(--radius-md);
+}
+
+.ui-tree-select .treeselect-list__item,
+.ui-tree-select-dropdown .treeselect-list__item {
+  min-height: 28px;
+  height: 28px;
+  line-height: var(--line-height-list-item);
+  border-radius: 6px;
+}
+
+.ui-tree-select .treeselect-list__item--focused,
+.ui-tree-select .treeselect-list__item--focused.treeselect-list__item--checked,
+.ui-tree-select-dropdown .treeselect-list__item--focused,
+.ui-tree-select-dropdown .treeselect-list__item--focused.treeselect-list__item--checked {
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+
+.ui-tree-select .treeselect-list__item--single-selected,
+.ui-tree-select .treeselect-list__item--checked,
+.ui-tree-select-dropdown .treeselect-list__item--single-selected,
+.ui-tree-select-dropdown .treeselect-list__item--checked {
+  color: var(--color-primary);
+  background: var(--color-settings-nav-active-bg);
+}
+
+.ui-tree-select .treeselect-list__item-icon,
+.ui-tree-select-dropdown .treeselect-list__item-icon {
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+}
+
+.ui-tree-select .treeselect-list__item-label,
+.ui-tree-select-dropdown .treeselect-list__item-label {
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: var(--font-size-body);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-tree-select .treeselect-list__empty-text,
+.ui-tree-select-dropdown .treeselect-list__empty-text {
+  font-size: var(--font-size-body);
+}

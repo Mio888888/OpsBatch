@@ -1,0 +1,185 @@
+.ui-multi-select {
+  position: relative;
+  width: 100%;
+}
+
+.ui-multi-select-trigger {
+  position: relative;
+  width: 100%;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 54px 4px 8px;
+  color: var(--color-text);
+  cursor: pointer;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  outline: none;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.ui-multi-select-trigger:hover:not(:disabled) {
+  border-color: var(--color-primary);
+}
+
+.ui-multi-select-trigger:focus-visible,
+.ui-multi-select:focus-within .ui-multi-select-trigger {
+  border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-primary) 12%, transparent);
+}
+
+.ui-multi-select-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.ui-multi-select-values {
+  min-width: 0;
+  display: flex;
+  flex: 1;
+  flex-wrap: nowrap;
+  gap: 4px;
+  overflow: hidden;
+  text-align: left;
+}
+
+.ui-multi-select-placeholder {
+  color: var(--color-text-muted);
+  line-height: var(--line-height-control-sm);
+}
+
+.ui-multi-select-tag {
+  max-width: min(160px, 100%);
+  flex: 0 1 auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  color: var(--color-primary);
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-chip-lg);
+  background: var(--color-settings-nav-active-bg);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 36%, var(--color-border));
+  border-radius: 999px;
+}
+
+.ui-multi-select-tag-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-multi-select-clear,
+.ui-multi-select-arrow {
+  position: absolute;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: -9px;
+  color: var(--color-text-muted);
+  line-height: var(--line-height-none);
+}
+
+.ui-multi-select-clear {
+  right: 28px;
+  border-radius: 999px;
+  background: var(--color-surface);
+}
+
+[data-theme-tone="dark"] .ui-multi-select-clear {
+  background: var(--color-settings-card-bg);
+}
+
+.ui-multi-select-clear:hover {
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 12%, transparent);
+}
+
+.ui-multi-select-arrow {
+  right: 7px;
+  pointer-events: none;
+}
+
+.ui-multi-select-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 1201;
+  width: 100%;
+  max-height: 220px;
+  overflow: auto;
+  padding: 6px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+.ui-multi-select-option {
+  width: 100%;
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  color: var(--color-text);
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.ui-multi-select-option:hover {
+  background: color-mix(in srgb, var(--color-primary) 10%, transparent);
+}
+
+.ui-multi-select-option-selected {
+  color: var(--color-primary);
+  background: var(--color-settings-nav-active-bg);
+}
+
+.ui-multi-select-checkbox {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: var(--font-size-support);
+  font-weight: var(--font-weight-bold);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
+}
+
+[data-theme-tone="dark"] .ui-multi-select-checkbox {
+  background: var(--color-settings-input-bg);
+  border-color: var(--color-settings-input-border);
+}
+
+.ui-multi-select-option-selected .ui-multi-select-checkbox {
+  background: var(--color-primary);
+  border-color: var(--color-primary);
+}
+
+.ui-multi-select-option-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ui-multi-select-empty {
+  padding: 16px 8px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-small);
+  text-align: center;
+}

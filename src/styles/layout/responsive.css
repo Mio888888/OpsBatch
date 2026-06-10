@@ -1,0 +1,104 @@
+@media (max-width: 980px) {
+  :root {
+    --workbench-topbar-height: 72px;
+    --workbench-titlebar-side-width: 210px;
+  }
+
+  .workbench-topbar {
+    grid-template-columns: minmax(var(--workbench-titlebar-side-width), 1fr) minmax(0, auto) minmax(var(--workbench-titlebar-side-width), 1fr);
+    grid-template-areas:
+      'titlebar-left modes tools'
+      'titlebar-left modes tools';
+  }
+
+  .workbench-titlebar-left { grid-area: titlebar-left; }
+  .workbench-mode-tabs { grid-area: modes; justify-content: center; max-width: 100%; overflow-x: auto; }
+  .workbench-tools { grid-area: tools; }
+
+  .titlebar-performance-monitor {
+    max-width: 112px;
+  }
+
+  .titlebar-performance-chip:last-child {
+    display: none;
+  }
+
+  .workbench-main-panel {
+    padding: 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .connection-pill,
+  .level-pill,
+  .state-pill {
+    padding: 0 9px;
+  }
+
+  .workbench-mode-tab {
+    padding: 0 12px;
+  }
+
+  .tool-icon-button:nth-last-child(-n + 2) {
+    display: none;
+  }
+
+  .terminal-page-shell-active .ui-tabs-list {
+    padding-right: 4px;
+    padding-left: 4px;
+  }
+
+  .terminal-page-shell-active .ui-tabs-trigger {
+    max-width: 180px;
+    min-height: 30px;
+    padding-right: 8px;
+    padding-left: 8px;
+  }
+
+  .terminal-tab-status-text {
+    display: none;
+  }
+
+  .terminal-tab-name,
+  .terminal-tab-meta {
+    max-width: 112px;
+  }
+
+  .terminal-panel-body {
+    padding: 0;
+  }
+
+  .terminal-page-state-shell {
+    padding: 16px;
+  }
+
+  .terminal-state-card {
+    padding: 16px;
+  }
+
+  .settings-window-page {
+    padding: 10px;
+  }
+
+  .settings-window-content {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .settings-sidebar-card {
+    overflow: visible;
+  }
+
+  .settings-nav-list {
+    overflow: visible;
+  }
+
+  .settings-main-card {
+    min-height: 520px;
+  }
+
+  .page-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}

@@ -1,0 +1,40 @@
+:root[data-platform="macos"] {
+  font-family: var(--font-sans-macos);
+}
+
+:root[data-platform="windows"] {
+  --window-radius: 0;
+  font-family: var(--font-sans-windows);
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: auto;
+  background-color: var(--color-workbench-bg);
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Windows: disable backdrop-filter to avoid blur artifacts on high-DPI */
+html[data-platform="windows"] .settings-sidebar-card,
+html[data-platform="windows"] .settings-main-card {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* Windows: disable will-change on major layout containers to prevent
+   GPU compositing layer misalignment on non-integer DPI scales (125%/150%).
+   This is the primary fix for text appearing blurry on Windows. */
+html[data-platform="windows"] .workbench-topbar,
+html[data-platform="windows"] .workbench-shell,
+html[data-platform="windows"] .workbench-asset-panel,
+html[data-platform="windows"] .workbench-main-panel,
+html[data-platform="windows"] .standalone-window-frame,
+html[data-platform="windows"] .standalone-window-titlebar,
+html[data-platform="windows"] .standalone-window-content,
+html[data-platform="windows"] .settings-window-frame,
+html[data-platform="windows"] .settings-window-content,
+html[data-platform="windows"] .terminal-page-shell-active,
+html[data-platform="windows"] .terminal-panel-body,
+html[data-platform="windows"] .terminal-panel-main,
+html[data-platform="windows"] .terminal-view,
+html[data-platform="windows"] .terminal-context-menu,
+html[data-platform="windows"] .asset-ctx-menu {
+  will-change: auto !important;
+}

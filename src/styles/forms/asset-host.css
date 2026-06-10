@@ -1,0 +1,117 @@
+.asset-host-modal.ui-dialog-content {
+  overflow: visible;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border-color: var(--color-border);
+}
+
+[data-theme-tone="dark"] .asset-host-modal.ui-dialog-content {
+  background: var(--color-settings-card-bg);
+  border-color: var(--color-settings-border);
+}
+
+.asset-host-modal .ui-dialog-body {
+  overflow: visible;
+}
+
+.keychain-notice {
+  display: grid;
+  gap: 12px;
+  color: var(--color-text);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-relaxed);
+}
+
+.keychain-notice p {
+  margin: 0;
+}
+
+.keychain-notice ul {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px 12px 28px;
+  margin: 0;
+  background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+.asset-host-form {
+  gap: 10px;
+  margin-top: 12px;
+  color: var(--color-text);
+}
+
+.asset-host-form-grid {
+  display: grid;
+  gap: 8px 10px;
+  align-items: end;
+}
+
+.asset-host-form-grid-name {
+  grid-template-columns: minmax(0, 1fr) 92px;
+}
+
+.asset-host-form-grid-address {
+  grid-template-columns: minmax(0, 1fr) 78px;
+}
+
+.asset-host-form-grid-auth {
+  grid-template-columns: 88px minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.asset-host-form-grid-meta {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.asset-host-form .ui-form-item {
+  min-width: 0;
+  margin: 0;
+}
+
+.asset-host-form .ui-form-label {
+  color: var(--color-text-secondary);
+}
+
+.asset-host-form .ui-input,
+.asset-host-form .ui-textarea,
+.asset-host-form .ui-select-trigger,
+.asset-host-form .ui-select-native,
+.asset-host-form .ui-multi-select-trigger,
+.asset-host-form .treeselect-input {
+  min-height: 32px;
+  color: var(--color-text);
+  background: var(--color-surface);
+  border-color: var(--color-border-strong);
+}
+
+[data-theme-tone="dark"] .asset-host-form .ui-input,
+[data-theme-tone="dark"] .asset-host-form .ui-textarea,
+[data-theme-tone="dark"] .asset-host-form .ui-select-trigger,
+[data-theme-tone="dark"] .asset-host-form .ui-select-native,
+[data-theme-tone="dark"] .asset-host-form .ui-multi-select-trigger,
+[data-theme-tone="dark"] .asset-host-form .treeselect-input {
+  background: var(--color-settings-input-bg);
+  border-color: var(--color-settings-input-border);
+}
+
+.asset-host-form .ui-input,
+.asset-host-form .ui-textarea,
+.asset-host-form .ui-select-trigger,
+.asset-host-form .ui-select-native,
+.asset-host-form .ui-multi-select,
+.asset-host-form .ui-tree-select,
+.asset-host-form .ui-input-addon,
+.asset-host-form input[type='number'] {
+  width: 100%;
+}
+
+.asset-host-form-jump {
+  position: relative;
+}
+
+.asset-host-form .ui-form-extra {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-compact);
+}

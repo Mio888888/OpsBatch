@@ -1,0 +1,4 @@
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background-color: var(--color-border-strong); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--color-text-muted) 52%, transparent); }

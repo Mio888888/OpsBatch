@@ -21,6 +21,7 @@ applyInitialRouteToHash();
 
 const TerminalPage = lazy(() => import('./pages/Terminal/TerminalPage'));
 const RdpPage = lazy(() => import('./pages/Rdp/RdpPage'));
+const VncPage = lazy(() => import('./pages/Vnc/VncPage'));
 
 const EditorWindow = lazy(() => import('./pages/Editor/EditorWindow'));
 const BatchTerminalWindow = lazy(() => import('./pages/Commands/BatchTerminalWindow'));
@@ -74,6 +75,14 @@ function RdpRoute() {
   );
 }
 
+function VncRoute() {
+  return (
+    <div className="rdp-route-root">
+      <VncPage />
+    </div>
+  );
+}
+
 function SettingsRoute() {
   return (
     <SettingsWindowFrame>
@@ -118,7 +127,8 @@ function AppContent() {
   const isSettings = location.pathname === '/settings';
   const isGlobalLog = location.pathname === '/global-log';
   const isRdp = location.pathname === '/rdp';
-  const isStandalone = isEditor || isBatchTerminal || isBatchTransfer || isSettings || isGlobalLog || isRdp;
+  const isVnc = location.pathname === '/vnc';
+  const isStandalone = isEditor || isBatchTerminal || isBatchTransfer || isSettings || isGlobalLog || isRdp || isVnc;
   const isTerminal = !isStandalone && (
     location.pathname === '/terminal'
     || location.pathname === '/assets'
@@ -143,6 +153,7 @@ function AppContent() {
           <Route path="/settings" element={<SettingsRoute />} />
           <Route path="/global-log" element={<GlobalLogRoute />} />
           <Route path="/rdp" element={<RdpRoute />} />
+          <Route path="/vnc" element={<VncRoute />} />
         </Routes>
       </Suspense>
     );
@@ -186,6 +197,7 @@ function App() {
 const prefetchPages = () => {
   void import('./pages/Terminal/TerminalPage');
   void import('./pages/Rdp/RdpPage');
+  void import('./pages/Vnc/VncPage');
   void import('./pages/Editor/EditorWindow');
   void import('./pages/Commands/BatchTerminalWindow');
   void import('./pages/Transfer/BatchTransferWindow');

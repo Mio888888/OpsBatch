@@ -6,6 +6,7 @@ enum ManagedWindow {
     Settings,
     GlobalLog,
     Rdp,
+    Vnc,
 }
 
 impl ManagedWindow {
@@ -16,6 +17,7 @@ impl ManagedWindow {
             "settings" => Ok(Self::Settings),
             "global-log" => Ok(Self::GlobalLog),
             "rdp" => Ok(Self::Rdp),
+            "vnc" => Ok(Self::Vnc),
             _ => Err("window kind is not allowed".to_string()),
         }
     }
@@ -27,6 +29,7 @@ impl ManagedWindow {
             Self::Settings => Ok("settings".to_string()),
             Self::GlobalLog => Ok("global-log".to_string()),
             Self::Rdp => Ok(format!("rdp-{}", encode_single_host_id(host_ids)?)),
+            Self::Vnc => Ok(format!("vnc-{}", encode_single_host_id(host_ids)?)),
         }
     }
 
@@ -37,6 +40,7 @@ impl ManagedWindow {
             Self::Settings => "设置".to_string(),
             Self::GlobalLog => "全局日志".to_string(),
             Self::Rdp => "RDP 远程桌面".to_string(),
+            Self::Vnc => "VNC 远程桌面".to_string(),
         }
     }
 
@@ -53,6 +57,7 @@ impl ManagedWindow {
             Self::Settings => Ok("/settings".to_string()),
             Self::GlobalLog => Ok("/global-log".to_string()),
             Self::Rdp => Ok(format!("/rdp?hostId={}", encode_single_host_id(host_ids)?)),
+            Self::Vnc => Ok(format!("/vnc?hostId={}", encode_single_host_id(host_ids)?)),
         }
     }
 
@@ -63,11 +68,15 @@ impl ManagedWindow {
             Self::Settings => (900.0, 680.0, 760.0, 560.0),
             Self::GlobalLog => (720.0, 600.0, 500.0, 400.0),
             Self::Rdp => (1280.0, 820.0, 760.0, 560.0),
+            Self::Vnc => (1280.0, 820.0, 760.0, 560.0),
         }
     }
 
     fn requires_hosts(&self) -> bool {
-        matches!(self, Self::BatchTerminal | Self::BatchTransfer | Self::Rdp)
+        matches!(
+            self,
+            Self::BatchTerminal | Self::BatchTransfer | Self::Rdp | Self::Vnc
+        )
     }
 }
 

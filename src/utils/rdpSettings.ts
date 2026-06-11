@@ -4,6 +4,7 @@ export const MIN_RDP_DESKTOP_WIDTH = 640;
 export const MIN_RDP_DESKTOP_HEIGHT = 480;
 export const MAX_RDP_DESKTOP_WIDTH = 3840;
 export const MAX_RDP_DESKTOP_HEIGHT = 2160;
+export const DEFAULT_VNC_PORT = 5900;
 
 export interface HostRdpSettingsFormValues {
   rdpDomain?: string;
@@ -13,6 +14,10 @@ export interface HostRdpSettingsFormValues {
   rdpEnableAudio?: boolean;
   rdpMapDisk?: boolean;
   rdpDiskPath?: string;
+  vncPort?: number;
+  vncPassword?: string;
+  vncViewOnly?: boolean;
+  vncShared?: boolean;
 }
 
 export function normalizeRdpDesktopValue(value: unknown, min: number, max: number) {
@@ -24,6 +29,19 @@ export function buildRdpSettings(
   values: HostRdpSettingsFormValues,
   os: Host['os'],
 ): Host['rdpSettings'] {
+  if (os === 'vnc') {
+    const settings: NonNullable<Host['rdpSettings']> = {
+      protocol: 'vnc',
+      vncPort: normalizeVncPort(values.vncPort),
+    };
+    if (values.vncPassword?.trim()) {
+      settings.vncPassword = values.vncPassword.trim();
+    }
+    settings.vncViewOnly = values.vncViewOnly ?? false;
+    settings.vncShared = values.vncShared ?? true;
+    return settings;
+  }
+
   if (os !== 'windows') return undefined;
 
   const domain = values.rdpDomain?.trim();
@@ -39,6 +57,7 @@ export function buildRdpSettings(
   );
   const settings: NonNullable<Host['rdpSettings']> = {};
 
+  settings.protocol = 'rdp';
   if (domain) settings.domain = domain;
   if (desktopWidth) settings.desktopWidth = desktopWidth;
   if (desktopHeight) settings.desktopHeight = desktopHeight;
@@ -50,4 +69,13 @@ export function buildRdpSettings(
   }
 
   return Object.keys(settings).length > 0 ? settings : undefined;
+}
+
+export function normalizeVncPort(value: unknown) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return DEFAULT_VNC_PORT;
+  return Math.min(65535, Math.max(1, Math.round(value)));
+}
+
+export function isVncRemoteDesktopHost(host: Pick<Host, 'rdpSettings'>) {
+  return host.rdpSettings?.protocol === 'vnc';
 }

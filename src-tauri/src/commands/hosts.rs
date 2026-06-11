@@ -301,6 +301,14 @@ fn is_windows_host(os: &str) -> bool {
     os.trim().eq_ignore_ascii_case("windows")
 }
 
+fn host_status_probe_port(default_port: i32, rdp_settings: &str) -> i32 {
+    let vnc_settings = crate::commands::vnc::parse_vnc_settings(rdp_settings);
+    if vnc_settings.protocol.as_deref() == Some("vnc") {
+        return crate::commands::vnc::vnc_port_from_settings(rdp_settings, default_port) as i32;
+    }
+    default_port
+}
+
 fn section_lines(output: &str, name: &str) -> Vec<String> {
     let marker = format!("__{}__", name);
     let mut collecting = false;
@@ -764,19 +772,20 @@ pub async fn delete_host(
 
 #[tauri::command]
 pub fn check_host_status(db: tauri::State<'_, Database>, id: String) -> Result<String, String> {
-    let (ip, port) = {
+    let (ip, port, rdp_settings) = {
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
-        let result: (String, i32) = conn
+        let result: (String, i32, String) = conn
             .query_row(
-                "SELECT ip, port FROM hosts WHERE id=?1",
+                "SELECT ip, port, COALESCE(rdp_settings, '{}') FROM hosts WHERE id=?1",
                 params![id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .map_err(|e| e.to_string())?;
         result
     };
 
-    let addr = format!("{}:{}", ip, port);
+    let probe_port = host_status_probe_port(port, &rdp_settings);
+    let addr = format!("{}:{}", ip, probe_port);
     let status = match addr.to_socket_addrs() {
         Ok(mut addrs) => {
             if let Some(socket_addr) = addrs.next() {
@@ -802,4 +811,27 @@ pub fn check_host_status(db: tauri::State<'_, Database>, id: String) -> Result<S
     }
 
     Ok(status.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_status_probe_port_uses_vnc_default_port() {
+        assert_eq!(5900, host_status_probe_port(22, r#"{"protocol":"vnc"}"#));
+    }
+
+    #[test]
+    fn host_status_probe_port_uses_vnc_custom_port() {
+        assert_eq!(
+            5902,
+            host_status_probe_port(22, r#"{"protocol":"vnc","vncPort":5902}"#)
+        );
+    }
+
+    #[test]
+    fn host_status_probe_port_keeps_regular_host_port() {
+        assert_eq!(3389, host_status_probe_port(3389, r#"{"protocol":"rdp"}"#));
+    }
 }

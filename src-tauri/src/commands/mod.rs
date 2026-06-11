@@ -24,5 +24,6 @@ pub mod tags;
 pub mod terminal;
 pub mod terminal_shell;
 pub mod transfer;
+pub mod vnc;
 pub mod window;
 pub mod workflow;

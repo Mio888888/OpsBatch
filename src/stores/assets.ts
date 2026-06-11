@@ -78,6 +78,9 @@ function parseRdpSettings(value?: string | null): RdpSettings | undefined {
   try {
     const parsed = JSON.parse(value) as Partial<RdpSettings>;
     const settings: RdpSettings = {};
+    if (parsed.protocol === 'rdp' || parsed.protocol === 'vnc') {
+      settings.protocol = parsed.protocol;
+    }
     if (typeof parsed.domain === 'string' && parsed.domain.trim()) {
       settings.domain = parsed.domain.trim();
     }
@@ -99,6 +102,18 @@ function parseRdpSettings(value?: string | null): RdpSettings | undefined {
     if (typeof parsed.diskPath === 'string' && parsed.diskPath.trim()) {
       settings.diskPath = parsed.diskPath.trim();
     }
+    if (typeof parsed.vncPort === 'number' && Number.isFinite(parsed.vncPort)) {
+      settings.vncPort = parsed.vncPort;
+    }
+    if (typeof parsed.vncPassword === 'string' && parsed.vncPassword.trim()) {
+      settings.vncPassword = parsed.vncPassword.trim();
+    }
+    if (typeof parsed.vncViewOnly === 'boolean') {
+      settings.vncViewOnly = parsed.vncViewOnly;
+    }
+    if (typeof parsed.vncShared === 'boolean') {
+      settings.vncShared = parsed.vncShared;
+    }
     return Object.keys(settings).length > 0 ? settings : undefined;
   } catch {
     return undefined;
@@ -107,6 +122,9 @@ function parseRdpSettings(value?: string | null): RdpSettings | undefined {
 
 function serializeRdpSettings(settings?: RdpSettings): string {
   const normalized: RdpSettings = {};
+  if (settings?.protocol === 'rdp' || settings?.protocol === 'vnc') {
+    normalized.protocol = settings.protocol;
+  }
   if (settings?.domain?.trim()) normalized.domain = settings.domain.trim();
   if (typeof settings?.desktopWidth === 'number' && Number.isFinite(settings.desktopWidth)) {
     normalized.desktopWidth = settings.desktopWidth;
@@ -125,6 +143,18 @@ function serializeRdpSettings(settings?: RdpSettings): string {
   }
   if (settings?.diskPath?.trim()) {
     normalized.diskPath = settings.diskPath.trim();
+  }
+  if (typeof settings?.vncPort === 'number' && Number.isFinite(settings.vncPort)) {
+    normalized.vncPort = settings.vncPort;
+  }
+  if (settings?.vncPassword?.trim()) {
+    normalized.vncPassword = settings.vncPassword.trim();
+  }
+  if (typeof settings?.vncViewOnly === 'boolean') {
+    normalized.vncViewOnly = settings.vncViewOnly;
+  }
+  if (typeof settings?.vncShared === 'boolean') {
+    normalized.vncShared = settings.vncShared;
   }
   return JSON.stringify(normalized);
 }

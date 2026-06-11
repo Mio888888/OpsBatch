@@ -67,6 +67,8 @@ import {
 } from '../utils/localPerformance';
 import {
   buildRdpSettings,
+  DEFAULT_VNC_PORT,
+  isVncRemoteDesktopHost,
   MAX_RDP_DESKTOP_HEIGHT,
   MAX_RDP_DESKTOP_WIDTH,
   MIN_RDP_DESKTOP_HEIGHT,
@@ -225,6 +227,10 @@ interface HostFormValues {
   rdpEnableAudio?: boolean;
   rdpMapDisk?: boolean;
   rdpDiskPath?: string;
+  vncPort?: number;
+  vncPassword?: string;
+  vncViewOnly?: boolean;
+  vncShared?: boolean;
 }
 
 const DEFAULT_GROUP_ID = '__default__';
@@ -263,6 +269,10 @@ function hostFormStoresSecret(host: Pick<Host, 'password' | 'privateKey'>) {
 
 function isWindowsHost(host: Pick<Host, 'os'>) {
   return host.os === 'windows';
+}
+
+function isVncHost(host: Pick<Host, 'os' | 'rdpSettings'>) {
+  return host.os === 'vnc' || isVncRemoteDesktopHost(host);
 }
 
 function getGroupDropId(groupId: string) {
@@ -385,6 +395,7 @@ function DraggableHostTitle({ host, children }: DraggableHostTitleProps) {
 function getActiveMode(pathname: string) {
   if (pathname === '/terminal') return '/terminal';
   if (pathname === '/rdp') return '/terminal';
+  if (pathname === '/vnc') return '/terminal';
   if (pathname === '/workflow') return '/workflow';
   if (pathname === '/github') return '/github';
   if (pathname === '/assets' || pathname === '/commands' || pathname === '/quick-actions') return '';
@@ -489,11 +500,22 @@ export default function MainLayout({ children }: { children: ReactNode }) {
   const lastOpenHostRef = useRef('');
   const openHostSession = useCallback(async (host: Host) => {
     if (lastOpenHostRef.current === host.id) return;
-    if (hostUsesStoredSecret(host) && !(await requestKeychainNotice())) return;
     lastOpenHostRef.current = host.id;
     window.setTimeout(() => {
       if (lastOpenHostRef.current === host.id) lastOpenHostRef.current = '';
     }, 300);
+    if (isVncHost(host)) {
+      try {
+        await invoke('open_managed_window', { kind: 'vnc', hostIds: [host.id] });
+        closeAssetPanel();
+      } catch (e: unknown) {
+        message.error(tText('common.operationFailed', { error: String(e) }));
+      }
+      return;
+    }
+
+    if (hostUsesStoredSecret(host) && !(await requestKeychainNotice())) return;
+
     if (isWindowsHost(host)) {
       try {
         await invoke('open_managed_window', { kind: 'rdp', hostIds: [host.id] });
@@ -632,13 +654,17 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       rdpEnableAudio: true,
       rdpMapDisk: false,
       rdpDiskPath: '',
+      vncPort: DEFAULT_VNC_PORT,
+      vncPassword: '',
+      vncViewOnly: false,
+      vncShared: true,
     });
     setHostModalTab('basic');
     setHostModalOpen(true);
   }, [hostForm]);
 
   const openEditHostModal = useCallback((host: Host) => {
-    const hostOs = host.os ?? 'linux';
+    const hostOs: Host['os'] = isVncRemoteDesktopHost(host) ? 'vnc' : (host.os ?? 'linux');
     setEditingHost(host);
     hostForm.resetFields();
     console.info('[host-secret] open edit host modal', {
@@ -651,14 +677,14 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       name: host.name,
       ip: host.ip,
       port: host.port,
-      authType: hostOs === 'windows' ? 'password' : host.authType,
-      username: host.username,
-      password: editableSecret(host.password),
-      privateKey: hostOs === 'windows' ? undefined : editableSecret(host.privateKey),
+      authType: hostOs === 'windows' || hostOs === 'vnc' ? 'password' : host.authType,
+      username: hostOs === 'vnc' ? (host.username || 'vnc') : host.username,
+      password: hostOs === 'vnc' ? undefined : editableSecret(host.password),
+      privateKey: hostOs === 'windows' || hostOs === 'vnc' ? undefined : editableSecret(host.privateKey),
       os: hostOs,
       groupId: host.groupId ?? DEFAULT_GROUP_ID,
       remark: host.remark,
-      jumpChain: hostOs === 'windows' ? [] : host.jumpChain ?? [],
+      jumpChain: hostOs === 'windows' || hostOs === 'vnc' ? [] : host.jumpChain ?? [],
       rdpDomain: host.rdpSettings?.domain ?? '',
       rdpDesktopWidth: host.rdpSettings?.desktopWidth ?? 1280,
       rdpDesktopHeight: host.rdpSettings?.desktopHeight ?? 720,
@@ -666,6 +692,10 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       rdpEnableAudio: host.rdpSettings?.enableAudio ?? true,
       rdpMapDisk: host.rdpSettings?.mapDisk ?? false,
       rdpDiskPath: host.rdpSettings?.diskPath ?? '',
+      vncPort: host.rdpSettings?.vncPort ?? DEFAULT_VNC_PORT,
+      vncPassword: host.rdpSettings?.vncPassword ?? '',
+      vncViewOnly: host.rdpSettings?.vncViewOnly ?? false,
+      vncShared: host.rdpSettings?.vncShared ?? true,
     });
     setHostModalTab('basic');
     setHostModalOpen(true);
@@ -679,10 +709,10 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     hostForm.setFieldValue('os', nextOs);
 
     if (nextOs === 'windows') {
-      if (!currentPort || currentPort === DEFAULT_SSH_PORT) {
+      if (!currentPort || currentPort === DEFAULT_SSH_PORT || currentPort === DEFAULT_VNC_PORT) {
         hostForm.setFieldValue('port', DEFAULT_RDP_PORT);
       }
-      if (!currentUsername || currentUsername === 'root') {
+      if (!currentUsername || currentUsername === 'root' || currentUsername === 'vnc') {
         hostForm.setFieldValue('username', 'Administrator');
       }
       hostForm.setFieldValue('authType', 'password');
@@ -706,10 +736,36 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       return;
     }
 
-    if (!currentPort || currentPort === DEFAULT_RDP_PORT) {
+    if (nextOs === 'vnc') {
+      if (!currentPort || currentPort === DEFAULT_SSH_PORT || currentPort === DEFAULT_RDP_PORT) {
+        hostForm.setFieldValue('port', DEFAULT_VNC_PORT);
+      }
+      if (!currentUsername || currentUsername === 'root' || currentUsername === 'Administrator') {
+        hostForm.setFieldValue('username', 'vnc');
+      }
+      hostForm.setFieldValue('authType', 'password');
+      hostForm.setFieldValue('password', undefined);
+      hostForm.setFieldValue('privateKey', undefined);
+      hostForm.setFieldValue('jumpChain', []);
+      hostForm.setFieldValue('rdpDomain', '');
+      hostForm.setFieldValue('rdpDiskPath', '');
+      if (!hostForm.getFieldValue('vncPort')) {
+        hostForm.setFieldValue('vncPort', DEFAULT_VNC_PORT);
+      }
+      if (hostForm.getFieldValue('vncShared') === undefined) {
+        hostForm.setFieldValue('vncShared', true);
+      }
+      if (hostForm.getFieldValue('vncViewOnly') === undefined) {
+        hostForm.setFieldValue('vncViewOnly', false);
+      }
+      setHostModalTab('basic');
+      return;
+    }
+
+    if (!currentPort || currentPort === DEFAULT_RDP_PORT || currentPort === DEFAULT_VNC_PORT) {
       hostForm.setFieldValue('port', DEFAULT_SSH_PORT);
     }
-    if (currentUsername === 'Administrator') {
+    if (!currentUsername || currentUsername === 'Administrator' || currentUsername === 'vnc') {
       hostForm.setFieldValue('username', 'root');
     }
     hostForm.setFieldValue('rdpDomain', '');
@@ -727,20 +783,20 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     try {
       const values = await hostForm.validateFields();
       const os = values.os ?? 'linux';
-      const authType = os === 'windows' ? 'password' : values.authType;
+      const authType = os === 'windows' || os === 'vnc' ? 'password' : values.authType;
       const normalizedHost: Omit<Host, 'id' | 'createdAt' | 'updatedAt'> = {
         name: values.name,
         ip: values.ip,
-        port: values.port ?? (os === 'windows' ? DEFAULT_RDP_PORT : DEFAULT_SSH_PORT),
+        port: values.port ?? (os === 'windows' ? DEFAULT_RDP_PORT : os === 'vnc' ? DEFAULT_VNC_PORT : DEFAULT_SSH_PORT),
         authType,
-        username: values.username,
-        password: submittedSecret(values.password),
-        privateKey: os === 'windows' ? undefined : submittedSecret(values.privateKey),
+        username: os === 'vnc' ? (values.username?.trim() || 'vnc') : values.username,
+        password: os === 'vnc' ? undefined : submittedSecret(values.password),
+        privateKey: os === 'windows' || os === 'vnc' ? undefined : submittedSecret(values.privateKey),
         os,
         tags: values.tags ?? [],
         groupId: values.groupId && values.groupId !== DEFAULT_GROUP_ID ? values.groupId : undefined,
         remark: values.remark ?? '',
-        jumpChain: os === 'windows' ? [] : values.jumpChain ?? [],
+        jumpChain: os === 'windows' || os === 'vnc' ? [] : values.jumpChain ?? [],
         rdpSettings: buildRdpSettings(values, os),
       };
       console.info('[host-secret] submit host form', {
@@ -814,8 +870,9 @@ export default function MainLayout({ children }: { children: ReactNode }) {
   }, []);
 
   const renderHostTitle = useCallback((host: Host) => {
-    const openLabel = isWindowsHost(host) ? t('assets.openRdp') : t('assets.openTerminal');
-    const openIcon = isWindowsHost(host) ? <CloudServerOutlined /> : <CodeOutlined />;
+    const vncHost = isVncHost(host);
+    const openLabel = vncHost ? t('assets.openVnc') : (isWindowsHost(host) ? t('assets.openRdp') : t('assets.openTerminal'));
+    const openIcon = vncHost || isWindowsHost(host) ? <CloudServerOutlined /> : <CodeOutlined />;
 
     return (
       <div
@@ -835,7 +892,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
             <span className="asset-tree-host-name">{host.name}</span>
             <span className="asset-tree-host-meta">{host.username}@{host.ip}:{host.port}</span>
             <div className="asset-tree-host-details">
-              <span>{isWindowsHost(host) ? t('assets.windowsHost') : t('assets.linuxHost')}</span>
+              <span>{vncHost ? t('assets.vncHost') : (isWindowsHost(host) ? t('assets.windowsHost') : t('assets.linuxHost'))}</span>
               {host.remark ? <span>{host.remark}</span> : null}
             </div>
           </div>
@@ -1324,8 +1381,9 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                     const target = ctxMenu.target as { type: 'host'; hostId: string };
                     const host = hosts.find((h) => h.id === target.hostId);
                     if (!host) return null;
-                    const openLabel = isWindowsHost(host) ? t('assets.openRdp') : t('assets.openTerminal');
-                    const openIcon = isWindowsHost(host) ? <CloudServerOutlined /> : <CodeOutlined />;
+                    const vncHost = isVncHost(host);
+                    const openLabel = vncHost ? t('assets.openVnc') : (isWindowsHost(host) ? t('assets.openRdp') : t('assets.openTerminal'));
+                    const openIcon = vncHost || isWindowsHost(host) ? <CloudServerOutlined /> : <CodeOutlined />;
                     return (
                       <>
                         <button type="button" className="asset-ctx-menu-item"
@@ -1429,6 +1487,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                                 options={[
                                   { value: 'linux', label: t('assets.linuxHost') },
                                   { value: 'windows', label: t('assets.windowsHost') },
+                                  { value: 'vnc', label: t('assets.vncHost') },
                                 ]}
                                 onChange={handleHostOsChange}
                               />
@@ -1442,26 +1501,28 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                               <InputNumber min={1} max={65535} />
                             </Form.Item>
                           </div>
-                          <div className="asset-host-form-grid asset-host-form-grid-auth">
-                            <Form.Item name="authType" label={t('assets.auth')} rules={[{ required: true, message: tText('common.required') }]}>
-                              <Select<Host['authType']> options={[
-                                { value: 'password', label: t('assets.passwordAuth') },
-                                ...(os === 'windows' ? [] : [{ value: 'key' as const, label: t('assets.keyAuth') }]),
-                              ]} />
-                            </Form.Item>
-                            <Form.Item name="username" label={t('assets.username')} rules={[{ required: true, message: tText('common.required') }]}>
-                              <Input placeholder={os === 'windows' ? 'Administrator' : 'root'} />
-                            </Form.Item>
-                            {os !== 'windows' && getFieldValue('authType') === 'key' ? (
-                              <Form.Item name="privateKey" label={t('assets.sshPrivateKey')}>
-                                <Input.TextArea rows={1} placeholder={tText('assets.pastePrivateKey')} />
+                          {os === 'vnc' ? null : (
+                            <div className="asset-host-form-grid asset-host-form-grid-auth">
+                              <Form.Item name="authType" label={t('assets.auth')} rules={[{ required: true, message: tText('common.required') }]}>
+                                <Select<Host['authType']> options={[
+                                  { value: 'password', label: t('assets.passwordAuth') },
+                                  ...(os === 'windows' ? [] : [{ value: 'key' as const, label: t('assets.keyAuth') }]),
+                                ]} />
                               </Form.Item>
-                            ) : (
-                              <Form.Item name="password" label={t('assets.password')}>
-                                <Input.Password placeholder={editingHost ? tText('assets.passwordKeepPlaceholder') : tText('assets.passwordPlaceholder')} />
+                              <Form.Item name="username" label={t('assets.username')} rules={[{ required: true, message: tText('common.required') }]}>
+                                <Input placeholder={os === 'windows' ? 'Administrator' : 'root'} />
                               </Form.Item>
-                            )}
-                          </div>
+                              {os !== 'windows' && getFieldValue('authType') === 'key' ? (
+                                <Form.Item name="privateKey" label={t('assets.sshPrivateKey')}>
+                                  <Input.TextArea rows={1} placeholder={tText('assets.pastePrivateKey')} />
+                                </Form.Item>
+                              ) : (
+                                <Form.Item name="password" label={t('assets.password')}>
+                                  <Input.Password placeholder={editingHost ? tText('assets.passwordKeepPlaceholder') : tText('assets.passwordPlaceholder')} />
+                                </Form.Item>
+                              )}
+                            </div>
+                          )}
                           <div className="asset-host-form-grid asset-host-form-grid-meta">
                             <Form.Item name="groupId" label={t('assets.group')}>
                               <TreeSelect
@@ -1474,7 +1535,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                             </Form.Item>
                           </div>
 
-                          {os === 'windows' ? null : (
+                          {os === 'linux' ? (
                             <Form.Item name="jumpChain" label={t('assets.jumpChain')} extra={t('assets.jumpChainExtra')} className="asset-host-form-jump">
                               <Select
                                 mode="multiple"
@@ -1483,7 +1544,39 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                                 options={hosts.filter((h) => h.os === 'linux').map((h) => ({ value: h.id, label: `${h.name} (${h.ip})` }))}
                               />
                             </Form.Item>
-                          )}
+                          ) : null}
+                        </div>
+                      );
+                      const vncTab = (
+                        <div className="asset-host-tab-pane asset-host-rdp-settings">
+                          <div className="asset-host-rdp-settings-header">
+                            <span>{t('assets.vncAdvanced')}</span>
+                            <small>{t('assets.vncAdvancedExtra')}</small>
+                          </div>
+                          <div className="asset-host-form-grid asset-host-form-grid-rdp">
+                            <Form.Item name="vncPort" label={t('assets.vncPort')}>
+                              <InputNumber min={1} max={65535} />
+                            </Form.Item>
+                            <Form.Item name="vncPassword" label={t('assets.vncPassword')}>
+                              <Input.Password placeholder={tText('assets.vncPasswordPlaceholder')} />
+                            </Form.Item>
+                          </div>
+                          <div className="asset-host-rdp-options">
+                            <Form.Item name="vncShared" valuePropName="checked" className="asset-host-rdp-option">
+                              <Switch />
+                            </Form.Item>
+                            <div className="asset-host-rdp-option-copy">
+                              <span>{t('assets.vncShared')}</span>
+                              <small>{t('assets.vncSharedExtra')}</small>
+                            </div>
+                            <Form.Item name="vncViewOnly" valuePropName="checked" className="asset-host-rdp-option">
+                              <Switch />
+                            </Form.Item>
+                            <div className="asset-host-rdp-option-copy">
+                              <span>{t('assets.vncViewOnly')}</span>
+                              <small>{t('assets.vncViewOnlyExtra')}</small>
+                            </div>
+                          </div>
                         </div>
                       );
                       const rdpTab = (
@@ -1541,6 +1634,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                           items={[
                             { key: 'basic', label: t('assets.hostBasicInfo'), children: basicTab },
                             ...(os === 'windows' ? [{ key: 'rdp', label: t('assets.rdpAdvancedTab'), children: rdpTab }] : []),
+                            ...(os === 'vnc' ? [{ key: 'vnc', label: t('assets.vncAdvancedTab'), children: vncTab }] : []),
                           ]}
                         />
                       );

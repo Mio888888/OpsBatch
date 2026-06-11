@@ -1,4 +1,5 @@
 export interface RdpSettings {
+  protocol?: 'rdp' | 'vnc';
   domain?: string;
   desktopWidth?: number;
   desktopHeight?: number;
@@ -6,6 +7,10 @@ export interface RdpSettings {
   enableAudio?: boolean;
   mapDisk?: boolean;
   diskPath?: string;
+  vncPort?: number;
+  vncPassword?: string;
+  vncViewOnly?: boolean;
+  vncShared?: boolean;
 }
 
 export interface Host {
@@ -17,7 +22,7 @@ export interface Host {
   username: string;
   password?: string;
   privateKey?: string;
-  os: 'linux' | 'windows';
+  os: 'linux' | 'windows' | 'vnc';
   tags: string[];
   remark: string;
   groupId?: string;

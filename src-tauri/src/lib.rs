@@ -59,6 +59,7 @@ pub fn run() {
             app.manage(commands::forward::ForwardManager::new());
             app.manage(commands::rdp::RdpManager::new());
             app.manage(commands::rdp::RdpWebRtcManager::new());
+            app.manage(commands::vnc::VncManager::default());
             app.manage(Arc::new(commands::mcp::McpManager::new()));
             let registry = ssh::SshConnectionRegistry::new();
             app.manage(registry);
@@ -237,6 +238,10 @@ pub fn run() {
             commands::rdp::webrtc::rdp_webrtc_create_offer,
             commands::rdp::webrtc::rdp_webrtc_set_answer,
             commands::rdp::webrtc::rdp_webrtc_close,
+            // VNC
+            commands::vnc::vnc_connect,
+            commands::vnc::vnc_send_input,
+            commands::vnc::vnc_disconnect,
             // Terminal
             commands::terminal::terminal_connect,
             commands::terminal::terminal_connect_local,

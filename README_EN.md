@@ -2,7 +2,7 @@
 
 [简体中文](README_CN.md) | [English](README_EN.md)
 
-OpsBatch is a local desktop workbench for operations workflows. It centralizes server assets, SSH terminals, batch commands, script libraries, file transfer, automation workflows, and operations knowledge synchronization. The current project version is `0.1.0`. The desktop app is built with Tauri v2, React 19, TypeScript/Vite, and a Rust backend, with core data persisted in a local SQLite database.
+OpsBatch is a local desktop workbench for operations workflows. It centralizes server assets, SSH terminals, batch commands, script libraries, file transfer, automation workflows, and operations knowledge synchronization. The current project version is `0.1.1`. The desktop app is built with Tauri v2, React 19, TypeScript/Vite, and a Rust backend, with core data persisted in a local SQLite database.
 
 
 ## Product Positioning

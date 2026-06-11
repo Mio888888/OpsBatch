@@ -54,6 +54,7 @@ struct HostRdpFields {
     password: Option<String>,
     os: String,
     settings: StoredRdpSettings,
+    proxy: Option<crate::ssh::ProxySettings>,
 }
 
 pub(super) enum RdpSessionCommand {
@@ -189,6 +190,7 @@ pub async fn rdp_connect(
         &host_fields.host,
         Some(host_fields.port),
         &host_fields.settings,
+        host_fields.proxy,
     )?;
 
     app.state::<RdpManager>()
@@ -217,10 +219,11 @@ fn load_host_rdp_fields(app: &tauri::AppHandle, host_id: &str) -> Result<HostRdp
     let db = app.state::<Database>();
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     conn.query_row(
-        "SELECT ip, port, auth_type, username, password, os, COALESCE(rdp_settings, '{}') FROM hosts WHERE id=?1",
+        "SELECT ip, port, auth_type, username, password, os, COALESCE(rdp_settings, '{}'), COALESCE(proxy_settings, '{}') FROM hosts WHERE id=?1",
         params![host_id],
         |row| {
             let settings_json = row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "{}".to_string());
+            let proxy_json = row.get::<_, Option<String>>(7)?;
             let settings = serde_json::from_str(&settings_json).unwrap_or_default();
             Ok(HostRdpFields {
                 host: row.get(0)?,
@@ -230,6 +233,7 @@ fn load_host_rdp_fields(app: &tauri::AppHandle, host_id: &str) -> Result<HostRdp
                 password: row.get(4)?,
                 os: row.get(5)?,
                 settings,
+                proxy: crate::commands::hosts::parse_host_proxy_settings(proxy_json),
             })
         },
     )
@@ -241,6 +245,7 @@ fn normalize_rdp_options(
     host: &str,
     stored_port: Option<i32>,
     settings: &StoredRdpSettings,
+    proxy: Option<crate::ssh::ProxySettings>,
 ) -> Result<RdpConnectionOptions, String> {
     let host = host.trim();
     if host.is_empty() {
@@ -287,6 +292,7 @@ fn normalize_rdp_options(
         enable_clipboard: settings.enable_clipboard.unwrap_or(true),
         enable_audio: settings.enable_audio.unwrap_or(default_enable_audio),
         transport_mode,
+        proxy,
     })
 }
 

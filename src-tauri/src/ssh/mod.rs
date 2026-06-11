@@ -1,5 +1,6 @@
 mod host_key;
 
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use dashmap::DashMap;
 use russh::keys::ssh_key;
 use russh::{
@@ -10,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::fs;
 use std::future::Future;
+use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -27,6 +29,34 @@ pub struct SshConfig {
     pub auth_type: String,
     pub password: Option<String>,
     pub private_key: Option<String>,
+    pub proxy: Option<ProxySettings>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProxyType {
+    Http,
+    Socks5,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProxySettings {
+    pub enabled: bool,
+    #[serde(rename = "type")]
+    pub proxy_type: ProxyType,
+    pub host: String,
+    pub port: u16,
+    pub username: Option<String>,
+    pub password: Option<String>,
+}
+
+impl ProxySettings {
+    fn enabled_endpoint(&self) -> Option<(&str, u16)> {
+        if !self.enabled || self.host.trim().is_empty() || self.port == 0 {
+            return None;
+        }
+        Some((self.host.trim(), self.port))
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,6 +153,204 @@ fn build_ssh_client_config() -> client::Config {
         nodelay: true,
         ..Default::default()
     }
+}
+
+fn resolve_socket_addr(host: &str, port: u16) -> Result<std::net::SocketAddr, String> {
+    let addr = format!("{}:{}", host, port);
+    addr.to_socket_addrs()
+        .map_err(|e| format!("DNS解析失败 {}: {}", addr, e))?
+        .next()
+        .ok_or_else(|| format!("未找到地址: {}", addr))
+}
+
+fn connect_tcp_endpoint(host: &str, port: u16, timeout_secs: u64) -> Result<TcpStream, String> {
+    let socket_addr = resolve_socket_addr(host, port)?;
+    TcpStream::connect_timeout(&socket_addr, Duration::from_secs(timeout_secs))
+        .map_err(|e| format!("TCP连接失败: {}", e))
+}
+
+fn connect_tcp_for_ssh(config: &SshConfig, timeout_secs: u64) -> Result<TcpStream, String> {
+    connect_tcp_stream(
+        &config.host,
+        config.port,
+        config.proxy.clone(),
+        timeout_secs,
+    )
+}
+
+pub fn connect_tcp_stream(
+    host: &str,
+    port: u16,
+    proxy: Option<ProxySettings>,
+    timeout_secs: u64,
+) -> Result<TcpStream, String> {
+    let config = SshConfig {
+        host: host.to_string(),
+        port,
+        username: String::new(),
+        auth_type: "password".to_string(),
+        password: None,
+        private_key: None,
+        proxy,
+    };
+
+    match config
+        .proxy
+        .as_ref()
+        .and_then(ProxySettings::enabled_endpoint)
+    {
+        Some(_) => connect_tcp_via_proxy(&config, timeout_secs),
+        None => connect_tcp_endpoint(host, port, timeout_secs),
+    }
+}
+
+fn connect_tcp_via_proxy(config: &SshConfig, timeout_secs: u64) -> Result<TcpStream, String> {
+    let proxy = config
+        .proxy
+        .as_ref()
+        .ok_or_else(|| "代理配置缺失".to_string())?;
+    let (proxy_host, proxy_port) = proxy
+        .enabled_endpoint()
+        .ok_or_else(|| "代理配置不完整".to_string())?;
+    let mut tcp = connect_tcp_endpoint(proxy_host, proxy_port, timeout_secs)
+        .map_err(|e| format!("代理 {}:{} 连接失败: {}", proxy_host, proxy_port, e))?;
+    tcp.set_read_timeout(Some(Duration::from_secs(timeout_secs)))
+        .map_err(|e| format!("设置代理读取超时失败: {}", e))?;
+    tcp.set_write_timeout(Some(Duration::from_secs(timeout_secs)))
+        .map_err(|e| format!("设置代理写入超时失败: {}", e))?;
+
+    match proxy.proxy_type {
+        ProxyType::Http => establish_http_proxy_tunnel(&mut tcp, config, proxy)?,
+        ProxyType::Socks5 => establish_socks5_proxy_tunnel(&mut tcp, config, proxy)?,
+    }
+
+    tcp.set_read_timeout(None)
+        .map_err(|e| format!("清理代理读取超时失败: {}", e))?;
+    tcp.set_write_timeout(None)
+        .map_err(|e| format!("清理代理写入超时失败: {}", e))?;
+    Ok(tcp)
+}
+
+fn establish_http_proxy_tunnel(
+    tcp: &mut TcpStream,
+    config: &SshConfig,
+    proxy: &ProxySettings,
+) -> Result<(), String> {
+    let target = format!("{}:{}", config.host, config.port);
+    let mut request = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n");
+    if let Some(username) = proxy.username.as_deref().filter(|value| !value.is_empty()) {
+        let password = proxy.password.as_deref().unwrap_or("");
+        let token = BASE64.encode(format!("{username}:{password}"));
+        request.push_str(&format!("Proxy-Authorization: Basic {token}\r\n"));
+    }
+    request.push_str("\r\n");
+    tcp.write_all(request.as_bytes())
+        .map_err(|e| format!("HTTP 代理请求失败: {}", e))?;
+
+    let mut response = Vec::with_capacity(256);
+    let mut byte = [0u8; 1];
+    while response.len() < 8192 {
+        tcp.read_exact(&mut byte)
+            .map_err(|e| format!("HTTP 代理响应读取失败: {}", e))?;
+        response.push(byte[0]);
+        if response.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+    let response_text = String::from_utf8_lossy(&response);
+    let status_line = response_text.lines().next().unwrap_or_default();
+    if !status_line.contains(" 200 ") {
+        return Err(format!("HTTP 代理 CONNECT 失败: {}", status_line));
+    }
+    Ok(())
+}
+
+fn establish_socks5_proxy_tunnel(
+    tcp: &mut TcpStream,
+    config: &SshConfig,
+    proxy: &ProxySettings,
+) -> Result<(), String> {
+    let needs_auth = proxy
+        .username
+        .as_deref()
+        .is_some_and(|value| !value.is_empty());
+    let greeting: &[u8] = if needs_auth {
+        &[0x05, 0x02, 0x00, 0x02]
+    } else {
+        &[0x05, 0x01, 0x00]
+    };
+    tcp.write_all(greeting)
+        .map_err(|e| format!("SOCKS5 握手失败: {}", e))?;
+
+    let mut method = [0u8; 2];
+    tcp.read_exact(&mut method)
+        .map_err(|e| format!("SOCKS5 方法响应读取失败: {}", e))?;
+    if method[0] != 0x05 || method[1] == 0xff {
+        return Err("SOCKS5 代理没有可用认证方式".to_string());
+    }
+
+    if method[1] == 0x02 {
+        let username = proxy.username.as_deref().unwrap_or("");
+        let password = proxy.password.as_deref().unwrap_or("");
+        if username.len() > u8::MAX as usize || password.len() > u8::MAX as usize {
+            return Err("SOCKS5 用户名或密码过长".to_string());
+        }
+        let mut auth = Vec::with_capacity(3 + username.len() + password.len());
+        auth.push(0x01);
+        auth.push(username.len() as u8);
+        auth.extend_from_slice(username.as_bytes());
+        auth.push(password.len() as u8);
+        auth.extend_from_slice(password.as_bytes());
+        tcp.write_all(&auth)
+            .map_err(|e| format!("SOCKS5 认证请求失败: {}", e))?;
+
+        let mut auth_response = [0u8; 2];
+        tcp.read_exact(&mut auth_response)
+            .map_err(|e| format!("SOCKS5 认证响应读取失败: {}", e))?;
+        if auth_response != [0x01, 0x00] {
+            return Err("SOCKS5 代理认证失败".to_string());
+        }
+    } else if method[1] != 0x00 {
+        return Err(format!("SOCKS5 不支持的认证方式: {}", method[1]));
+    }
+
+    let host_bytes = config.host.as_bytes();
+    if host_bytes.len() > u8::MAX as usize {
+        return Err("目标主机名过长，SOCKS5 无法连接".to_string());
+    }
+    let mut request = Vec::with_capacity(7 + host_bytes.len());
+    request.extend_from_slice(&[0x05, 0x01, 0x00, 0x03, host_bytes.len() as u8]);
+    request.extend_from_slice(host_bytes);
+    request.extend_from_slice(&config.port.to_be_bytes());
+    tcp.write_all(&request)
+        .map_err(|e| format!("SOCKS5 CONNECT 请求失败: {}", e))?;
+
+    let mut header = [0u8; 4];
+    tcp.read_exact(&mut header)
+        .map_err(|e| format!("SOCKS5 CONNECT 响应读取失败: {}", e))?;
+    if header[0] != 0x05 || header[1] != 0x00 {
+        return Err(format!("SOCKS5 CONNECT 失败，状态码 {}", header[1]));
+    }
+
+    match header[3] {
+        0x01 => read_and_discard(tcp, 6)?,
+        0x03 => {
+            let mut len = [0u8; 1];
+            tcp.read_exact(&mut len)
+                .map_err(|e| format!("SOCKS5 响应地址长度读取失败: {}", e))?;
+            read_and_discard(tcp, len[0] as usize + 2)?;
+        }
+        0x04 => read_and_discard(tcp, 18)?,
+        other => return Err(format!("SOCKS5 响应地址类型不支持: {}", other)),
+    }
+
+    Ok(())
+}
+
+fn read_and_discard(tcp: &mut TcpStream, len: usize) -> Result<(), String> {
+    let mut buffer = vec![0u8; len];
+    tcp.read_exact(&mut buffer)
+        .map_err(|e| format!("SOCKS5 响应读取失败: {}", e))
 }
 
 impl client::Handler for ClientHandler {
@@ -305,15 +533,7 @@ fn connect_internal_with_host_id(
 
     let config_clone = config.clone();
 
-    let addr = format!("{}:{}", config_clone.host, config_clone.port);
-    let socket_addr = addr
-        .to_socket_addrs()
-        .map_err(|e| format!("DNS解析失败 {}: {}", addr, e))?
-        .next()
-        .ok_or_else(|| format!("未找到地址: {}", addr))?;
-
-    let tcp = TcpStream::connect_timeout(&socket_addr, Duration::from_secs(timeout_secs))
-        .map_err(|e| format!("TCP连接失败: {}", e))?;
+    let tcp = connect_tcp_for_ssh(&config_clone, timeout_secs)?;
     tcp.set_nonblocking(true)
         .map_err(|e| format!("设置非阻塞失败: {}", e))?;
 
@@ -392,14 +612,8 @@ pub fn connect_via_jump_chain(
 
     // Step 1: Direct TCP connect to first jump host
     let first_config = &jump_configs[0];
-    let addr = format!("{}:{}", first_config.host, first_config.port);
-    let socket_addr = addr
-        .to_socket_addrs()
-        .map_err(|e| format!("DNS解析失败 {}: {}", addr, e))?
-        .next()
-        .ok_or_else(|| format!("未找到地址: {}", addr))?;
-    let tcp = TcpStream::connect_timeout(&socket_addr, Duration::from_secs(timeout_secs))
-        .map_err(|e| format!("跳板机 {} TCP连接失败: {}", first_config.host, e))?;
+    let tcp = connect_tcp_for_ssh(first_config, timeout_secs)
+        .map_err(|e| format!("跳板机 {} 连接失败: {}", first_config.host, e))?;
     tcp.set_nonblocking(true)
         .map_err(|e| format!("设置非阻塞失败: {}", e))?;
 
@@ -1228,7 +1442,7 @@ impl SshConnectionRegistry {
 
 #[cfg(test)]
 mod tests {
-    use super::{SshConfig, SshConnectionRegistry};
+    use super::{ProxySettings, ProxyType, SshConfig, SshConnectionRegistry};
     use std::time::Duration;
 
     fn sample_config(host: &str) -> SshConfig {
@@ -1239,7 +1453,28 @@ mod tests {
             auth_type: "password".to_string(),
             password: Some("secret".to_string()),
             private_key: None,
+            proxy: None,
         }
+    }
+
+    #[test]
+    fn ssh_config_can_carry_proxy_settings() {
+        let mut config = sample_config("192.0.2.10");
+        config.proxy = Some(ProxySettings {
+            enabled: true,
+            proxy_type: ProxyType::Socks5,
+            host: "proxy.internal".to_string(),
+            port: 1080,
+            username: Some("deploy".to_string()),
+            password: Some("secret".to_string()),
+        });
+
+        let proxy = config.proxy.expect("proxy should be present");
+
+        assert!(proxy.enabled);
+        assert_eq!(proxy.host, "proxy.internal");
+        assert_eq!(proxy.port, 1080);
+        assert!(matches!(proxy.proxy_type, ProxyType::Socks5));
     }
 
     #[test]

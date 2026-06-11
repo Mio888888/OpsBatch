@@ -1,6 +1,8 @@
 use ironrdp::pdu::geometry::{InclusiveRectangle, Rectangle as _};
 use serde::{Deserialize, Serialize};
 
+use crate::ssh::ProxySettings;
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RdpConnectRequest {
@@ -33,6 +35,7 @@ pub(super) struct RdpConnectionOptions {
     pub enable_clipboard: bool,
     pub enable_audio: bool,
     pub transport_mode: RdpTransportMode,
+    pub proxy: Option<ProxySettings>,
 }
 
 #[derive(Debug, Clone)]

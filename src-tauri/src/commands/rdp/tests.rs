@@ -29,9 +29,7 @@ use super::protocol::{
     h264_direct_encoded_video_receiver_count_for_tests, negotiation_response_flags_diagnostics,
     rdp_static_channel_names,
 };
-use super::types::{
-    RdpConnectionOptions, RdpMouseButton, RdpStatusDetail, RdpTransportMode,
-};
+use super::types::{RdpConnectionOptions, RdpMouseButton, RdpStatusDetail, RdpTransportMode};
 use super::*;
 use crate::commands::rdp::config::build_ironrdp_config;
 
@@ -46,8 +44,14 @@ fn normalize_options_defaults_to_rdp_port_and_safe_desktop_size() {
         transport_mode: None,
     };
 
-    let options =
-        normalize_rdp_options(&request, "10.0.0.5", None, &StoredRdpSettings::default()).unwrap();
+    let options = normalize_rdp_options(
+        &request,
+        "10.0.0.5",
+        None,
+        &StoredRdpSettings::default(),
+        None,
+    )
+    .unwrap();
 
     assert_eq!(options.host, "10.0.0.5");
     assert_eq!(options.port, 3389);
@@ -69,8 +73,14 @@ fn h264_direct_mode_reports_available_when_egfx_bridge_is_enabled() {
         transport_mode: Some(RdpTransportMode::H264Direct),
     };
 
-    let options =
-        normalize_rdp_options(&request, "10.0.0.5", None, &StoredRdpSettings::default()).unwrap();
+    let options = normalize_rdp_options(
+        &request,
+        "10.0.0.5",
+        None,
+        &StoredRdpSettings::default(),
+        None,
+    )
+    .unwrap();
 
     assert_eq!(options.transport_mode, RdpTransportMode::H264Direct);
 }
@@ -86,8 +96,14 @@ fn h264_direct_mode_enables_audio_unless_saved_setting_disables_it() {
         transport_mode: Some(RdpTransportMode::H264Direct),
     };
 
-    let default_options =
-        normalize_rdp_options(&request, "10.0.0.5", None, &StoredRdpSettings::default()).unwrap();
+    let default_options = normalize_rdp_options(
+        &request,
+        "10.0.0.5",
+        None,
+        &StoredRdpSettings::default(),
+        None,
+    )
+    .unwrap();
     assert!(default_options.enable_audio);
 
     let disabled_settings = StoredRdpSettings {
@@ -95,7 +111,7 @@ fn h264_direct_mode_enables_audio_unless_saved_setting_disables_it() {
         ..StoredRdpSettings::default()
     };
     let disabled_options =
-        normalize_rdp_options(&request, "10.0.0.5", None, &disabled_settings).unwrap();
+        normalize_rdp_options(&request, "10.0.0.5", None, &disabled_settings, None).unwrap();
     assert!(!disabled_options.enable_audio);
 }
 
@@ -117,7 +133,8 @@ fn normalize_options_rejects_empty_credentials() {
         &request,
         "10.0.0.5",
         Some(3390),
-        &StoredRdpSettings::default()
+        &StoredRdpSettings::default(),
+        None,
     )
     .is_ok());
 }
@@ -142,7 +159,7 @@ fn normalize_options_prefers_saved_rdp_settings() {
         disk_path: Some("/Users/admin/Downloads".to_string()),
     };
 
-    let options = normalize_rdp_options(&request, "10.0.0.5", Some(3389), &settings).unwrap();
+    let options = normalize_rdp_options(&request, "10.0.0.5", Some(3389), &settings, None).unwrap();
 
     assert_eq!(options.width, 1920);
     assert_eq!(options.height, 1080);
@@ -187,6 +204,7 @@ fn rdp_config_advertises_tls_fallback_and_autologon() {
         "10.0.0.5",
         Some(3389),
         &StoredRdpSettings::default(),
+        None,
     )
     .unwrap();
     let credentials = RdpCredentials {
@@ -235,7 +253,7 @@ fn rdp_config_enables_audio_playback_when_requested() {
         enable_audio: Some(true),
         ..StoredRdpSettings::default()
     };
-    let options = normalize_rdp_options(&request, "10.0.0.5", Some(3389), &settings).unwrap();
+    let options = normalize_rdp_options(&request, "10.0.0.5", Some(3389), &settings, None).unwrap();
     let credentials = RdpCredentials {
         username: "Administrator".to_string(),
         password: "secret".to_string(),
@@ -595,6 +613,7 @@ fn test_rdp_options(enable_clipboard: bool, enable_audio: bool) -> RdpConnection
         enable_clipboard,
         enable_audio,
         transport_mode: RdpTransportMode::LegacyBitmap,
+        proxy: None,
     }
 }
 

@@ -57,7 +57,7 @@ import { useTranslation } from '../i18n';
 import type { TranslationKey } from '../i18n';
 import { useAssetsStore } from '../stores/assets';
 import { useThemeStore } from '../stores/theme';
-import type { AssetGroup, Host } from '../types';
+import type { AssetGroup, Host, ProxySettings } from '../types';
 import { requestKeychainNotice } from '../utils/keychainNotice';
 import {
   calculateProcessCpuPercent,
@@ -74,6 +74,7 @@ import {
   MIN_RDP_DESKTOP_HEIGHT,
   MIN_RDP_DESKTOP_WIDTH,
 } from '../utils/rdpSettings';
+import { buildProxySettings, DEFAULT_PROXY_PORTS } from '../utils/proxySettings';
 
 const { Content } = Layout;
 
@@ -231,6 +232,12 @@ interface HostFormValues {
   vncPassword?: string;
   vncViewOnly?: boolean;
   vncShared?: boolean;
+  proxyEnabled?: boolean;
+  proxyType?: ProxySettings['type'];
+  proxyHost?: string;
+  proxyPort?: number;
+  proxyUsername?: string;
+  proxyPassword?: string;
 }
 
 const DEFAULT_GROUP_ID = '__default__';
@@ -658,6 +665,12 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       vncPassword: '',
       vncViewOnly: false,
       vncShared: true,
+      proxyEnabled: false,
+      proxyType: 'socks5',
+      proxyHost: '',
+      proxyPort: DEFAULT_PROXY_PORTS.socks5,
+      proxyUsername: '',
+      proxyPassword: '',
     });
     setHostModalTab('basic');
     setHostModalOpen(true);
@@ -696,6 +709,12 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       vncPassword: host.rdpSettings?.vncPassword ?? '',
       vncViewOnly: host.rdpSettings?.vncViewOnly ?? false,
       vncShared: host.rdpSettings?.vncShared ?? true,
+      proxyEnabled: host.proxySettings?.enabled ?? false,
+      proxyType: host.proxySettings?.type ?? 'socks5',
+      proxyHost: host.proxySettings?.host ?? '',
+      proxyPort: host.proxySettings?.port ?? DEFAULT_PROXY_PORTS.socks5,
+      proxyUsername: host.proxySettings?.username ?? '',
+      proxyPassword: host.proxySettings?.password ?? '',
     });
     setHostModalTab('basic');
     setHostModalOpen(true);
@@ -798,6 +817,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         remark: values.remark ?? '',
         jumpChain: os === 'windows' || os === 'vnc' ? [] : values.jumpChain ?? [],
         rdpSettings: buildRdpSettings(values, os),
+        proxySettings: buildProxySettings(values),
       };
       console.info('[host-secret] submit host form', {
         hostId: editingHost?.id ?? '(new)',
@@ -1475,6 +1495,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                     {({ getFieldValue }) => {
                       const os = (getFieldValue('os') as Host['os'] | undefined) ?? 'linux';
                       const mapDisk = Boolean(getFieldValue('rdpMapDisk'));
+                      const proxyEnabled = Boolean(getFieldValue('proxyEnabled'));
                       const basicTab = (
                         <div className="asset-host-tab-pane">
                           <div className="asset-host-form-grid asset-host-form-grid-name">
@@ -1534,17 +1555,73 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                               <Input placeholder={tText('assets.remarkPlaceholder')} />
                             </Form.Item>
                           </div>
-
-                          {os === 'linux' ? (
-                            <Form.Item name="jumpChain" label={t('assets.jumpChain')} extra={t('assets.jumpChainExtra')} className="asset-host-form-jump">
-                              <Select
-                                mode="multiple"
-                                allowClear
-                                placeholder={tText('assets.directNoJump')}
-                                options={hosts.filter((h) => h.os === 'linux').map((h) => ({ value: h.id, label: `${h.name} (${h.ip})` }))}
-                              />
+                        </div>
+                      );
+                      const proxySettingsBlock = (
+                        <div className="asset-host-proxy-settings">
+                          <div className="asset-host-rdp-settings-header">
+                            <span>{t('assets.proxySettings')}</span>
+                            <small>{t('assets.proxySettingsExtra')}</small>
+                          </div>
+                          <div className="asset-host-rdp-options asset-host-proxy-toggle">
+                            <Form.Item name="proxyEnabled" valuePropName="checked" className="asset-host-rdp-option">
+                              <Switch />
                             </Form.Item>
+                            <div className="asset-host-rdp-option-copy">
+                              <span>{t('assets.proxyEnabled')}</span>
+                              <small>{t('assets.proxyEnabledExtra')}</small>
+                            </div>
+                          </div>
+                          {proxyEnabled ? (
+                            <>
+                              <div className="asset-host-form-grid asset-host-form-grid-proxy">
+                                <Form.Item name="proxyType" label={t('assets.proxyType')}>
+                                  <Select<ProxySettings['type']>
+                                    options={[
+                                      { value: 'socks5', label: t('assets.proxyTypeSocks5') },
+                                      { value: 'http', label: t('assets.proxyTypeHttp') },
+                                    ]}
+                                    onChange={(value) => {
+                                      if (!hostForm.getFieldValue('proxyPort')) {
+                                        hostForm.setFieldValue('proxyPort', DEFAULT_PROXY_PORTS[value]);
+                                      }
+                                    }}
+                                  />
+                                </Form.Item>
+                                <Form.Item name="proxyHost" label={t('assets.proxyHost')} rules={[{ required: true, message: tText('common.required') }]}>
+                                  <Input placeholder={tText('assets.proxyHostPlaceholder')} />
+                                </Form.Item>
+                                <Form.Item name="proxyPort" label={t('assets.proxyPort')} rules={[{ required: true, message: tText('common.required') }]}>
+                                  <InputNumber min={1} max={65535} />
+                                </Form.Item>
+                              </div>
+                              <div className="asset-host-form-grid asset-host-form-grid-proxy-auth">
+                                <Form.Item name="proxyUsername" label={t('assets.proxyUsername')}>
+                                  <Input placeholder={tText('assets.proxyUsernamePlaceholder')} />
+                                </Form.Item>
+                                <Form.Item name="proxyPassword" label={t('assets.proxyPassword')}>
+                                  <Input.Password placeholder={editingHost ? tText('assets.passwordKeepPlaceholder') : tText('assets.proxyPasswordPlaceholder')} />
+                                </Form.Item>
+                              </div>
+                            </>
                           ) : null}
+                        </div>
+                      );
+                      const linuxAdvancedTab = (
+                        <div className="asset-host-tab-pane asset-host-rdp-settings">
+                          <div className="asset-host-rdp-settings-header">
+                            <span>{t('assets.linuxAdvanced')}</span>
+                            <small>{t('assets.linuxAdvancedExtra')}</small>
+                          </div>
+                          <Form.Item name="jumpChain" label={t('assets.jumpChain')} extra={t('assets.jumpChainExtra')} className="asset-host-form-jump">
+                            <Select
+                              mode="multiple"
+                              allowClear
+                              placeholder={tText('assets.directNoJump')}
+                              options={hosts.filter((h) => h.os === 'linux').map((h) => ({ value: h.id, label: `${h.name} (${h.ip})` }))}
+                            />
+                          </Form.Item>
+                          {proxySettingsBlock}
                         </div>
                       );
                       const vncTab = (
@@ -1577,6 +1654,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                               <small>{t('assets.vncViewOnlyExtra')}</small>
                             </div>
                           </div>
+                          {proxySettingsBlock}
                         </div>
                       );
                       const rdpTab = (
@@ -1624,6 +1702,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                               <Input placeholder={tText('assets.rdpDiskPathPlaceholder')} />
                             </Form.Item>
                           ) : null}
+                          {proxySettingsBlock}
                         </div>
                       );
                       return (
@@ -1633,6 +1712,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                           className="asset-host-tabs"
                           items={[
                             { key: 'basic', label: t('assets.hostBasicInfo'), children: basicTab },
+                            ...(os === 'linux' ? [{ key: 'linux-advanced', label: t('assets.linuxAdvancedTab'), children: linuxAdvancedTab }] : []),
                             ...(os === 'windows' ? [{ key: 'rdp', label: t('assets.rdpAdvancedTab'), children: rdpTab }] : []),
                             ...(os === 'vnc' ? [{ key: 'vnc', label: t('assets.vncAdvancedTab'), children: vncTab }] : []),
                           ]}

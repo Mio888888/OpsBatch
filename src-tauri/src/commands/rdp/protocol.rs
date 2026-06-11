@@ -35,6 +35,7 @@ use super::types::{
 };
 use super::webrtc::RdpWebRtcManager;
 use super::{RdpSessionCommand, RDP_CONNECT_TIMEOUT};
+use crate::ssh;
 
 type RdpFramed = MovableTokioFramed<ironrdp_tls::TlsStream<TcpStream>>;
 const RDP_FRAME_INTERVAL: Duration = Duration::from_millis(16);
@@ -208,10 +209,19 @@ async fn connect_rdp_session(
     credentials: &RdpCredentials,
 ) -> Result<ConnectedRdpSession, String> {
     let addr = format!("{}:{}", options.host, options.port);
-    let tcp = tokio::time::timeout(RDP_CONNECT_TIMEOUT, TcpStream::connect(&addr))
-        .await
-        .map_err(|_| format!("RDP TCP 连接超时: {addr}"))?
-        .map_err(|e| format!("RDP TCP 连接失败 {addr}: {e}"))?;
+    let std_tcp = tokio::task::spawn_blocking({
+        let host = options.host.clone();
+        let port = options.port;
+        let proxy = options.proxy.clone();
+        move || ssh::connect_tcp_stream(&host, port, proxy, RDP_CONNECT_TIMEOUT.as_secs())
+    })
+    .await
+    .map_err(|e| format!("RDP TCP 连接线程异常 {addr}: {e}"))?
+    .map_err(|e| format!("RDP TCP 连接失败 {addr}: {e}"))?;
+    std_tcp
+        .set_nonblocking(true)
+        .map_err(|e| format!("设置 RDP 非阻塞失败: {e}"))?;
+    let tcp = TcpStream::from_std(std_tcp).map_err(|e| format!("RDP TcpStream 转换失败: {e}"))?;
     tcp.set_nodelay(true)
         .map_err(|e| format!("设置 RDP TCP_NODELAY 失败: {e}"))?;
 

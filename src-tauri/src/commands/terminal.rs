@@ -484,7 +484,7 @@ pub async fn terminal_connect(
 ) -> Result<String, String> {
     let session_id = session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    let (ip, port, auth_type, username, password, private_key, jump_chain_json): (
+    let (ip, port, auth_type, username, password, private_key, jump_chain_json, proxy_settings): (
         String,
         i32,
         String,
@@ -492,11 +492,12 @@ pub async fn terminal_connect(
         Option<String>,
         Option<String>,
         String,
+        Option<String>,
     ) = {
         let db = app.state::<Database>();
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
         conn.query_row(
-            "SELECT ip, port, auth_type, username, password, private_key, COALESCE(jump_chain, '[]') FROM hosts WHERE id=?1",
+            "SELECT ip, port, auth_type, username, password, private_key, COALESCE(jump_chain, '[]'), COALESCE(proxy_settings, '{}') FROM hosts WHERE id=?1",
             rusqlite::params![host_id],
             |row| {
                 Ok((
@@ -507,6 +508,7 @@ pub async fn terminal_connect(
                     row.get(4)?,
                     row.get(5)?,
                     row.get::<_, String>(6)?,
+                    row.get(7)?,
                 ))
             },
         )
@@ -551,6 +553,7 @@ pub async fn terminal_connect(
         auth_type: auth_type.clone(),
         password,
         private_key,
+        proxy: crate::commands::hosts::parse_host_proxy_settings(proxy_settings),
     };
     let pool = app.state::<ssh::SshConnectionRegistry>();
     pool.remember_config(&host_id, &config);
@@ -566,13 +569,13 @@ pub async fn terminal_connect(
         let conn = db.conn.lock().map_err(|e| e.to_string())?;
         let mut configs = Vec::with_capacity(jump_chain.len());
         for jump_id in &jump_chain {
-            let (jip, jport, jauth, juname, jpass, jkey): (
-                String, i32, String, String, Option<String>, Option<String>,
+            let (jip, jport, jauth, juname, jpass, jkey, jproxy): (
+                String, i32, String, String, Option<String>, Option<String>, Option<String>,
             ) = conn
                 .query_row(
-                    "SELECT ip, port, auth_type, username, password, private_key FROM hosts WHERE id=?1",
+                    "SELECT ip, port, auth_type, username, password, private_key, COALESCE(proxy_settings, '{}') FROM hosts WHERE id=?1",
                     rusqlite::params![jump_id],
-                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?)),
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
                 )
                 .map_err(|e| format!("跳板机 {} 未找到: {}", jump_id, e))?;
             let jpass =
@@ -610,6 +613,7 @@ pub async fn terminal_connect(
                 auth_type: jauth,
                 password: jpass,
                 private_key: jkey,
+                proxy: crate::commands::hosts::parse_host_proxy_settings(jproxy),
             };
             pool.remember_config(jump_id, &jump_config);
             configs.push(jump_config);

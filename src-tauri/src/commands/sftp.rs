@@ -67,16 +67,17 @@ fn load_host_config(
     }
 
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let (ip, port, auth_type, username, password, private_key): (
+    let (ip, port, auth_type, username, password, private_key, proxy_settings): (
         String,
         i32,
         String,
         String,
         Option<String>,
         Option<String>,
+        Option<String>,
     ) = conn
         .query_row(
-            "SELECT ip, port, auth_type, username, password, private_key FROM hosts WHERE id=?1",
+            "SELECT ip, port, auth_type, username, password, private_key, COALESCE(proxy_settings, '{}') FROM hosts WHERE id=?1",
             rusqlite::params![host_id],
             |row| {
                 Ok((
@@ -86,6 +87,7 @@ fn load_host_config(
                     row.get(3)?,
                     row.get(4)?,
                     row.get(5)?,
+                    row.get(6)?,
                 ))
             },
         )
@@ -102,6 +104,7 @@ fn load_host_config(
         auth_type,
         password,
         private_key,
+        proxy: crate::commands::hosts::parse_host_proxy_settings(proxy_settings),
     })
 }
 

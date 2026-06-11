@@ -13,6 +13,15 @@ export interface RdpSettings {
   vncShared?: boolean;
 }
 
+export interface ProxySettings {
+  enabled: boolean;
+  type: 'http' | 'socks5';
+  host: string;
+  port: number;
+  username?: string;
+  password?: string;
+}
+
 export interface Host {
   id: string;
   name: string;
@@ -28,6 +37,7 @@ export interface Host {
   groupId?: string;
   jumpChain: string[];
   rdpSettings?: RdpSettings;
+  proxySettings?: ProxySettings;
   createdAt: string;
   updatedAt: string;
 }

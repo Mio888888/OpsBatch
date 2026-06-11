@@ -28,6 +28,7 @@ pub struct Host {
     pub status: String,
     pub jump_chain: String,
     pub rdp_settings: String,
+    pub proxy_settings: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -48,6 +49,7 @@ pub struct UpdateHost {
     pub remark: Option<String>,
     pub jump_chain: Option<String>,
     pub rdp_settings: Option<String>,
+    pub proxy_settings: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -101,13 +103,21 @@ struct HostConnectionInfo {
     os: String,
 }
 
+pub(crate) fn parse_host_proxy_settings(value: Option<String>) -> Option<ssh::ProxySettings> {
+    value
+        .and_then(|raw| serde_json::from_str::<ssh::ProxySettings>(&raw).ok())
+        .filter(|settings| {
+            settings.enabled && !settings.host.trim().is_empty() && settings.port > 0
+        })
+}
+
 fn get_host_connection_info(
     db: &Database,
     pool: &crate::ssh::SshConnectionRegistry,
     id: &str,
 ) -> Result<HostConnectionInfo, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let (ip, port, auth_type, username, password, private_key, os): (
+    let (ip, port, auth_type, username, password, private_key, os, proxy_settings): (
         String,
         i32,
         String,
@@ -115,9 +125,10 @@ fn get_host_connection_info(
         Option<String>,
         Option<String>,
         String,
+        Option<String>,
     ) = conn
         .query_row(
-            "SELECT ip, port, auth_type, username, password, private_key, os FROM hosts WHERE id=?1",
+            "SELECT ip, port, auth_type, username, password, private_key, os, COALESCE(proxy_settings, '{}') FROM hosts WHERE id=?1",
             params![id],
             |row| {
                 Ok((
@@ -128,6 +139,7 @@ fn get_host_connection_info(
                     row.get(4)?,
                     row.get(5)?,
                     row.get(6)?,
+                    row.get(7)?,
                 ))
             },
         )
@@ -148,6 +160,7 @@ fn get_host_connection_info(
             auth_type,
             password,
             private_key,
+            proxy: parse_host_proxy_settings(proxy_settings),
         },
         os,
     })
@@ -598,7 +611,7 @@ pub async fn list_hosts(db: tauri::State<'_, Database>) -> Result<Vec<Host>, Str
     tokio::task::spawn_blocking(move || {
         let conn = conn.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, ip, port, auth_type, username, password, private_key, os, tags, group_id, remark, status, jump_chain, COALESCE(rdp_settings, '{}'), created_at, updated_at FROM hosts ORDER BY name"
+            "SELECT id, name, ip, port, auth_type, username, password, private_key, os, tags, group_id, remark, status, jump_chain, COALESCE(rdp_settings, '{}'), COALESCE(proxy_settings, '{}'), created_at, updated_at FROM hosts ORDER BY name"
         ).map_err(|e| e.to_string())?;
 
         let hosts = stmt
@@ -619,8 +632,9 @@ pub async fn list_hosts(db: tauri::State<'_, Database>) -> Result<Vec<Host>, Str
                     status: row.get(12)?,
                     jump_chain: row.get::<_, Option<String>>(13)?.unwrap_or_else(|| "[]".to_string()),
                     rdp_settings: row.get::<_, Option<String>>(14)?.unwrap_or_else(|| "{}".to_string()),
-                    created_at: row.get(15)?,
-                    updated_at: row.get(16)?,
+                    proxy_settings: row.get::<_, Option<String>>(15)?.unwrap_or_else(|| "{}".to_string()),
+                    created_at: row.get(16)?,
+                    updated_at: row.get(17)?,
                 })
             })
             .map_err(|e| e.to_string())?
@@ -646,6 +660,7 @@ pub struct NewHost {
     pub remark: Option<String>,
     pub jump_chain: Option<String>,
     pub rdp_settings: Option<String>,
+    pub proxy_settings: Option<String>,
 }
 
 #[tauri::command]
@@ -656,7 +671,7 @@ pub async fn add_host(db: tauri::State<'_, Database>, host: NewHost) -> Result<S
         let (password, private_key) = store_host_secrets(&id, host.password, host.private_key)?;
         let conn = conn.lock().map_err(|e| e.to_string())?;
         conn.execute(
-            "INSERT INTO hosts (id, name, ip, port, auth_type, username, password, private_key, os, tags, group_id, remark, jump_chain, rdp_settings) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            "INSERT INTO hosts (id, name, ip, port, auth_type, username, password, private_key, os, tags, group_id, remark, jump_chain, rdp_settings, proxy_settings) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 id,
                 host.name,
@@ -672,6 +687,7 @@ pub async fn add_host(db: tauri::State<'_, Database>, host: NewHost) -> Result<S
                 host.remark.unwrap_or_default(),
                 host.jump_chain.unwrap_or_else(|| "[]".into()),
                 host.rdp_settings.unwrap_or_else(|| "{}".into()),
+                host.proxy_settings.unwrap_or_else(|| "{}".into()),
             ],
         ).map_err(|e| e.to_string())?;
         Ok(id)
@@ -732,8 +748,8 @@ pub async fn update_host(
         {
             let conn = conn.lock().map_err(|e| e.to_string())?;
             conn.execute(
-                "UPDATE hosts SET name=?1, ip=?2, port=?3, auth_type=?4, username=?5, password=?6, private_key=?7, os=?8, tags=?9, group_id=?10, remark=?11, jump_chain=?12, rdp_settings=?13, updated_at=datetime('now','localtime') WHERE id=?14",
-                params![host.name, host.ip, host.port, host.auth_type, host.username, password, private_key, host.os, host.tags, host.group_id, host.remark, host.jump_chain.as_deref().unwrap_or("[]"), host.rdp_settings.as_deref().unwrap_or("{}"), host.id],
+                "UPDATE hosts SET name=?1, ip=?2, port=?3, auth_type=?4, username=?5, password=?6, private_key=?7, os=?8, tags=?9, group_id=?10, remark=?11, jump_chain=?12, rdp_settings=?13, proxy_settings=?14, updated_at=datetime('now','localtime') WHERE id=?15",
+                params![host.name, host.ip, host.port, host.auth_type, host.username, password, private_key, host.os, host.tags, host.group_id, host.remark, host.jump_chain.as_deref().unwrap_or("[]"), host.rdp_settings.as_deref().unwrap_or("{}"), host.proxy_settings.as_deref().unwrap_or("{}"), host.id],
             ).map_err(|e| e.to_string())?;
         }
         crate::commands::app_log::emit_log(
@@ -745,6 +761,8 @@ pub async fn update_host(
         );
         app.state::<crate::ssh::SshConnectionRegistry>()
             .forget_config(&host.id);
+        app.state::<crate::ssh::SshConnectionRegistry>()
+            .remove_connection(&host.id);
         Ok(())
     }).await.map_err(|e| e.to_string())?
 }

@@ -12,6 +12,7 @@ use tokio::net::TcpStream;
 use tokio::sync::oneshot;
 
 use crate::db::Database;
+use crate::ssh;
 
 const DEFAULT_VNC_PORT: u16 = 5900;
 
@@ -44,6 +45,7 @@ struct VncHostConfig {
     port: u16,
     password: String,
     shared: bool,
+    proxy: Option<ssh::ProxySettings>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -144,11 +146,11 @@ fn emit_frame(app: &AppHandle, session_id: &str, payload: VncFramePayload) {
 
 fn load_vnc_host_config(db: &Database, host_id: &str) -> Result<VncHostConfig, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let (host, port, rdp_settings): (String, i32, String) = conn
+    let (host, port, rdp_settings, proxy_settings): (String, i32, String, Option<String>) = conn
         .query_row(
-            "SELECT ip, port, COALESCE(rdp_settings, '{}') FROM hosts WHERE id=?1",
+            "SELECT ip, port, COALESCE(rdp_settings, '{}'), COALESCE(proxy_settings, '{}') FROM hosts WHERE id=?1",
             params![host_id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
         .map_err(|e| format!("host not found: {}", e))?;
 
@@ -162,17 +164,23 @@ fn load_vnc_host_config(db: &Database, host_id: &str) -> Result<VncHostConfig, S
         port: vnc_port_from_settings(&rdp_settings, port),
         password: settings.vnc_password.unwrap_or_default(),
         shared: settings.vnc_shared.unwrap_or(true),
+        proxy: crate::commands::hosts::parse_host_proxy_settings(proxy_settings),
     })
 }
 
 async fn connect_vnc_client(config: VncHostConfig) -> Result<VncClient, String> {
-    let tcp = tokio::time::timeout(
-        Duration::from_secs(12),
-        TcpStream::connect((config.host.as_str(), config.port)),
-    )
+    let std_tcp = tokio::task::spawn_blocking({
+        let host = config.host.clone();
+        let proxy = config.proxy.clone();
+        move || ssh::connect_tcp_stream(&host, config.port, proxy, 12)
+    })
     .await
-    .map_err(|_| "VNC TCP 连接超时".to_string())?
+    .map_err(|e| format!("VNC TCP 连接线程异常: {}", e))?
     .map_err(|e| format!("VNC TCP 连接失败: {}", e))?;
+    std_tcp
+        .set_nonblocking(true)
+        .map_err(|e| format!("设置 VNC 非阻塞失败: {}", e))?;
+    let tcp = TcpStream::from_std(std_tcp).map_err(|e| format!("VNC TcpStream 转换失败: {}", e))?;
 
     let password = config.password.clone();
     tokio::time::timeout(
@@ -461,6 +469,7 @@ mod tests {
             port: addr.port(),
             password: String::new(),
             shared: true,
+            proxy: None,
         })
         .await
         .expect("connect mock vnc");

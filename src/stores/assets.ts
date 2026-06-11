@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import type { Host, AssetGroup, HostMonitorNetwork, HostMonitorSnapshot, RdpSettings, Tag } from '../types';
+import { parseProxySettings, serializeProxySettings } from '../utils/proxySettings';
 
 interface BackendHost {
   id: string;
@@ -18,6 +19,7 @@ interface BackendHost {
   status: string;
   jump_chain: string;
   rdp_settings?: string | null;
+  proxy_settings?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -219,6 +221,7 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
         remark: h.remark,
         jumpChain: JSON.parse(h.jump_chain || '[]'),
         rdpSettings: parseRdpSettings(h.rdp_settings),
+        proxySettings: parseProxySettings(h.proxy_settings),
         createdAt: h.created_at,
         updatedAt: h.updated_at,
       }));
@@ -246,6 +249,7 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
       remark: host.remark,
       jump_chain: JSON.stringify(host.jumpChain ?? []),
       rdp_settings: serializeRdpSettings(host.rdpSettings),
+      proxy_settings: serializeProxySettings(host.proxySettings),
     };
     try {
       await invoke('add_host', { host: backend });
@@ -271,6 +275,7 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
       remark: host.remark,
       jump_chain: JSON.stringify(host.jumpChain ?? []),
       rdp_settings: serializeRdpSettings(host.rdpSettings),
+      proxy_settings: serializeProxySettings(host.proxySettings),
     };
     console.info('[host-secret] invoke update_host', {
       hostId: host.id,

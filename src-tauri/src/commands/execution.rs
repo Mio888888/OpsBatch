@@ -112,11 +112,11 @@ pub fn execute_command(
 
     let mut configs: Vec<(String, String, ssh::SshConfig)> = Vec::new();
     for hid in &host_ids {
-        let (ip, port, auth_type, host_name, username, password, private_key): (String, i32, String, String, String, Option<String>, Option<String>) = conn
+        let (ip, port, auth_type, host_name, username, password, private_key, proxy_settings): (String, i32, String, String, String, Option<String>, Option<String>, Option<String>) = conn
             .query_row(
-                "SELECT ip, port, auth_type, name, username, password, private_key FROM hosts WHERE id=?1",
+                "SELECT ip, port, auth_type, name, username, password, private_key, COALESCE(proxy_settings, '{}') FROM hosts WHERE id=?1",
                 params![hid],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?)),
             )
             .map_err(|e| format!("host {} not found: {}", hid, e))?;
 
@@ -133,6 +133,7 @@ pub fn execute_command(
                 auth_type,
                 password,
                 private_key,
+                proxy: crate::commands::hosts::parse_host_proxy_settings(proxy_settings),
             },
         ));
     }

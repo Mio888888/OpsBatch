@@ -22,7 +22,7 @@ use tokio::sync::{mpsc, oneshot};
 use crate::db::Database;
 
 pub use types::{RdpConnectRequest, RdpConnectResponse, RdpInputEvent};
-use types::{RdpConnectionOptions, RdpCredentials, RdpTransportMode, RdpVideoNegotiation};
+use types::{RdpConnectionOptions, RdpCredentials, RdpTransportMode};
 pub use webrtc::RdpWebRtcManager;
 
 const DEFAULT_RDP_PORT: u16 = 3389;
@@ -190,9 +190,6 @@ pub async fn rdp_connect(
         Some(host_fields.port),
         &host_fields.settings,
     )?;
-    if let RdpVideoNegotiation::Unsupported { reason } = probe_h264_direct_support(&options) {
-        return Err(format!("RDP H.264 直通暂不可用: {reason}"));
-    }
 
     app.state::<RdpManager>()
         .connect(app.clone(), options, credentials, frame_channel)
@@ -291,14 +288,6 @@ fn normalize_rdp_options(
         enable_audio: settings.enable_audio.unwrap_or(default_enable_audio),
         transport_mode,
     })
-}
-
-fn probe_h264_direct_support(options: &RdpConnectionOptions) -> RdpVideoNegotiation {
-    if options.transport_mode != RdpTransportMode::H264Direct {
-        return RdpVideoNegotiation::LegacyBitmap;
-    }
-
-    RdpVideoNegotiation::H264Direct
 }
 
 fn normalize_credentials(

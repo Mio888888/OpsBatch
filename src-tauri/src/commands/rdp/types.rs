@@ -80,15 +80,6 @@ impl Default for RdpTransportMode {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(tag = "state", rename_all = "camelCase")]
-#[allow(dead_code)]
-pub enum RdpVideoNegotiation {
-    LegacyBitmap,
-    H264Direct,
-    Unsupported { reason: String },
-}
-
 #[cfg(test)]
 #[derive(Debug, Clone)]
 pub(super) struct RdpFramePayload {

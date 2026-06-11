@@ -7,7 +7,7 @@ import { CloseOutlined, ReloadOutlined } from '../../components/ui/icons';
 import WindowControls from '../../components/WindowControls';
 import { useAssetsStore } from '../../stores/assets';
 import { useTranslation } from '../../i18n';
-import { clamp, getOpenHostRequest, getRdpOverlayText, getScancodeForKey, type OpenHostRequest } from './rdpProtocol';
+import { clamp, getOpenHostRequest, getRdpKeyboardInputEvents, getRdpOverlayText, type OpenHostRequest } from './rdpProtocol';
 import { useRdpConnection } from './useRdpConnection';
 
 export default function RdpPage() {
@@ -132,16 +132,12 @@ export default function RdpPage() {
   }, [getRemotePoint, sendInput]);
 
   const handleKey = useCallback((event: ReactKeyboardEvent<HTMLDivElement>, down: boolean) => {
-    const special = getScancodeForKey(event.key);
-    if (special) {
-      event.preventDefault();
-      sendInput({ type: 'key_scancode', ...special, down });
-      return;
-    }
+    const inputEvents = getRdpKeyboardInputEvents(event.nativeEvent, down);
+    if (inputEvents.length === 0) return;
 
-    if (event.key.length === 1 && !event.metaKey) {
-      event.preventDefault();
-      sendInput({ type: 'unicode', character: event.key, down });
+    event.preventDefault();
+    for (const inputEvent of inputEvents) {
+      sendInput(inputEvent);
     }
   }, [sendInput]);
 
@@ -258,6 +254,7 @@ export default function RdpPage() {
           className={`rdp-video ${renderMode === 'h264Direct' ? '' : 'rdp-render-hidden'}`}
           autoPlay
           playsInline
+          controls={false}
         />
         {showConnecting && (
           <div className="rdp-overlay">

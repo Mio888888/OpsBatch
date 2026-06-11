@@ -68,11 +68,24 @@ export type RdpInputEvent =
   | { type: 'key_scancode'; code: number; extended: boolean; down: boolean }
   | { type: 'unicode'; character: string; down: boolean };
 
+export interface RdpKeyboardEventLike {
+  key: string;
+  code: string;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
+  altKey?: boolean;
+  repeat?: boolean;
+}
+
 const MIN_DESKTOP_WIDTH = 640;
 const MIN_DESKTOP_HEIGHT = 480;
 const MAX_DESKTOP_WIDTH = 1920;
 const MAX_DESKTOP_HEIGHT = 1080;
 const RDP_FRAME_HEADER_BYTES = 16;
+const RDP_BASE_FRAME_PAINT_BUDGET = 8;
+const RDP_MAX_FRAME_PAINT_BUDGET = 24;
+const RDP_LARGE_BACKLOG_FRAME_COUNT = 24;
+const RDP_CONTROL_SCANCODE = { code: 0x1d, extended: false };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object';
@@ -158,6 +171,20 @@ export function drainRdpFrameBatch<T>(queue: T[], budget: number): T[] {
   return queue.splice(0, Math.min(queue.length, Math.floor(budget)));
 }
 
+export function getRdpFramePaintBudget(queueLength: number) {
+  if (!Number.isFinite(queueLength) || queueLength <= 0) {
+    return 0;
+  }
+  if (queueLength <= RDP_BASE_FRAME_PAINT_BUDGET) {
+    return Math.floor(queueLength);
+  }
+  if (queueLength <= RDP_LARGE_BACKLOG_FRAME_COUNT) {
+    return RDP_BASE_FRAME_PAINT_BUDGET;
+  }
+
+  return Math.min(RDP_MAX_FRAME_PAINT_BUDGET, Math.ceil(queueLength / 2));
+}
+
 export function resolveRdpRenderMode({
   requested,
   webRtcReady,
@@ -187,8 +214,8 @@ export function resolveRdpRenderMode({
   };
 }
 
-export function shouldAttachRdpVideoTrack(kind: string) {
-  return kind === 'video';
+export function shouldAttachRdpMediaTrack(kind: string) {
+  return kind === 'video' || kind === 'audio';
 }
 
 export function isH264DirectUnavailableStatus(
@@ -271,8 +298,74 @@ export async function withRdpTimeout<T>(
   }
 }
 
-export function getScancodeForKey(key: string): { code: number; extended: boolean } | undefined {
-  const map: Record<string, { code: number; extended: boolean }> = {
+export function getScancodeForKey(
+  key: string,
+  code = '',
+): { code: number; extended: boolean } | undefined {
+  const codeMap: Record<string, { code: number; extended: boolean }> = {
+    Backquote: { code: 0x29, extended: false },
+    Digit1: { code: 0x02, extended: false },
+    Digit2: { code: 0x03, extended: false },
+    Digit3: { code: 0x04, extended: false },
+    Digit4: { code: 0x05, extended: false },
+    Digit5: { code: 0x06, extended: false },
+    Digit6: { code: 0x07, extended: false },
+    Digit7: { code: 0x08, extended: false },
+    Digit8: { code: 0x09, extended: false },
+    Digit9: { code: 0x0a, extended: false },
+    Digit0: { code: 0x0b, extended: false },
+    Minus: { code: 0x0c, extended: false },
+    Equal: { code: 0x0d, extended: false },
+    KeyQ: { code: 0x10, extended: false },
+    KeyW: { code: 0x11, extended: false },
+    KeyE: { code: 0x12, extended: false },
+    KeyR: { code: 0x13, extended: false },
+    KeyT: { code: 0x14, extended: false },
+    KeyY: { code: 0x15, extended: false },
+    KeyU: { code: 0x16, extended: false },
+    KeyI: { code: 0x17, extended: false },
+    KeyO: { code: 0x18, extended: false },
+    KeyP: { code: 0x19, extended: false },
+    BracketLeft: { code: 0x1a, extended: false },
+    BracketRight: { code: 0x1b, extended: false },
+    KeyA: { code: 0x1e, extended: false },
+    KeyS: { code: 0x1f, extended: false },
+    KeyD: { code: 0x20, extended: false },
+    KeyF: { code: 0x21, extended: false },
+    KeyG: { code: 0x22, extended: false },
+    KeyH: { code: 0x23, extended: false },
+    KeyJ: { code: 0x24, extended: false },
+    KeyK: { code: 0x25, extended: false },
+    KeyL: { code: 0x26, extended: false },
+    Semicolon: { code: 0x27, extended: false },
+    Quote: { code: 0x28, extended: false },
+    Backslash: { code: 0x2b, extended: false },
+    KeyZ: { code: 0x2c, extended: false },
+    KeyX: { code: 0x2d, extended: false },
+    KeyC: { code: 0x2e, extended: false },
+    KeyV: { code: 0x2f, extended: false },
+    KeyB: { code: 0x30, extended: false },
+    KeyN: { code: 0x31, extended: false },
+    KeyM: { code: 0x32, extended: false },
+    Comma: { code: 0x33, extended: false },
+    Period: { code: 0x34, extended: false },
+    Slash: { code: 0x35, extended: false },
+    Space: { code: 0x39, extended: false },
+    NumpadEnter: { code: 0x1c, extended: true },
+    ControlLeft: { code: 0x1d, extended: false },
+    ControlRight: { code: 0x1d, extended: true },
+    ShiftLeft: { code: 0x2a, extended: false },
+    ShiftRight: { code: 0x36, extended: false },
+    AltLeft: { code: 0x38, extended: false },
+    AltRight: { code: 0x38, extended: true },
+    MetaLeft: { code: 0x5b, extended: true },
+    MetaRight: { code: 0x5c, extended: true },
+  };
+  if (codeMap[code]) {
+    return codeMap[code];
+  }
+
+  const keyMap: Record<string, { code: number; extended: boolean }> = {
     Backspace: { code: 0x0e, extended: false },
     Tab: { code: 0x0f, extended: false },
     Enter: { code: 0x1c, extended: false },
@@ -287,12 +380,71 @@ export function getScancodeForKey(key: string): { code: number; extended: boolea
     ArrowDown: { code: 0x50, extended: true },
     ArrowLeft: { code: 0x4b, extended: true },
     ArrowRight: { code: 0x4d, extended: true },
+    F1: { code: 0x3b, extended: false },
+    F2: { code: 0x3c, extended: false },
+    F3: { code: 0x3d, extended: false },
+    F4: { code: 0x3e, extended: false },
+    F5: { code: 0x3f, extended: false },
+    F6: { code: 0x40, extended: false },
+    F7: { code: 0x41, extended: false },
+    F8: { code: 0x42, extended: false },
+    F9: { code: 0x43, extended: false },
+    F10: { code: 0x44, extended: false },
+    F11: { code: 0x57, extended: false },
+    F12: { code: 0x58, extended: false },
     Shift: { code: 0x2a, extended: false },
     Control: { code: 0x1d, extended: false },
     Alt: { code: 0x38, extended: false },
+    ' ': { code: 0x39, extended: false },
   };
 
-  return map[key];
+  return keyMap[key];
+}
+
+export function getRdpKeyboardInputEvents(
+  event: RdpKeyboardEventLike,
+  down: boolean,
+): RdpInputEvent[] {
+  if (event.key === 'Meta') {
+    return [];
+  }
+
+  const special = getScancodeForKey(event.key, event.code);
+  const hasModifier = Boolean(event.ctrlKey || event.metaKey || event.altKey);
+  const keyScancode = event.key.length === 1
+    ? getScancodeForKey(event.key, event.code)
+    : special;
+
+  if (event.metaKey && keyScancode && event.key.length === 1) {
+    const keyEvent: RdpInputEvent = { type: 'key_scancode', ...keyScancode, down };
+    if (event.repeat && down) {
+      return [keyEvent];
+    }
+
+    return down
+      ? [
+        { type: 'key_scancode', ...RDP_CONTROL_SCANCODE, down: true },
+        keyEvent,
+      ]
+      : [
+        keyEvent,
+        { type: 'key_scancode', ...RDP_CONTROL_SCANCODE, down: false },
+      ];
+  }
+
+  if (hasModifier && keyScancode) {
+    return [{ type: 'key_scancode', ...keyScancode, down }];
+  }
+
+  if (special) {
+    return [{ type: 'key_scancode', ...special, down }];
+  }
+
+  if (event.key.length === 1) {
+    return [{ type: 'unicode', character: event.key, down }];
+  }
+
+  return [];
 }
 
 export function getErrorMessage(error: unknown) {

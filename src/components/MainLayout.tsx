@@ -65,6 +65,13 @@ import {
   getProcessMemoryBarPercent,
   type LocalPerformanceSnapshot,
 } from '../utils/localPerformance';
+import {
+  buildRdpSettings,
+  MAX_RDP_DESKTOP_HEIGHT,
+  MAX_RDP_DESKTOP_WIDTH,
+  MIN_RDP_DESKTOP_HEIGHT,
+  MIN_RDP_DESKTOP_WIDTH,
+} from '../utils/rdpSettings';
 
 const { Content } = Layout;
 
@@ -223,10 +230,6 @@ interface HostFormValues {
 const DEFAULT_GROUP_ID = '__default__';
 const DEFAULT_SSH_PORT = 22;
 const DEFAULT_RDP_PORT = 3389;
-const MIN_RDP_DESKTOP_WIDTH = 640;
-const MIN_RDP_DESKTOP_HEIGHT = 480;
-const MAX_RDP_DESKTOP_WIDTH = 3840;
-const MAX_RDP_DESKTOP_HEIGHT = 2160;
 const GROUP_DROP_ID_PREFIX = 'asset-group:';
 const HOST_DRAG_ID_PREFIX = 'asset-host:';
 const SECRET_PLACEHOLDER = '***keychain***';
@@ -260,29 +263,6 @@ function hostFormStoresSecret(host: Pick<Host, 'password' | 'privateKey'>) {
 
 function isWindowsHost(host: Pick<Host, 'os'>) {
   return host.os === 'windows';
-}
-
-function normalizeRdpDesktopValue(value: unknown, min: number, max: number) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
-  return Math.min(max, Math.max(min, Math.round(value)));
-}
-
-function buildRdpSettings(values: HostFormValues, os: Host['os']): Host['rdpSettings'] {
-  if (os !== 'windows') return undefined;
-  const domain = values.rdpDomain?.trim();
-  const desktopWidth = normalizeRdpDesktopValue(values.rdpDesktopWidth, MIN_RDP_DESKTOP_WIDTH, MAX_RDP_DESKTOP_WIDTH);
-  const desktopHeight = normalizeRdpDesktopValue(values.rdpDesktopHeight, MIN_RDP_DESKTOP_HEIGHT, MAX_RDP_DESKTOP_HEIGHT);
-  const settings: NonNullable<Host['rdpSettings']> = {};
-  if (domain) settings.domain = domain;
-  if (desktopWidth) settings.desktopWidth = desktopWidth;
-  if (desktopHeight) settings.desktopHeight = desktopHeight;
-  settings.enableClipboard = values.rdpEnableClipboard ?? true;
-  settings.enableAudio = values.rdpEnableAudio ?? false;
-  settings.mapDisk = values.rdpMapDisk ?? false;
-  if (settings.mapDisk && values.rdpDiskPath?.trim()) {
-    settings.diskPath = values.rdpDiskPath.trim();
-  }
-  return Object.keys(settings).length > 0 ? settings : undefined;
 }
 
 function getGroupDropId(groupId: string) {
@@ -649,7 +629,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       rdpDesktopWidth: 1280,
       rdpDesktopHeight: 720,
       rdpEnableClipboard: true,
-      rdpEnableAudio: false,
+      rdpEnableAudio: true,
       rdpMapDisk: false,
       rdpDiskPath: '',
     });
@@ -683,7 +663,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       rdpDesktopWidth: host.rdpSettings?.desktopWidth ?? 1280,
       rdpDesktopHeight: host.rdpSettings?.desktopHeight ?? 720,
       rdpEnableClipboard: host.rdpSettings?.enableClipboard ?? true,
-      rdpEnableAudio: host.rdpSettings?.enableAudio ?? false,
+      rdpEnableAudio: host.rdpSettings?.enableAudio ?? true,
       rdpMapDisk: host.rdpSettings?.mapDisk ?? false,
       rdpDiskPath: host.rdpSettings?.diskPath ?? '',
     });
@@ -718,7 +698,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         hostForm.setFieldValue('rdpEnableClipboard', true);
       }
       if (hostForm.getFieldValue('rdpEnableAudio') === undefined) {
-        hostForm.setFieldValue('rdpEnableAudio', false);
+        hostForm.setFieldValue('rdpEnableAudio', true);
       }
       if (hostForm.getFieldValue('rdpMapDisk') === undefined) {
         hostForm.setFieldValue('rdpMapDisk', false);

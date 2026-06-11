@@ -30,7 +30,7 @@ use super::protocol::{
     rdp_static_channel_names,
 };
 use super::types::{
-    RdpConnectionOptions, RdpMouseButton, RdpStatusDetail, RdpTransportMode, RdpVideoNegotiation,
+    RdpConnectionOptions, RdpMouseButton, RdpStatusDetail, RdpTransportMode,
 };
 use super::*;
 use crate::commands::rdp::config::build_ironrdp_config;
@@ -56,10 +56,6 @@ fn normalize_options_defaults_to_rdp_port_and_safe_desktop_size() {
     assert!(options.enable_clipboard);
     assert!(!options.enable_audio);
     assert_eq!(options.transport_mode, RdpTransportMode::LegacyBitmap);
-    assert_eq!(
-        probe_h264_direct_support(&options),
-        RdpVideoNegotiation::LegacyBitmap
-    );
 }
 
 #[test]
@@ -77,10 +73,6 @@ fn h264_direct_mode_reports_available_when_egfx_bridge_is_enabled() {
         normalize_rdp_options(&request, "10.0.0.5", None, &StoredRdpSettings::default()).unwrap();
 
     assert_eq!(options.transport_mode, RdpTransportMode::H264Direct);
-    assert_eq!(
-        probe_h264_direct_support(&options),
-        RdpVideoNegotiation::H264Direct
-    );
 }
 
 #[test]

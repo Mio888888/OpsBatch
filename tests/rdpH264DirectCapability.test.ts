@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import * as protocol from '../src/pages/Rdp/rdpProtocol.ts';
 import {
   getRdpHandshakeStatusMessage,
   getRdpOverlayText,
@@ -7,7 +8,6 @@ import {
   isH264DirectUnavailableStatus,
   resolveH264UnavailableFallback,
   resolveRdpRenderMode,
-  shouldAttachRdpVideoTrack,
   withRdpTimeout,
 } from '../src/pages/Rdp/rdpProtocol.ts';
 
@@ -43,9 +43,141 @@ test('uses canvas rendering when h264 direct receives bitmap fallback frames', (
   assert.equal(state.usesVideoElement, false);
 });
 
-test('only attaches WebRTC video tracks to the video element', () => {
-  assert.equal(shouldAttachRdpVideoTrack('video'), true);
-  assert.equal(shouldAttachRdpVideoTrack('audio'), false);
+test('attaches WebRTC video and audio tracks to the RDP media element', () => {
+  const shouldAttachRdpMediaTrack = (protocol as {
+    shouldAttachRdpMediaTrack?: (kind: string) => boolean;
+  }).shouldAttachRdpMediaTrack;
+
+  assert.equal(typeof shouldAttachRdpMediaTrack, 'function');
+  assert.equal(shouldAttachRdpMediaTrack('video'), true);
+  assert.equal(shouldAttachRdpMediaTrack('audio'), true);
+  assert.equal(shouldAttachRdpMediaTrack('data'), false);
+});
+
+test('maps command paste to a remote Windows ctrl+v shortcut', () => {
+  const getRdpKeyboardInputEvents = (protocol as {
+    getRdpKeyboardInputEvents?: (
+      event: {
+        key: string;
+        code: string;
+        ctrlKey?: boolean;
+        metaKey?: boolean;
+        altKey?: boolean;
+        repeat?: boolean;
+      },
+      down: boolean,
+    ) => unknown[];
+  }).getRdpKeyboardInputEvents;
+
+  assert.equal(typeof getRdpKeyboardInputEvents, 'function');
+  assert.deepEqual(getRdpKeyboardInputEvents({
+    key: 'v',
+    code: 'KeyV',
+    metaKey: true,
+  }, true), [
+    { type: 'key_scancode', code: 0x1d, extended: false, down: true },
+    { type: 'key_scancode', code: 0x2f, extended: false, down: true },
+  ]);
+  assert.deepEqual(getRdpKeyboardInputEvents({
+    key: 'v',
+    code: 'KeyV',
+    metaKey: true,
+  }, false), [
+    { type: 'key_scancode', code: 0x2f, extended: false, down: false },
+    { type: 'key_scancode', code: 0x1d, extended: false, down: false },
+  ]);
+});
+
+test('maps control copy to the remote c scancode without synthetic ctrl', () => {
+  const getRdpKeyboardInputEvents = (protocol as {
+    getRdpKeyboardInputEvents?: (
+      event: {
+        key: string;
+        code: string;
+        ctrlKey?: boolean;
+        metaKey?: boolean;
+        altKey?: boolean;
+        repeat?: boolean;
+      },
+      down: boolean,
+    ) => unknown[];
+  }).getRdpKeyboardInputEvents;
+
+  assert.equal(typeof getRdpKeyboardInputEvents, 'function');
+  assert.deepEqual(getRdpKeyboardInputEvents({
+    key: 'c',
+    code: 'KeyC',
+    ctrlKey: true,
+  }, true), [
+    { type: 'key_scancode', code: 0x2e, extended: false, down: true },
+  ]);
+});
+
+test('maps control key presses and function keys to scancodes', () => {
+  const getRdpKeyboardInputEvents = (protocol as {
+    getRdpKeyboardInputEvents?: (
+      event: {
+        key: string;
+        code: string;
+        ctrlKey?: boolean;
+        metaKey?: boolean;
+        altKey?: boolean;
+        repeat?: boolean;
+      },
+      down: boolean,
+    ) => unknown[];
+  }).getRdpKeyboardInputEvents;
+
+  assert.equal(typeof getRdpKeyboardInputEvents, 'function');
+  assert.deepEqual(getRdpKeyboardInputEvents({
+    key: 'Control',
+    code: 'ControlLeft',
+  }, true), [
+    { type: 'key_scancode', code: 0x1d, extended: false, down: true },
+  ]);
+  assert.deepEqual(getRdpKeyboardInputEvents({
+    key: 'F5',
+    code: 'F5',
+  }, true), [
+    { type: 'key_scancode', code: 0x3f, extended: false, down: true },
+  ]);
+});
+
+test('maps alt tab as a remote tab scancode instead of unicode text', () => {
+  const getRdpKeyboardInputEvents = (protocol as {
+    getRdpKeyboardInputEvents?: (
+      event: {
+        key: string;
+        code: string;
+        ctrlKey?: boolean;
+        metaKey?: boolean;
+        altKey?: boolean;
+        repeat?: boolean;
+      },
+      down: boolean,
+    ) => unknown[];
+  }).getRdpKeyboardInputEvents;
+
+  assert.equal(typeof getRdpKeyboardInputEvents, 'function');
+  assert.deepEqual(getRdpKeyboardInputEvents({
+    key: 'Tab',
+    code: 'Tab',
+    altKey: true,
+  }, true), [
+    { type: 'key_scancode', code: 0x0f, extended: false, down: true },
+  ]);
+});
+
+test('raises the RDP paint budget when the frame queue is backed up', () => {
+  const getRdpFramePaintBudget = (protocol as {
+    getRdpFramePaintBudget?: (queueLength: number) => number;
+  }).getRdpFramePaintBudget;
+
+  assert.equal(typeof getRdpFramePaintBudget, 'function');
+  assert.equal(getRdpFramePaintBudget(0), 0);
+  assert.equal(getRdpFramePaintBudget(4), 4);
+  assert.equal(getRdpFramePaintBudget(12), 8);
+  assert.equal(getRdpFramePaintBudget(64), 24);
 });
 
 test('detects backend status when Windows does not negotiate RDPGFX H.264', () => {

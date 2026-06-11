@@ -10,11 +10,12 @@ import {
   drainRdpFrameBatch,
   getDesktopRequestSize,
   getErrorMessage,
+  getRdpFramePaintBudget,
   getRdpHandshakeStatusMessage,
   getRdpStartupStatusMessage,
   resolveH264UnavailableFallback,
   resolveRdpRenderMode,
-  shouldAttachRdpVideoTrack,
+  shouldAttachRdpMediaTrack,
   withRdpTimeout,
   type OpenHostRequest,
   type RdpConnectResponse,
@@ -41,7 +42,6 @@ const RDP_CANVAS_CONTEXT_OPTIONS: CanvasRenderingContext2DSettings = {
   alpha: false,
   desynchronized: true,
 };
-const RDP_MAX_FRAMES_PER_PAINT = 8;
 const RDP_LISTENER_SETUP_TIMEOUT_MS = 5_000;
 const WEBRTC_SIGNALING_TIMEOUT_MS = 8_000;
 const RDP_CONNECT_TIMEOUT_MS = 35_000;
@@ -115,7 +115,7 @@ export function useRdpConnection({
   const flushFrames = useCallback(() => {
     drawFrameRequestRef.current = null;
     const frames = pendingFramesRef.current;
-    const batch = drainRdpFrameBatch(frames, RDP_MAX_FRAMES_PER_PAINT);
+    const batch = drainRdpFrameBatch(frames, getRdpFramePaintBudget(frames.length));
 
     let drewFrameCount = 0;
     for (const frame of batch) {
@@ -271,15 +271,24 @@ export function useRdpConnection({
       peerConnection = pc;
       peerConnectionRef.current = pc;
       pc.ontrack = (event) => {
-        if (!shouldAttachRdpVideoTrack(event.track.kind)) return;
+        if (!shouldAttachRdpMediaTrack(event.track.kind)) return;
         const video = videoRef.current;
         if (!video) return;
         const [stream] = event.streams;
-        video.srcObject = stream ?? new MediaStream([event.track]);
-        video.onloadeddata = markVideoFrameVisible;
-        video.onplaying = markVideoFrameVisible;
+        const currentStream = video.srcObject instanceof MediaStream ? video.srcObject : null;
+        const nextStream = stream ?? currentStream ?? new MediaStream();
+        if (!nextStream.getTracks().some((track) => track.id === event.track.id)) {
+          nextStream.addTrack(event.track);
+        }
+        video.srcObject = nextStream;
+        video.muted = false;
+        video.volume = 1;
+        if (event.track.kind === 'video') {
+          video.onloadeddata = markVideoFrameVisible;
+          video.onplaying = markVideoFrameVisible;
+        }
         void video.play().catch(() => {
-          setStatusMessage(getErrorMessage('WebRTC video autoplay was blocked'));
+          setStatusMessage(getErrorMessage('WebRTC media autoplay was blocked'));
         });
       };
 

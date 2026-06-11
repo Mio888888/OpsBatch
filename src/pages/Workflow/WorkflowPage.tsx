@@ -12,6 +12,7 @@ import ScheduledTaskManager, { type ScheduledTask } from './ScheduledTaskManager
 import ExecutionLogPanel from './components/ExecutionLogPanel';
 import { executeWorkflow, type ProgressEvent } from './workflowExecutor';
 import { collectWorkflowHostIds, createWorkflowLogEntry, type LogEntry } from './workflowExecutionLogs';
+import { logHandledError } from '../../utils/globalLogger';
 
 interface WorkflowFormValues {
   name: string;
@@ -82,7 +83,8 @@ export default function WorkflowPage() {
     try {
       const list = await invoke<ScheduledTask[]>('list_scheduled_tasks');
       setScheduledTasks(list);
-    } catch {
+    } catch (error) {
+      void logHandledError('workflow.loadScheduledTasks', error);
       setScheduledTasks([]);
     }
   };
@@ -95,7 +97,9 @@ export default function WorkflowPage() {
       setCreateModalOpen(false);
       createForm.resetFields();
       setEditingWf(wf);
-    } catch {}
+    } catch (error) {
+      void logHandledError('workflow.create', error, 'warn');
+    }
   };
 
   const handleCreateFromTemplate = async (template: WorkflowTemplate) => {
@@ -107,7 +111,9 @@ export default function WorkflowPage() {
       setEditingWf({ ...wf, nodes, connections, status: 'ready', selectedHostIds: [] });
       setCreateFromTemplateModalOpen(false);
       message.success(tText('workflow.createdFromTemplate'));
-    } catch {}
+    } catch (error) {
+      void logHandledError('workflow.createFromTemplate', error, 'warn');
+    }
   };
 
   const handleDelete = async (id: string) => {

@@ -19,6 +19,7 @@ import {
   normalizeTerminalFontFamily,
 } from '../../stores/theme';
 import { requestKeychainNotice } from '../../utils/keychainNotice';
+import { logHandledError } from '../../utils/globalLogger';
 import { darkThemes, lightThemes, accentColors } from '../../data/themes';
 import type { ThemePreviewMeta } from '../../data/themes';
 
@@ -454,7 +455,8 @@ function AppearanceSection() {
       .then((fonts) => {
         if (mounted) setSystemFontFamilies(fonts);
       })
-      .catch(() => {
+      .catch((error) => {
+        void logHandledError('settings.loadFonts', error, 'warn');
         if (mounted) setSystemFontFamilies([]);
       })
       .finally(() => {
@@ -711,7 +713,9 @@ export default function SettingsPage() {
         setAiModel(config.model);
       }
       setAiProvider(config.provider);
-    } catch {}
+    } catch (error) {
+      void logHandledError('settings.loadAiConfig', error, 'warn');
+    }
   };
 
   const loadGeneralSettings = async () => {
@@ -723,7 +727,9 @@ export default function SettingsPage() {
         minimizeToTray: settings.minimizeToTray !== 'false',
         logRetentionDays: settings.logRetentionDays ? parseInt(settings.logRetentionDays) : 90,
       });
-    } catch {}
+    } catch (error) {
+      void logHandledError('settings.loadGeneral', error, 'warn');
+    }
   };
 
   const handleSaveGeneral = async () => {
@@ -738,7 +744,9 @@ export default function SettingsPage() {
         },
       });
       message.success(tText('settings.generalSaved'));
-    } catch {}
+    } catch (error) {
+      void logHandledError('settings.saveGeneral', error, 'warn');
+    }
   };
 
 
@@ -821,7 +829,9 @@ export default function SettingsPage() {
       message.success(tText('settings.aiSaved'));
       setAiConfig(configToSave);
       aiForm.setFieldsValue({ ...configToSave, model: values.model });
-    } catch {}
+    } catch (error) {
+      void logHandledError('settings.saveAi', error, 'warn');
+    }
   };
 
   const handleTestAi = async () => {
@@ -853,7 +863,9 @@ export default function SettingsPage() {
       setRuleModalOpen(false);
       ruleForm.resetFields();
       loadDangerRules();
-    } catch {}
+    } catch (error) {
+      void logHandledError('settings.addDangerRule', error, 'warn');
+    }
   };
 
   const handleDeleteRule = async (id: string) => {

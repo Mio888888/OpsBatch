@@ -11,6 +11,7 @@ import type { TranslationKey } from '../../i18n';
 import type { ScriptEntry } from '../../types';
 import { invoke } from '@tauri-apps/api/core';
 import CodeEditor from '../../components/CodeEditor';
+import { logHandledError } from '../../utils/globalLogger';
 
 const LANGUAGES = [
   { value: 'shell', label: 'Shell', icon: '🐚', color: 'blue' },
@@ -133,7 +134,9 @@ export default function ScriptLibPage() {
       message.success(tText('scriptLib.added'));
       setAddModalOpen(false);
       form.resetFields();
-    } catch {}
+    } catch (error) {
+      void logHandledError('scriptLib.add', error, 'warn');
+    }
   };
 
   return (

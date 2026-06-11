@@ -14,6 +14,7 @@ import { useTranslation } from '../../i18n';
 import type { TranslationKey } from '../../i18n';
 import type { QuickAction } from '../../types';
 import { parseQuickActionParams, replaceQuickActionParams } from '../../utils/quickActionParams';
+import { logHandledError } from '../../utils/globalLogger';
 
 interface QuickActionFormValues {
   name: string;
@@ -212,7 +213,9 @@ export default function QuickActionsPage({ embedded = false }: QuickActionsPageP
       setModalOpen(false);
       setEditingAction(null);
       form.resetFields();
-    } catch {}
+    } catch (error) {
+      void logHandledError('quickActions.save', error, 'warn');
+    }
   };
 
   const handleExport = () => {

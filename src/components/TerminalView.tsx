@@ -10,6 +10,7 @@ import { SerializeAddon } from '@xterm/addon-serialize';
 import { createTerminalOutputPump, type TerminalOutputPump } from '../utils/terminalOutput';
 import { createTrackedCommand, createTrackedCommandOutputCleaner, stripTrackedCommandOutputArtifacts } from '../utils/terminalTracker';
 import { getCurrentTerminalAppearance, onThemeChange } from '../stores/theme';
+import { logHandledError } from '../utils/globalLogger';
 
 export interface TerminalCommandExecutionOptions {
   timeoutMs?: number;
@@ -137,7 +138,9 @@ export default memo(function TerminalView({ sessionId, active = true, onTerminal
     const data = writeQueueRef.current;
     if (!data) return;
     writeQueueRef.current = '';
-    invoke('terminal_write', { sessionId: targetSessionId, data }).catch(() => {});
+    invoke('terminal_write', { sessionId: targetSessionId, data }).catch((error) => {
+      void logHandledError('terminal.writeFlush', error, 'warn');
+    });
   }, []);
 
   const enqueueTerminalWrite = useCallback((targetSessionId: string, data: string) => {
@@ -145,7 +148,9 @@ export default memo(function TerminalView({ sessionId, active = true, onTerminal
 
     if (data === '\r' || data === '\n' || data === '' || data === '') {
       flushWriteQueue(targetSessionId);
-      invoke('terminal_write', { sessionId: targetSessionId, data }).catch(() => {});
+      invoke('terminal_write', { sessionId: targetSessionId, data }).catch((error) => {
+        void logHandledError('terminal.writeImmediate', error, 'warn');
+      });
       return;
     }
 
@@ -272,7 +277,8 @@ export default memo(function TerminalView({ sessionId, active = true, onTerminal
               resolve: settle,
             });
 
-            invoke('terminal_write', { sessionId, data: bracketedPaste }).catch(() => {
+            invoke('terminal_write', { sessionId, data: bracketedPaste }).catch((error) => {
+              void logHandledError('terminal.writeTrackedCommand', error, 'warn');
               settleExecution(executionId, 'write_failed');
             });
           });
@@ -353,7 +359,9 @@ export default memo(function TerminalView({ sessionId, active = true, onTerminal
       fitAddon.fit();
       const { cols, rows } = terminal;
       if (cols !== prevCols || rows !== prevRows) {
-        invoke('terminal_resize', { sessionId, cols, rows }).catch(() => {});
+        invoke('terminal_resize', { sessionId, cols, rows }).catch((error) => {
+          void logHandledError('terminal.resize', error, 'warn');
+        });
       }
     };
 
@@ -399,14 +407,18 @@ export default memo(function TerminalView({ sessionId, active = true, onTerminal
       const { cols, rows } = terminal;
       // Always send resize to trigger shell prompt redraw — initial SSH output
       // may have been emitted before this terminal subscribed to events.
-      invoke('terminal_resize', { sessionId, cols, rows }).catch(() => {});
+      invoke('terminal_resize', { sessionId, cols, rows }).catch((error) => {
+        void logHandledError('terminal.initialResize', error, 'warn');
+      });
     }, 120);
 
     invoke<{ id: string; name: string; pattern: string; enabled: boolean; is_builtin: boolean }[]>('list_danger_rules')
       .then((rules) => {
         dangerRulesRef.current = rules.filter((r) => r.enabled).map((r) => ({ name: r.name, pattern: r.pattern }));
       })
-      .catch(() => {});
+      .catch((error) => {
+        void logHandledError('terminal.loadDangerRules', error, 'warn');
+      });
 
     return () => {
       disposed = true;
@@ -464,7 +476,9 @@ export default memo(function TerminalView({ sessionId, active = true, onTerminal
       const prevRows = terminal.rows;
       fitAddon.fit();
       if (terminal.cols !== prevCols || terminal.rows !== prevRows) {
-        invoke('terminal_resize', { sessionId, cols: terminal.cols, rows: terminal.rows }).catch(() => {});
+        invoke('terminal_resize', { sessionId, cols: terminal.cols, rows: terminal.rows }).catch((error) => {
+          void logHandledError('terminal.cleanupResize', error, 'warn');
+        });
       }
     });
     return () => cancelAnimationFrame(frame);

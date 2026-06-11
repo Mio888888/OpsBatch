@@ -5,6 +5,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { ITheme } from '@xterm/xterm';
 import { allThemes, darkThemes, lightThemes, accentColors, getThemeById, getAccentById } from '../data/themes';
 import type { ThemePreviewMeta, AccentColorMeta } from '../data/themes';
+import { logHandledError } from '../utils/globalLogger';
 
 export interface ThemeState {
   themeMode: 'system' | 'manual';
@@ -128,7 +129,8 @@ export async function loadThemeSettings() {
       reduceMotion: settings.reduceMotion === 'true',
       loaded: true,
     });
-  } catch {
+  } catch (error) {
+    void logHandledError('theme.loadSettings', error, 'warn');
     useThemeStore.setState({ loaded: true });
   }
   applyThemeToDOM();
@@ -153,7 +155,9 @@ export async function patchTheme(patch: Partial<Omit<ThemeState, 'loaded'>>) {
       },
     });
     saved = true;
-  } catch {}
+  } catch (error) {
+    void logHandledError('theme.saveSettings', error, 'warn');
+  }
   applyThemeToDOM();
   notify();
   if (saved) {

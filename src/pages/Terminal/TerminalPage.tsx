@@ -17,6 +17,7 @@ import { useAiChatStore } from '../../stores/aiChat';
 import { useTranslation } from '../../i18n';
 import type { HostMonitorNetwork, HostMonitorSnapshot } from '../../types';
 import { getTerminalTabCloseTargets, type TerminalTabCloseMode } from '../../utils/terminalTabs';
+import { logHandledError } from '../../utils/globalLogger';
 
 interface TerminalTab {
   key: string;
@@ -870,10 +871,14 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
 
       // SFTP warmup + monitor snapshot run independently after terminal is interactive.
       // These are best-effort and must not gate terminal/AI/port-forward readiness.
-      void invoke('sftp_warmup', { hostId }).catch(() => {});
+      void invoke('sftp_warmup', { hostId }).catch((error) => {
+        void logHandledError('terminal.sftpWarmup', error, 'warn');
+      });
       void useAssetsStore.getState().getHostMonitorSnapshot(hostId)
         .then((snapshot) => { monitorSnapshotRefs.current.set(tabKey, snapshot); })
-        .catch(() => {});
+        .catch((error) => {
+          void logHandledError('terminal.monitorSnapshot', error, 'warn');
+        });
     } catch (e: unknown) {
       if (connectDisposedRef.current || activeConnectionIdsRef.current.get(tabKey) !== connectionId) {
         return;
@@ -1098,7 +1103,9 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
   }, []);
 
   const handleCopySelection = useCallback((selectedText: string) => {
-    void navigator.clipboard.writeText(selectedText).catch(() => {});
+    void navigator.clipboard.writeText(selectedText).catch((error) => {
+      void logHandledError('terminal.copySelection', error, 'warn');
+    });
     setSplitContextMenu(null);
   }, []);
 
@@ -1106,7 +1113,9 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
     setSplitContextMenu(null);
     void navigator.clipboard.readText()
       .then((text) => pasteTerminalText(terminalKey, text))
-      .catch(() => {});
+      .catch((error) => {
+        void logHandledError('terminal.pasteClipboard', error, 'warn');
+      });
   }, [pasteTerminalText]);
 
   const handleAiAnalyzeSelection = useCallback((tabKey: string, selectedText: string) => {

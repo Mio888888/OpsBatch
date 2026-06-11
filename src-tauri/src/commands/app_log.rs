@@ -101,3 +101,31 @@ pub fn get_log_history(app: AppHandle, limit: Option<u32>) -> Result<Vec<AppLogE
 pub fn ping_log(app: AppHandle, message: String) {
     emit_log(&app, "info", "system", &message, "backend");
 }
+
+#[tauri::command]
+pub fn emit_frontend_log(app: AppHandle, level: String, source: String, message: String) {
+    let level = normalize_level(&level);
+    let source = normalize_source(&source);
+    let message = message.chars().take(4000).collect::<String>();
+
+    emit_log(&app, &level, &source, &message, "frontend");
+}
+
+fn normalize_level(level: &str) -> String {
+    match level {
+        "error" => "error",
+        "warn" => "warn",
+        "success" => "success",
+        _ => "info",
+    }
+    .to_string()
+}
+
+fn normalize_source(source: &str) -> String {
+    let trimmed = source.trim();
+    if trimmed.is_empty() {
+        "system".to_string()
+    } else {
+        trimmed.chars().take(64).collect()
+    }
+}

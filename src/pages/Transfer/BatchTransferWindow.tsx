@@ -9,6 +9,7 @@ import {
   Button, Input, InputNumber, message, Tooltip,
 } from '../../components/ui';
 import WindowControls from '../../components/WindowControls';
+import { logHandledError } from '../../utils/globalLogger';
 import {
   UploadOutlined,
   FolderOpenOutlined, FileOutlined,
@@ -79,7 +80,10 @@ export default function BatchTransferWindow() {
       WebviewWindow.getByLabel('batch-transfer').then((win) => {
         if (win) win.setTitle(`批量上传 - ${hostIds.length} 台主机`);
       });
-    }).catch(() => setHostsLoading(false));
+    }).catch((error) => {
+      void logHandledError('transfer.loadHosts', error, 'warn');
+      setHostsLoading(false);
+    });
   }, []);
 
   useEffect(() => {

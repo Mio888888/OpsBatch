@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { Host } from '../../types';
 import WindowControls from '../../components/WindowControls';
 import TerminalPane from './TerminalPane';
+import { logHandledError } from '../../utils/globalLogger';
 import './batch-terminal.css';
 
 interface PaneSession {
@@ -43,7 +44,10 @@ export default function BatchTerminalWindow() {
       WebviewWindow.getByLabel('batch-terminal').then((win) => {
         if (win) win.setTitle(`广播终端 - ${filtered.length} 台主机`);
       });
-    }).catch(() => setLoading(false));
+    }).catch((error) => {
+      void logHandledError('batchTerminal.loadHosts', error, 'warn');
+      setLoading(false);
+    });
   }, [hostIds]);
 
   // auto-connect all hosts
@@ -60,7 +64,9 @@ export default function BatchTerminalWindow() {
     setSessions((prev) => {
       prev.forEach((s) => {
         if (s.sessionId) {
-          void invoke('terminal_disconnect', { sessionId: s.sessionId }).catch(() => {});
+          void invoke('terminal_disconnect', { sessionId: s.sessionId }).catch((error) => {
+            void logHandledError('batchTerminal.disconnectPrevious', error, 'warn');
+          });
         }
       });
       return pending;
@@ -83,7 +89,9 @@ export default function BatchTerminalWindow() {
         sessionId,
       }).then(() => {
         if (disposedRef.current || controller.signal.aborted) {
-          invoke('terminal_disconnect', { sessionId }).catch(() => {});
+          invoke('terminal_disconnect', { sessionId }).catch((error) => {
+            void logHandledError('batchTerminal.disconnectStale', error, 'warn');
+          });
           return;
         }
         setSessions((prev) => prev.map((s) =>
@@ -91,7 +99,9 @@ export default function BatchTerminalWindow() {
         ));
       }).catch((e) => {
         if (disposedRef.current || controller.signal.aborted) {
-          invoke('terminal_disconnect', { sessionId }).catch(() => {});
+          invoke('terminal_disconnect', { sessionId }).catch((error) => {
+            void logHandledError('batchTerminal.disconnectFailedSession', error, 'warn');
+          });
           return;
         }
         setSessions((prev) => prev.map((s) =>
@@ -118,7 +128,9 @@ export default function BatchTerminalWindow() {
       });
       createdSessionIdsRef.current.clear();
       sessionIds.forEach((sessionId) => {
-        invoke('terminal_disconnect', { sessionId }).catch(() => {});
+        invoke('terminal_disconnect', { sessionId }).catch((error) => {
+          void logHandledError('batchTerminal.disconnectUnmount', error, 'warn');
+        });
       });
     };
   }, []);
@@ -132,7 +144,9 @@ export default function BatchTerminalWindow() {
     setSessions((prev) => prev.map((s) => {
       if (s.hostId !== hostId) return s;
       if (s.sessionId) {
-        void invoke('terminal_disconnect', { sessionId: s.sessionId }).catch(() => {});
+        void invoke('terminal_disconnect', { sessionId: s.sessionId }).catch((error) => {
+          void logHandledError('batchTerminal.disconnectRetryPrevious', error, 'warn');
+        });
       }
       return { ...s, sessionId, state: 'connecting', errorMessage: undefined };
     }));
@@ -144,7 +158,9 @@ export default function BatchTerminalWindow() {
       sessionId,
     }).then(() => {
       if (disposedRef.current) {
-        invoke('terminal_disconnect', { sessionId }).catch(() => {});
+        invoke('terminal_disconnect', { sessionId }).catch((error) => {
+          void logHandledError('batchTerminal.disconnectDisposedRetry', error, 'warn');
+        });
         return;
       }
       setSessions((prev) => prev.map((s) =>
@@ -152,7 +168,9 @@ export default function BatchTerminalWindow() {
       ));
     }).catch((e) => {
       if (disposedRef.current) {
-        invoke('terminal_disconnect', { sessionId }).catch(() => {});
+        invoke('terminal_disconnect', { sessionId }).catch((error) => {
+          void logHandledError('batchTerminal.disconnectFailedRetry', error, 'warn');
+        });
         return;
       }
       setSessions((prev) => prev.map((s) =>
@@ -169,7 +187,9 @@ export default function BatchTerminalWindow() {
       }
     }
     if (writes.length > 0) {
-      invoke('terminal_batch_write', { writes }).catch(() => {});
+      invoke('terminal_batch_write', { writes }).catch((error) => {
+        void logHandledError('batchTerminal.write', error, 'warn');
+      });
     }
   }, [sessions]);
 

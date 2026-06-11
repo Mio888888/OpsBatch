@@ -4,6 +4,7 @@ import { ClockCircleOutlined, DeleteOutlined, PlusOutlined } from '../../compone
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from '../../i18n';
 import type { WorkflowRecord } from '../../stores/workflow';
+import { logHandledError } from '../../utils/globalLogger';
 
 export interface ScheduledTask {
   id: string;
@@ -45,7 +46,9 @@ export default function ScheduledTaskManager({ workflows, tasks, onLoad }: Props
       setModalOpen(false);
       form.resetFields();
       onLoad();
-    } catch {}
+    } catch (error) {
+      void logHandledError('scheduledTask.add', error, 'warn');
+    }
   };
 
   const handleToggle = async (id: string, enabled: boolean) => {

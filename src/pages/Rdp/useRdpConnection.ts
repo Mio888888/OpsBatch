@@ -27,6 +27,7 @@ import {
   type RdpTransportMode,
   type RdpWebRtcOffer,
 } from './rdpProtocol';
+import { logHandledError } from '../../utils/globalLogger';
 
 interface UseRdpConnectionOptions {
   hostRequest?: OpenHostRequest;
@@ -167,6 +168,7 @@ export function useRdpConnection({
     const sessionId = activeSessionIdRef.current;
     if (!sessionId || connectionState !== 'connected') return;
     void invoke('rdp_send_input', { sessionId, event }).catch((error: unknown) => {
+      void logHandledError('rdp.sendInput', error, 'warn');
       setStatusMessage(getErrorMessage(error));
     });
   }, [connectionState]);
@@ -287,7 +289,8 @@ export function useRdpConnection({
           video.onloadeddata = markVideoFrameVisible;
           video.onplaying = markVideoFrameVisible;
         }
-        void video.play().catch(() => {
+        void video.play().catch((error) => {
+          void logHandledError('rdp.media.play', error, 'warn');
           setStatusMessage(getErrorMessage('WebRTC media autoplay was blocked'));
         });
       };
@@ -384,7 +387,8 @@ export function useRdpConnection({
         try {
           const payload = decodeRdpFramePayload(message);
           enqueueFrame(payload);
-        } catch {
+        } catch (error) {
+          void logHandledError('rdp.decodeFrame', error, 'warn');
           setStatusMessage(invalidFrameMessage);
         }
       });
@@ -436,6 +440,7 @@ export function useRdpConnection({
 
     void start().catch((error: unknown) => {
       if (disposed) return;
+      void logHandledError('rdp.start', error);
       peerConnection?.close();
       peerConnection = null;
       peerConnectionRef.current = null;

@@ -3,6 +3,7 @@ import CodeMirror from '@uiw/react-codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
+import { logHandledError } from '../utils/globalLogger';
 
 type LanguageLoader = () => Promise<Extension>;
 
@@ -129,7 +130,8 @@ export default memo(function CodeEditor({ value, onChange, language = 'shell', r
       .then((loadedExtension) => {
         if (!ignore) setLanguageExtension(loadedExtension);
       })
-      .catch(() => {
+      .catch((error) => {
+        void logHandledError('codeEditor.loadExtension', error, 'warn');
         if (!ignore) setLanguageExtension(null);
       });
 

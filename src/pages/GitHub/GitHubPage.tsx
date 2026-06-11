@@ -10,6 +10,7 @@ import {
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from '../../i18n';
 import { requestKeychainNotice } from '../../utils/keychainNotice';
+import { logHandledError } from '../../utils/globalLogger';
 
 interface RepoInfo {
   id: string;
@@ -94,7 +95,9 @@ export default function GitHubPage() {
       setModalOpen(false);
       form.resetFields();
       loadRepos();
-    } catch {}
+    } catch (error) {
+      void logHandledError('github.addRepo', error, 'warn');
+    }
   };
 
   const handlePull = async (repo: RepoInfo) => {

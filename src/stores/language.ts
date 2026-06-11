@@ -4,6 +4,7 @@ import { emit, listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { AppLanguage, LanguageMode } from '../i18n/language';
 import { resolveLanguage } from '../i18n/language';
+import { logHandledError } from '../utils/globalLogger';
 
 export interface LanguageState {
   languageMode: LanguageMode;
@@ -95,7 +96,8 @@ export async function loadLanguageSettings() {
       ? settings[GENERAL_SETTINGS_LANGUAGE_KEY]
       : defaults.languageMode;
     applyLanguageMode(languageMode);
-  } catch {
+  } catch (error) {
+    void logHandledError('language.loadSettings', error, 'warn');
     applyLanguageMode(defaults.languageMode);
   }
 }
@@ -110,7 +112,9 @@ export async function patchLanguage(languageMode: LanguageMode) {
       },
     });
     saved = true;
-  } catch {}
+  } catch (error) {
+    void logHandledError('language.saveSettings', error, 'warn');
+  }
 
   if (saved) {
     emit(LANGUAGE_SETTINGS_CHANGED_EVENT, getLanguageEventPayload()).catch((e) => {

@@ -21,6 +21,7 @@ import * as RadixTooltip from '@radix-ui/react-tooltip';
 import Treeselect from 'treeselectjs';
 import type { OptionType, ValueType } from 'treeselectjs';
 import { translateText, useTranslation } from '../../i18n';
+import { emitFrontendGlobalLog } from '../../utils/globalLogger';
 import 'treeselectjs/dist/treeselectjs.css';
 
 export type BadgeStatus = 'success' | 'processing' | 'default' | 'error' | 'warning';
@@ -1234,11 +1235,23 @@ function getTreeSelectOptionName(title: ReactNode): string {
 }
 
 export const message = {
-  success: (content: ReactNode) => toast(String(content), 'success'),
-  error: (content: ReactNode) => toast(String(content), 'error'),
-  warning: (content: ReactNode) => toast(String(content), 'warning'),
-  info: (content: ReactNode) => toast(String(content), 'info'),
+  success: (content: ReactNode) => showMessage('success', 'success', content),
+  error: (content: ReactNode) => showMessage('error', 'error', content),
+  warning: (content: ReactNode) => showMessage('warning', 'warn', content),
+  info: (content: ReactNode) => showMessage('info', 'info', content),
 };
+
+function showMessage(status: BadgeStatus | 'info', logLevel: 'success' | 'error' | 'warn' | 'info', content: ReactNode) {
+  const messageText = getVisibleMessageText(content);
+  void emitFrontendGlobalLog(logLevel, 'ui', messageText);
+  toast(messageText, status);
+}
+
+function getVisibleMessageText(content: ReactNode): string {
+  const text = getTreeSelectOptionName(content);
+  if (text) return text;
+  return content == null || typeof content === 'boolean' ? '' : String(content);
+}
 
 function toast(content: string, status: BadgeStatus | 'info') {
   window.dispatchEvent(new CustomEvent('opsbatch-toast', { detail: { content, status } }));

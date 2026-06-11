@@ -12,6 +12,7 @@ import { useLibraryStore } from '../../stores/library';
 import { useTranslation } from '../../i18n';
 import type { TranslationKey } from '../../i18n';
 import type { CommandEntry } from '../../types';
+import { logHandledError } from '../../utils/globalLogger';
 
 const RISK_LABEL_KEYS: Record<string, TranslationKey> = {
   low: 'library.risk.low',
@@ -88,7 +89,9 @@ export default function CommandLibPage() {
       message.success(tText('commandLib.commandAdded'));
       setAddModalOpen(false);
       form.resetFields();
-    } catch {}
+    } catch (error) {
+      void logHandledError('commandLib.add', error, 'warn');
+    }
   };
 
   const categories = useMemo(() => {

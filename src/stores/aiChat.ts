@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { parseAiPendingActionsAsync } from '../utils/aiActionParser';
 import type { AiActionAssessment, ParsedCommandPlanNotice, ParsedPendingAction } from '../utils/aiActionParser';
+import { logHandledError } from '../utils/globalLogger';
 
 export interface ChatMessage {
   id: string;
@@ -294,7 +295,9 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
       ) {
         set({ conversations: convs });
       }
-    } catch {}
+    } catch (error) {
+      void logHandledError('aiChat.loadConversations', error, 'warn');
+    }
   },
 
   openConversation: async (id) => {
@@ -318,7 +321,9 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
           },
         },
       }));
-    } catch {}
+    } catch (error) {
+      void logHandledError('aiChat.openConversation', error, 'warn');
+    }
   },
 
   newConversation: () => {
@@ -360,7 +365,9 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
         }
       }
       await get().loadConversations();
-    } catch {}
+    } catch (error) {
+      void logHandledError('aiChat.deleteConversation', error, 'warn');
+    }
   },
 
   sendMessage: async (context?: string) => {

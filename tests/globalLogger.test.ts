@@ -100,3 +100,11 @@ test('routes silent handled exceptions through the global logger', () => {
     assert.doesNotMatch(source, /\.catch\(\s*\(\s*\)\s*=>\s*\{\s*\}\s*\)/, path);
   }
 });
+
+test('does not log expected RDP media play aborts', () => {
+  const source = readFileSync('src/pages/Rdp/useRdpConnection.ts', 'utf8');
+
+  assert.match(source, /isExpectedMediaPlayAbort/);
+  assert.match(source, /if \(isExpectedMediaPlayAbort\(error\)\) return/);
+  assert.match(source, /void logHandledError\('rdp\.media\.play', error, 'warn'\)/);
+});

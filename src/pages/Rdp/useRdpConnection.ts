@@ -47,6 +47,10 @@ const RDP_LISTENER_SETUP_TIMEOUT_MS = 5_000;
 const WEBRTC_SIGNALING_TIMEOUT_MS = 8_000;
 const RDP_CONNECT_TIMEOUT_MS = 35_000;
 
+function isExpectedMediaPlayAbort(error: unknown) {
+  return error instanceof DOMException && error.name === 'AbortError';
+}
+
 export function useRdpConnection({
   hostRequest,
   stageRef,
@@ -290,6 +294,7 @@ export function useRdpConnection({
           video.onplaying = markVideoFrameVisible;
         }
         void video.play().catch((error) => {
+          if (isExpectedMediaPlayAbort(error)) return;
           void logHandledError('rdp.media.play', error, 'warn');
           setStatusMessage(getErrorMessage('WebRTC media autoplay was blocked'));
         });

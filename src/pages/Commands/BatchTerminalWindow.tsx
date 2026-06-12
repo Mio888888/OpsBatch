@@ -8,6 +8,29 @@ import TerminalPane from './TerminalPane';
 import { logHandledError } from '../../utils/globalLogger';
 import './batch-terminal.css';
 
+const MAX_CONCURRENT_CONNECTS = 4;
+
+function createSemaphore(limit: number) {
+  let current = 0;
+  const queue: (() => void)[] = [];
+  return {
+    acquire(): Promise<void> {
+      if (current < limit) {
+        current++;
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => queue.push(resolve));
+    },
+    release(): void {
+      if (queue.length > 0) {
+        queue.shift()!();
+      } else {
+        current--;
+      }
+    },
+  };
+}
+
 interface PaneSession {
   hostId: string;
   hostName: string;
@@ -30,6 +53,7 @@ export default function BatchTerminalWindow() {
   const disposedRef = useRef(false);
   const sessionsRef = useRef<PaneSession[]>([]);
   const createdSessionIdsRef = useRef<Set<string>>(new Set());
+  const semaphoreRef = useRef(createSemaphore(MAX_CONCURRENT_CONNECTS));
 
   useEffect(() => {
     sessionsRef.current = sessions;
@@ -73,6 +97,7 @@ export default function BatchTerminalWindow() {
     });
 
     const controller = new AbortController();
+    const sem = semaphoreRef.current;
 
     hosts.forEach((host) => {
       const sessionId = crypto.randomUUID();
@@ -82,33 +107,45 @@ export default function BatchTerminalWindow() {
         s.hostId === host.id ? { ...s, sessionId } : s,
       ));
 
-      invoke<string>('terminal_connect', {
-        hostId: host.id,
-        cols: 80,
-        rows: 24,
-        sessionId,
-      }).then(() => {
+      void sem.acquire().then(() => {
         if (disposedRef.current || controller.signal.aborted) {
+          sem.release();
           invoke('terminal_disconnect', { sessionId }).catch((error) => {
             void logHandledError('batchTerminal.disconnectStale', error, 'warn');
           });
           return;
         }
-        setSessions((prev) => prev.map((s) =>
-          s.hostId === host.id ? { ...s, state: 'connected' as const } : s,
-        ));
-      }).catch((e) => {
-        if (disposedRef.current || controller.signal.aborted) {
-          invoke('terminal_disconnect', { sessionId }).catch((error) => {
-            void logHandledError('batchTerminal.disconnectFailedSession', error, 'warn');
-          });
-          return;
-        }
-        setSessions((prev) => prev.map((s) =>
-          s.hostId === host.id
-            ? { ...s, state: 'error' as const, errorMessage: String(e) }
-            : s,
-        ));
+
+        invoke<string>('terminal_connect', {
+          hostId: host.id,
+          cols: 80,
+          rows: 24,
+          sessionId,
+        }).then(() => {
+          sem.release();
+          if (disposedRef.current || controller.signal.aborted) {
+            invoke('terminal_disconnect', { sessionId }).catch((error) => {
+              void logHandledError('batchTerminal.disconnectStale', error, 'warn');
+            });
+            return;
+          }
+          setSessions((prev) => prev.map((s) =>
+            s.hostId === host.id ? { ...s, state: 'connected' as const } : s,
+          ));
+        }).catch((e) => {
+          sem.release();
+          if (disposedRef.current || controller.signal.aborted) {
+            invoke('terminal_disconnect', { sessionId }).catch((error) => {
+              void logHandledError('batchTerminal.disconnectFailedSession', error, 'warn');
+            });
+            return;
+          }
+          setSessions((prev) => prev.map((s) =>
+            s.hostId === host.id
+              ? { ...s, state: 'error' as const, errorMessage: String(e) }
+              : s,
+          ));
+        });
       });
     });
 
@@ -151,31 +188,43 @@ export default function BatchTerminalWindow() {
       return { ...s, sessionId, state: 'connecting', errorMessage: undefined };
     }));
 
-    invoke<string>('terminal_connect', {
-      hostId: host.id,
-      cols: 80,
-      rows: 24,
-      sessionId,
-    }).then(() => {
+    const sem = semaphoreRef.current;
+    void sem.acquire().then(() => {
       if (disposedRef.current) {
+        sem.release();
         invoke('terminal_disconnect', { sessionId }).catch((error) => {
           void logHandledError('batchTerminal.disconnectDisposedRetry', error, 'warn');
         });
         return;
       }
-      setSessions((prev) => prev.map((s) =>
-        s.hostId === hostId ? { ...s, state: 'connected' } : s,
-      ));
-    }).catch((e) => {
-      if (disposedRef.current) {
-        invoke('terminal_disconnect', { sessionId }).catch((error) => {
-          void logHandledError('batchTerminal.disconnectFailedRetry', error, 'warn');
-        });
-        return;
-      }
-      setSessions((prev) => prev.map((s) =>
-        s.hostId === hostId ? { ...s, state: 'error', errorMessage: String(e) } : s,
-      ));
+      invoke<string>('terminal_connect', {
+        hostId: host.id,
+        cols: 80,
+        rows: 24,
+        sessionId,
+      }).then(() => {
+        sem.release();
+        if (disposedRef.current) {
+          invoke('terminal_disconnect', { sessionId }).catch((error) => {
+            void logHandledError('batchTerminal.disconnectDisposedRetry', error, 'warn');
+          });
+          return;
+        }
+        setSessions((prev) => prev.map((s) =>
+          s.hostId === hostId ? { ...s, state: 'connected' } : s,
+        ));
+      }).catch((e) => {
+        sem.release();
+        if (disposedRef.current) {
+          invoke('terminal_disconnect', { sessionId }).catch((error) => {
+            void logHandledError('batchTerminal.disconnectFailedRetry', error, 'warn');
+          });
+          return;
+        }
+        setSessions((prev) => prev.map((s) =>
+          s.hostId === hostId ? { ...s, state: 'error', errorMessage: String(e) } : s,
+        ));
+      });
     });
   }, [hosts]);
 

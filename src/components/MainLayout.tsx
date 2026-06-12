@@ -1,10 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { Key, ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
-import { relaunch } from '@tauri-apps/plugin-process';
-import { check as checkTauriUpdate } from '@tauri-apps/plugin-updater';
-import type { DownloadEvent } from '@tauri-apps/plugin-updater';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import {
@@ -12,8 +10,6 @@ import {
   PointerSensor,
   pointerWithin,
   rectIntersection,
-  useDraggable,
-  useDroppable,
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
@@ -37,14 +33,12 @@ import {
   message,
 } from './ui';
 import {
-  ApartmentOutlined,
   CloudServerOutlined,
   CloseOutlined,
   CodeOutlined,
   DeleteOutlined,
   EditOutlined,
   FolderOpenOutlined,
-  GithubOutlined,
   PlusOutlined,
   ProfileOutlined,
   ReloadOutlined,
@@ -53,32 +47,47 @@ import {
   UpdateOutlined,
   UploadOutlined,
 } from './ui/icons';
-import type { Key, ReactNode } from 'react';
-import type { DataNode, TreeSelectOption } from './ui';
+import type { TreeSelectOption } from './ui';
 import CloudImport from './CloudImport';
 import WindowControls from './WindowControls';
 import { useTranslation } from '../i18n';
-import type { TranslationKey } from '../i18n';
 import { useAssetsStore } from '../stores/assets';
 import { useThemeStore } from '../stores/theme';
 import type { AssetGroup, Host, ProxySettings } from '../types';
 import { requestKeychainNotice } from '../utils/keychainNotice';
 import {
-  calculateProcessCpuPercent,
-  formatProcessMemory,
-  getProcessMemoryBarPercent,
-  type LocalPerformanceSnapshot,
-} from '../utils/localPerformance';
-import {
   buildRdpSettings,
   DEFAULT_VNC_PORT,
   isVncRemoteDesktopHost,
-  MAX_RDP_DESKTOP_HEIGHT,
+  MIN_RDP_DESKTOP_WIDTH,
   MAX_RDP_DESKTOP_WIDTH,
   MIN_RDP_DESKTOP_HEIGHT,
-  MIN_RDP_DESKTOP_WIDTH,
+  MAX_RDP_DESKTOP_HEIGHT,
 } from '../utils/rdpSettings';
 import { buildProxySettings, DEFAULT_PROXY_PORTS } from '../utils/proxySettings';
+// Extracted modules
+import TitlebarPerformanceMonitor from './asset/TitlebarPerformanceMonitor';
+import { DroppableGroupTitle, DraggableHostTitle } from './asset/DragDropItems';
+import UpdateModal from './asset/UpdateModal';
+import { useUpdate } from '../hooks/useUpdate';
+import {
+  DEFAULT_GROUP_ID,
+  DEFAULT_SSH_PORT,
+  DEFAULT_RDP_PORT,
+  workModes,
+  type HostTreeNode,
+  type HostFormValues,
+  submittedSecret,
+  secretDebugState,
+  hostUsesStoredSecret,
+  hostFormStoresSecret,
+  isWindowsHost,
+  isVncHost,
+  getLinuxHostIds,
+  getGroupIdFromDropId,
+  getHostIdFromDragId,
+  getActiveMode,
+} from './asset/constants';
 
 const { Content } = Layout;
 
@@ -100,421 +109,39 @@ function useSystemReduceMotion() {
   return systemReduceMotion;
 }
 
-function TitlebarPerformanceMonitor() {
-  const { tText } = useTranslation();
-  const [snapshot, setSnapshot] = useState<LocalPerformanceSnapshot | null>(null);
-  const [cpuPercent, setCpuPercent] = useState<number | undefined>(undefined);
-  const [error, setError] = useState(false);
-  const previousSnapshotRef = useRef<LocalPerformanceSnapshot | null>(null);
-
-  useEffect(() => {
-    let disposed = false;
-    let inFlight = false;
-
-    const loadSnapshot = async () => {
-      if (inFlight) return;
-      inFlight = true;
-      try {
-        const next = await invoke<{
-          cpu_time_ms?: number | null;
-          memory_rss_mb?: number | null;
-          logical_cpu_count?: number | null;
-          timestamp?: number;
-        }>('get_local_performance_snapshot');
-        if (disposed) return;
-        const normalizedSnapshot: LocalPerformanceSnapshot = {
-          cpuTimeMs: next.cpu_time_ms ?? undefined,
-          memoryRssMb: next.memory_rss_mb ?? undefined,
-          logicalCpuCount: next.logical_cpu_count ?? undefined,
-          timestamp: next.timestamp,
-        };
-        const nextCpuPercent = calculateProcessCpuPercent(previousSnapshotRef.current, normalizedSnapshot);
-        previousSnapshotRef.current = normalizedSnapshot;
-        setSnapshot(normalizedSnapshot);
-        setCpuPercent(nextCpuPercent);
-        setError(false);
-      } catch {
-        if (!disposed) setError(true);
-      } finally {
-        inFlight = false;
-      }
-    };
-
-    void loadSnapshot();
-    const timer = window.setInterval(() => {
-      void loadSnapshot();
-    }, 2500);
-
-    return () => {
-      disposed = true;
-      window.clearInterval(timer);
-    };
-  }, []);
-
-  const memoryPercent = getProcessMemoryBarPercent(snapshot?.memoryRssMb);
-  const memorySummary = formatProcessMemory(snapshot?.memoryRssMb);
-  const title = error
-    ? tText('performance.unavailable')
-    : tText('performance.title', {
-      cpu: cpuPercent === undefined ? '--' : `${Math.round(cpuPercent)}%`,
-      memory: memorySummary,
-    });
-
-  return (
-    <div
-      className={`titlebar-performance-monitor${error ? ' titlebar-performance-monitor-error' : ''}`}
-      aria-label={title}
-      title={title}
-    >
-      <span className="titlebar-performance-chip">
-        <span className="titlebar-performance-label">CPU</span>
-        <span className="titlebar-performance-track" aria-hidden="true">
-          <span style={{ width: `${cpuPercent ?? 0}%` }} />
-        </span>
-        <span className="titlebar-performance-value">{cpuPercent === undefined ? '--' : `${Math.round(cpuPercent)}%`}</span>
-      </span>
-      <span className="titlebar-performance-chip">
-        <span className="titlebar-performance-label">MEM</span>
-        <span className="titlebar-performance-track" aria-hidden="true">
-          <span style={{ width: `${memoryPercent}%` }} />
-        </span>
-        <span className="titlebar-performance-value">{memorySummary}</span>
-      </span>
-    </div>
-  );
-}
-
-const workModes: Array<{ key: string; icon: ReactNode; labelKey: TranslationKey }> = [
-  { key: '/terminal', icon: <CodeOutlined />, labelKey: 'nav.terminal' },
-  { key: '/workflow', icon: <ApartmentOutlined />, labelKey: 'nav.workflow' },
-  { key: '/github', icon: <GithubOutlined />, labelKey: 'nav.github' },
-];
-
-interface HostTreeNode extends DataNode {
-  children?: HostTreeNode[];
-  nodeType: 'group' | 'host';
-  groupId?: string;
-  host?: Host;
-  depth?: number;
-}
-
-interface DroppableGroupTitleProps {
-  groupId: string;
-  name: string;
-  hostCount: number;
-  depth: number;
-  children?: ReactNode;
-  onContextMenu: (event: React.MouseEvent, groupId: string) => void;
-}
-
-interface DraggableHostTitleProps {
-  host: Host;
-  children: ReactNode;
-}
-
-interface HostFormValues {
-  name: string;
-  ip: string;
-  port: number;
-  authType: Host['authType'];
-  username: string;
-  password?: string;
-  privateKey?: string;
-  os: Host['os'];
-  tags?: string[];
-  groupId?: string;
-  remark?: string;
-  jumpChain?: string[];
-  rdpDomain?: string;
-  rdpDesktopWidth?: number;
-  rdpDesktopHeight?: number;
-  rdpEnableClipboard?: boolean;
-  rdpEnableAudio?: boolean;
-  rdpMapDisk?: boolean;
-  rdpDiskPath?: string;
-  vncPort?: number;
-  vncUsername?: string;
-  vncPassword?: string;
-  vncViewOnly?: boolean;
-  vncShared?: boolean;
-  proxyEnabled?: boolean;
-  proxyType?: ProxySettings['type'];
-  proxyHost?: string;
-  proxyPort?: number;
-  proxyUsername?: string;
-  proxyPassword?: string;
-}
-
-const DEFAULT_GROUP_ID = '__default__';
-const DEFAULT_SSH_PORT = 22;
-const DEFAULT_RDP_PORT = 3389;
-const GROUP_DROP_ID_PREFIX = 'asset-group:';
-const HOST_DRAG_ID_PREFIX = 'asset-host:';
-const SECRET_PLACEHOLDER = '***keychain***';
-
-interface AppUpdateInfo {
-  hasUpdate: boolean;
-  currentVersion: string;
-  latestVersion?: string | null;
-  releaseTitle?: string | null;
-  releaseNotes?: string | null;
-  publishedAt?: string | null;
-  releaseUrl: string;
-}
-
-type UpdateInstallPhase = 'idle' | 'checking' | 'downloading' | 'installing' | 'ready' | 'error';
-
-interface UpdateInstallState {
-  phase: UpdateInstallPhase;
-  downloaded: number;
-  total?: number;
-  error?: string;
-}
-
-function formatUpdateBytes(value?: number): string {
-  if (!value || value <= 0) return '-';
-  const units = ['B', 'KB', 'MB', 'GB'];
-  let size = value;
-  let unitIndex = 0;
-  while (size >= 1024 && unitIndex < units.length - 1) {
-    size /= 1024;
-    unitIndex += 1;
-  }
-  const precision = size >= 100 || unitIndex === 0 ? 0 : 1;
-  return `${size.toFixed(precision)} ${units[unitIndex]}`;
-}
-
-function editableSecret(value?: string): string | undefined {
-  return value && value !== SECRET_PLACEHOLDER ? value : undefined;
-}
-
-function submittedSecret(value?: string): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed && trimmed !== SECRET_PLACEHOLDER ? value : undefined;
-}
-
-function secretDebugState(value?: string) {
-  return {
-    present: Boolean(value),
-    placeholder: value === SECRET_PLACEHOLDER,
-    length: value?.length ?? 0,
-  };
-}
-
-function hostUsesStoredSecret(host: Pick<Host, 'authType' | 'password' | 'privateKey' | 'jumpChain'>) {
-  if (host.authType === 'password' && host.password === SECRET_PLACEHOLDER) return true;
-  if (host.authType === 'key' && host.privateKey === SECRET_PLACEHOLDER) return true;
-  return host.jumpChain.length > 0;
-}
-
-function hostFormStoresSecret(host: Pick<Host, 'password' | 'privateKey'>) {
-  return Boolean(host.password || host.privateKey);
-}
-
-function isWindowsHost(host: Pick<Host, 'os'>) {
-  return host.os === 'windows';
-}
-
-function isVncHost(host: Pick<Host, 'os' | 'rdpSettings'>) {
-  return host.os === 'vnc' || isVncRemoteDesktopHost(host);
-}
-
-function getLinuxHostIds(selectedIds: string[], hosts: Host[]) {
-  const selectedIdSet = new Set(selectedIds);
-  return hosts
-    .filter((host) => selectedIdSet.has(host.id) && host.os === 'linux')
-    .map((host) => host.id);
-}
-
-function getGroupDropId(groupId: string) {
-  return `${GROUP_DROP_ID_PREFIX}${groupId}`;
-}
-
-function getHostDragId(hostId: string) {
-  return `${HOST_DRAG_ID_PREFIX}${hostId}`;
-}
-
-function getGroupIdFromDropId(id: string) {
-  return id.startsWith(GROUP_DROP_ID_PREFIX) ? id.slice(GROUP_DROP_ID_PREFIX.length) : null;
-}
-
-function getHostIdFromDragId(id: string) {
-  return id.startsWith(HOST_DRAG_ID_PREFIX) ? id.slice(HOST_DRAG_ID_PREFIX.length) : null;
-}
-
-function DroppableGroupTitle({
-  groupId,
-  name,
-  hostCount,
-  depth,
-  children,
-  onContextMenu,
-}: DroppableGroupTitleProps) {
-  const { isOver, setNodeRef } = useDroppable({
-    id: getGroupDropId(groupId),
-    data: { type: 'group', groupId },
-  });
-
-  return (
-    <div
-      ref={setNodeRef}
-      className={`asset-tree-group-title${isOver ? ' asset-tree-group-title-drag-over' : ''}`}
-      style={{ marginLeft: -depth * 12, paddingLeft: depth * 12 + 4 }}
-      onContextMenu={(event) => onContextMenu(event, groupId)}
-    >
-      <FolderOpenOutlined />
-      <span>{name}</span>
-      <span className="asset-tree-count">{hostCount}</span>
-      {children}
-    </div>
-  );
-}
-
-function DraggableHostTitle({ host, children }: DraggableHostTitleProps) {
-  const pointerDownRef = useRef<{ x: number; y: number } | null>(null);
-  const suppressClickAfterDragRef = useRef(false);
-  const suppressClickResetRef = useRef<number | null>(null);
-  const { attributes, isDragging, listeners, setNodeRef, transform } = useDraggable({
-    id: getHostDragId(host.id),
-    data: { type: 'host', hostId: host.id },
-  });
-
-  useEffect(() => {
-    if (isDragging) {
-      if (suppressClickResetRef.current !== null) {
-        window.clearTimeout(suppressClickResetRef.current);
-        suppressClickResetRef.current = null;
-      }
-      suppressClickAfterDragRef.current = true;
-      return undefined;
-    }
-
-    if (!suppressClickAfterDragRef.current) return undefined;
-
-    const timeoutId = window.setTimeout(() => {
-      suppressClickAfterDragRef.current = false;
-      suppressClickResetRef.current = null;
-    }, 120);
-    suppressClickResetRef.current = timeoutId;
-
-    return () => window.clearTimeout(timeoutId);
-  }, [isDragging]);
-
-  const handlePointerDownCapture = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
-    if (event.button !== 0) {
-      pointerDownRef.current = null;
-      return;
-    }
-    pointerDownRef.current = { x: event.clientX, y: event.clientY };
-  }, []);
-
-  const handleClickCapture = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    const pointerDown = pointerDownRef.current;
-    pointerDownRef.current = null;
-    const movedAfterPointerDown = pointerDown
-      ? Math.hypot(event.clientX - pointerDown.x, event.clientY - pointerDown.y) >= 4
-      : false;
-
-    if (!suppressClickAfterDragRef.current && !movedAfterPointerDown) return;
-
-    suppressClickAfterDragRef.current = false;
-    if (suppressClickResetRef.current !== null) {
-      window.clearTimeout(suppressClickResetRef.current);
-      suppressClickResetRef.current = null;
-    }
-    event.preventDefault();
-    event.stopPropagation();
-  }, []);
-
-  return (
-    <div
-      ref={setNodeRef}
-      className={`asset-tree-draggable-host${isDragging ? ' asset-tree-draggable-host-dragging' : ''}`}
-      style={{
-        transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
-      }}
-      onPointerDownCapture={handlePointerDownCapture}
-      onClickCapture={handleClickCapture}
-      {...listeners}
-      {...attributes}
-    >
-      {children}
-    </div>
-  );
-}
-
-function getActiveMode(pathname: string) {
-  if (pathname === '/terminal') return '/terminal';
-  if (pathname === '/rdp') return '/terminal';
-  if (pathname === '/vnc') return '/terminal';
-  if (pathname === '/workflow') return '/workflow';
-  if (pathname === '/github') return '/github';
-  if (pathname === '/assets' || pathname === '/commands' || pathname === '/quick-actions') return '';
-  return '';
-}
-
 export default function MainLayout({ children }: { children: ReactNode }) {
   const { t, tText } = useTranslation();
-  const location = useLocation();
   const navigate = useNavigate();
+  const location = useLocation();
   const layoutRef = useRef<HTMLDivElement>(null);
-  const assetPanelRef = useRef<HTMLElement>(null);
+  const assetPanelRef = useRef<HTMLDivElement>(null);
   const mainPanelRef = useRef<HTMLElement>(null);
+
+  const activeMode = useMemo(() => getActiveMode(location.pathname), [location.pathname]);
+  const previousActiveModeRef = useRef(activeMode);
+  const previousPathnameRef = useRef(location.pathname);
   const hasPlayedIntroRef = useRef(false);
   const assetPanelIntroPlayedRef = useRef(false);
-  const previousActiveModeRef = useRef(getActiveMode(location.pathname));
-  const previousPathnameRef = useRef(location.pathname);
-  const updateCheckInFlightRef = useRef(false);
-  const startupUpdateRequestedRef = useRef(false);
+
   const motionSettingsLoaded = useThemeStore((s) => s.loaded);
   const reduceMotionSetting = useThemeStore((s) => s.reduceMotion);
   const systemReduceMotion = useSystemReduceMotion();
   const reduceMotion = !motionSettingsLoaded || reduceMotionSetting || systemReduceMotion;
-  const activeMode = getActiveMode(location.pathname);
-  const isTerminal = location.pathname === '/terminal' || location.pathname === '/assets' || location.pathname === '/';
-  const [assetPanelVisible, setAssetPanelVisible] = useState(
-    () => new URLSearchParams(location.search).get('assets') === '1',
-  );
+
+  const [assetPanelVisible, setAssetPanelVisible] = useState(false);
+
   const closeAssetPanel = useCallback(() => {
     setAssetPanelVisible(false);
+  }, []);
+
+  useEffect(() => {
     if (new URLSearchParams(location.search).get('assets') === '1') {
+      setAssetPanelVisible(true);
       navigate(location.pathname, { replace: true });
     }
   }, [location.pathname, location.search, navigate]);
-  const [assetSearchText, setAssetSearchText] = useState('');
-  const [assetExpandedKeys, setAssetExpandedKeys] = useState<Key[]>([]);
-  const [userCollapsedKeys, setUserCollapsedKeys] = useState<Set<string>>(new Set());
-  const [hostModalOpen, setHostModalOpen] = useState(false);
-  const [hostModalTab, setHostModalTab] = useState('basic');
-  const [editingHost, setEditingHost] = useState<Host | null>(null);
-  const [cloudImportOpen, setCloudImportOpen] = useState(false);
-  const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
-  const [updateModalOpen, setUpdateModalOpen] = useState(false);
-  const [updateInstallState, setUpdateInstallState] = useState<UpdateInstallState>({
-    phase: 'idle',
-    downloaded: 0,
-  });
-  const [hostForm] = Form.useForm<HostFormValues>();
 
-  // Group context menu & modal
-  const [ctxMenu, setCtxMenu] = useState<{
-    x: number;
-    y: number;
-    target: { type: 'empty' } | { type: 'group'; groupId: string } | { type: 'host'; hostId: string };
-  } | null>(null);
-  const [groupModalOpen, setGroupModalOpen] = useState(false);
-  const [editingGroup, setEditingGroup] = useState<AssetGroup | null>(null);
-  const [editingDefaultGroup, setEditingDefaultGroup] = useState(false);
-  const [newGroupParentId, setNewGroupParentId] = useState<string | undefined>(undefined);
-  const [groupForm] = Form.useForm<{ name: string }>();
-  const ctxMenuRef = useRef<HTMLDivElement>(null);
-  const lastDragOverGroupIdRef = useRef<string | null>(null);
-  const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
-  const assetTreeCollisionDetection = useCallback<CollisionDetection>((args) => {
-    const pointerCollisions = pointerWithin(args);
-    return pointerCollisions.length > 0 ? pointerCollisions : rectIntersection(args);
-  }, []);
-
+  // ── Assets Store bindings ──
   const hosts = useAssetsStore((s) => s.hosts);
   const groups = useAssetsStore((s) => s.groups);
   // @ts-expect-error — tags removed from UI but kept in store for future use
@@ -556,6 +183,38 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     }
   }, [assetPanelVisible, hosts.length, loadHosts]);
 
+  // ── Search & Tree ──
+  const [assetSearchText, setAssetSearchText] = useState('');
+  const [assetExpandedKeys, setAssetExpandedKeys] = useState<Key[]>([]);
+  const [userCollapsedKeys, setUserCollapsedKeys] = useState<Set<string>>(new Set());
+  const [hostModalOpen, setHostModalOpen] = useState(false);
+  const [hostModalTab, setHostModalTab] = useState('basic');
+  const [editingHost, setEditingHost] = useState<Host | null>(null);
+  const [cloudImportOpen, setCloudImportOpen] = useState(false);
+  const [hostForm] = Form.useForm<HostFormValues>();
+
+  // ── Context menu ──
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number;
+    y: number;
+    target: { type: 'empty' } | { type: 'group'; groupId: string } | { type: 'host'; hostId: string };
+  } | null>(null);
+  const [groupModalOpen, setGroupModalOpen] = useState(false);
+  const [editingGroup, setEditingGroup] = useState<AssetGroup | null>(null);
+  const [editingDefaultGroup, setEditingDefaultGroup] = useState(false);
+  const [newGroupParentId, setNewGroupParentId] = useState<string | undefined>(undefined);
+  const [groupForm] = Form.useForm<{ name: string }>();
+  const ctxMenuRef = useRef<HTMLDivElement>(null);
+
+  // ── DnD ──
+  const lastDragOverGroupIdRef = useRef<string | null>(null);
+  const dndSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+  const assetTreeCollisionDetection = useCallback<CollisionDetection>((args) => {
+    const pointerCollisions = pointerWithin(args);
+    return pointerCollisions.length > 0 ? pointerCollisions : rectIntersection(args);
+  }, []);
+
+  // ── Host session ──
   const lastOpenHostRef = useRef('');
   const openHostSession = useCallback(async (host: Host) => {
     if (lastOpenHostRef.current === host.id) return;
@@ -572,9 +231,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       }
       return;
     }
-
     if (hostUsesStoredSecret(host) && !(await requestKeychainNotice())) return;
-
     if (isWindowsHost(host)) {
       try {
         await invoke('open_managed_window', { kind: 'rdp', hostIds: [host.id] });
@@ -584,7 +241,6 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       }
       return;
     }
-
     closeAssetPanel();
     navigate('/terminal', {
       state: {
@@ -614,7 +270,6 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     setSelectedHostIds(keys.map(String).filter((key) => hostIdSet.has(key)));
   }, [hostIdSet, setSelectedHostIds]);
 
-  // Right-click context menu
   const handleGroupContextMenu = useCallback((e: React.MouseEvent, groupId: string) => {
     e.preventDefault();
     e.stopPropagation();
@@ -632,6 +287,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     return () => document.removeEventListener('mousedown', close);
   }, [ctxMenu]);
 
+  // ── Group CRUD ──
   const handleCtxAddGroup = useCallback((parentId?: string) => {
     setCtxMenu(null);
     setEditingGroup(null);
@@ -696,6 +352,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     }
   }, [addGroup, editingGroup, editingDefaultGroup, groupForm, newGroupParentId, setDefaultGroupName, tText, updateGroup]);
 
+  // ── Host CRUD ──
   const openNewHostModal = useCallback((groupId?: string) => {
     setEditingHost(null);
     hostForm.resetFields();
@@ -743,43 +400,41 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       name: host.name,
       ip: host.ip,
       port: host.port,
-      authType: hostOs === 'windows' || hostOs === 'vnc' ? 'password' : host.authType,
-      username: hostOs === 'vnc' ? (host.username || 'vnc') : host.username,
-      password: hostOs === 'vnc' ? undefined : editableSecret(host.password),
-      privateKey: hostOs === 'windows' || hostOs === 'vnc' ? undefined : editableSecret(host.privateKey),
+      authType: host.authType,
+      username: host.username,
+      password: host.password ?? undefined,
+      privateKey: host.privateKey ?? undefined,
       os: hostOs,
+      tags: host.tags,
       groupId: host.groupId ?? DEFAULT_GROUP_ID,
-      remark: host.remark,
-      jumpChain: hostOs === 'windows' || hostOs === 'vnc' ? [] : host.jumpChain ?? [],
-      rdpDomain: host.rdpSettings?.domain ?? '',
-      rdpDesktopWidth: host.rdpSettings?.desktopWidth ?? 1280,
-      rdpDesktopHeight: host.rdpSettings?.desktopHeight ?? 720,
-      rdpEnableClipboard: host.rdpSettings?.enableClipboard ?? true,
-      rdpEnableAudio: host.rdpSettings?.enableAudio ?? true,
-      rdpMapDisk: host.rdpSettings?.mapDisk ?? false,
-      rdpDiskPath: host.rdpSettings?.diskPath ?? '',
+      remark: host.remark ?? '',
+      jumpChain: host.jumpChain,
+      rdpDomain: host.rdpSettings?.domain,
+      rdpDesktopWidth: host.rdpSettings?.desktopWidth,
+      rdpDesktopHeight: host.rdpSettings?.desktopHeight,
+      rdpEnableClipboard: host.rdpSettings?.enableClipboard,
+      rdpEnableAudio: host.rdpSettings?.enableAudio,
+      rdpMapDisk: host.rdpSettings?.mapDisk,
+      rdpDiskPath: host.rdpSettings?.diskPath,
       vncPort: host.rdpSettings?.vncPort ?? DEFAULT_VNC_PORT,
-      vncUsername: host.rdpSettings?.vncUsername ?? '',
-      vncPassword: host.rdpSettings?.vncPassword ?? '',
-      vncViewOnly: host.rdpSettings?.vncViewOnly ?? false,
+      vncUsername: host.rdpSettings?.vncUsername,
+      vncPassword: host.rdpSettings?.vncPassword,
+      vncViewOnly: host.rdpSettings?.vncViewOnly,
       vncShared: host.rdpSettings?.vncShared ?? true,
-      proxyEnabled: host.proxySettings?.enabled ?? false,
+      proxyEnabled: host.proxySettings?.enabled,
       proxyType: host.proxySettings?.type ?? 'socks5',
-      proxyHost: host.proxySettings?.host ?? '',
+      proxyHost: host.proxySettings?.host,
       proxyPort: host.proxySettings?.port ?? DEFAULT_PROXY_PORTS.socks5,
-      proxyUsername: host.proxySettings?.username ?? '',
-      proxyPassword: host.proxySettings?.password ?? '',
+      proxyUsername: host.proxySettings?.username,
+      proxyPassword: host.proxySettings?.password,
     });
     setHostModalTab('basic');
     setHostModalOpen(true);
   }, [hostForm]);
 
   const handleHostOsChange = useCallback((nextOs: Host['os']) => {
-    const currentPortValue = Number(hostForm.getFieldValue('port'));
-    const currentPort = Number.isFinite(currentPortValue) ? currentPortValue : 0;
-    const currentUsername = String(hostForm.getFieldValue('username') ?? '').trim();
-
-    hostForm.setFieldValue('os', nextOs);
+    const currentPort = hostForm.getFieldValue('port') as number | undefined;
+    const currentUsername = hostForm.getFieldValue('username') as string | undefined;
 
     if (nextOs === 'windows') {
       if (!currentPort || currentPort === DEFAULT_SSH_PORT || currentPort === DEFAULT_VNC_PORT) {
@@ -791,21 +446,11 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       hostForm.setFieldValue('authType', 'password');
       hostForm.setFieldValue('privateKey', undefined);
       hostForm.setFieldValue('jumpChain', []);
-      if (!hostForm.getFieldValue('rdpDesktopWidth')) {
-        hostForm.setFieldValue('rdpDesktopWidth', 1280);
-      }
-      if (!hostForm.getFieldValue('rdpDesktopHeight')) {
-        hostForm.setFieldValue('rdpDesktopHeight', 720);
-      }
-      if (hostForm.getFieldValue('rdpEnableClipboard') === undefined) {
-        hostForm.setFieldValue('rdpEnableClipboard', true);
-      }
-      if (hostForm.getFieldValue('rdpEnableAudio') === undefined) {
-        hostForm.setFieldValue('rdpEnableAudio', true);
-      }
-      if (hostForm.getFieldValue('rdpMapDisk') === undefined) {
-        hostForm.setFieldValue('rdpMapDisk', false);
-      }
+      if (!hostForm.getFieldValue('rdpDesktopWidth')) hostForm.setFieldValue('rdpDesktopWidth', 1280);
+      if (!hostForm.getFieldValue('rdpDesktopHeight')) hostForm.setFieldValue('rdpDesktopHeight', 720);
+      if (hostForm.getFieldValue('rdpEnableClipboard') === undefined) hostForm.setFieldValue('rdpEnableClipboard', true);
+      if (hostForm.getFieldValue('rdpEnableAudio') === undefined) hostForm.setFieldValue('rdpEnableAudio', true);
+      if (hostForm.getFieldValue('rdpMapDisk') === undefined) hostForm.setFieldValue('rdpMapDisk', false);
       return;
     }
 
@@ -822,15 +467,9 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       hostForm.setFieldValue('jumpChain', []);
       hostForm.setFieldValue('rdpDomain', '');
       hostForm.setFieldValue('rdpDiskPath', '');
-      if (!hostForm.getFieldValue('vncPort')) {
-        hostForm.setFieldValue('vncPort', DEFAULT_VNC_PORT);
-      }
-      if (hostForm.getFieldValue('vncShared') === undefined) {
-        hostForm.setFieldValue('vncShared', true);
-      }
-      if (hostForm.getFieldValue('vncViewOnly') === undefined) {
-        hostForm.setFieldValue('vncViewOnly', false);
-      }
+      if (!hostForm.getFieldValue('vncPort')) hostForm.setFieldValue('vncPort', DEFAULT_VNC_PORT);
+      if (hostForm.getFieldValue('vncShared') === undefined) hostForm.setFieldValue('vncShared', true);
+      if (hostForm.getFieldValue('vncViewOnly') === undefined) hostForm.setFieldValue('vncViewOnly', false);
       setHostModalTab('basic');
       return;
     }
@@ -910,6 +549,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     }
   }, [deleteHost, tText]);
 
+  // ── DnD handlers ──
   const handleAssetDragStart = useCallback(() => {
     lastDragOverGroupIdRef.current = null;
   }, []);
@@ -924,15 +564,11 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     const hostId = getHostIdFromDragId(String(event.active.id));
     const dropGroupId = event.over ? getGroupIdFromDropId(String(event.over.id)) : null;
     lastDragOverGroupIdRef.current = null;
-
     if (!hostId || !dropGroupId) return;
-
     const host = hosts.find((h) => h.id === hostId);
     if (!host) return;
-
     const newGroupId = dropGroupId === DEFAULT_GROUP_ID ? undefined : dropGroupId;
     if (host.groupId === newGroupId) return;
-
     void updateHost({ ...host, groupId: newGroupId })
       .catch((error: unknown) => {
         message.error(tText('common.moveFailed', { error: String(error) }));
@@ -943,6 +579,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     lastDragOverGroupIdRef.current = null;
   }, []);
 
+  // ── Host title renderer ──
   const renderHostTitle = useCallback((host: Host) => {
     const vncHost = isVncHost(host);
     const openLabel = vncHost ? t('assets.openVnc') : (isWindowsHost(host) ? t('assets.openRdp') : t('assets.openTerminal'));
@@ -973,42 +610,17 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         </div>
         <div className="asset-tree-host-actions">
           <Tooltip title={openLabel}>
-            <button
-              type="button"
-              className="asset-tree-host-icon-button"
-              onClick={(event) => {
-                event.stopPropagation();
-                void openHostSession(host);
-              }}
-            >
+            <button type="button" className="asset-tree-host-icon-button" onClick={(event) => { event.stopPropagation(); void openHostSession(host); }}>
               {openIcon}
             </button>
           </Tooltip>
           <Tooltip title={t('common.edit')}>
-            <button
-              type="button"
-              className="asset-tree-host-icon-button"
-              onClick={(event) => {
-                event.stopPropagation();
-                openEditHostModal(host);
-              }}
-            >
+            <button type="button" className="asset-tree-host-icon-button" onClick={(event) => { event.stopPropagation(); openEditHostModal(host); }}>
               <EditOutlined />
             </button>
           </Tooltip>
-          <Popconfirm
-            title={t('assets.deleteHostConfirm')}
-            onConfirm={() => {
-              void handleDeleteHost(host.id);
-            }}
-          >
-            <button
-              type="button"
-              className="asset-tree-host-icon-button asset-tree-host-icon-button-danger"
-              aria-label={tText('assets.deleteHostAria')}
-              title={tText('common.delete')}
-              onClick={(event) => event.stopPropagation()}
-            >
+          <Popconfirm title={t('assets.deleteHostConfirm')} onConfirm={() => { void handleDeleteHost(host.id); }}>
+            <button type="button" className="asset-tree-host-icon-button asset-tree-host-icon-button-danger" aria-label={tText('assets.deleteHostAria')} title={tText('common.delete')} onClick={(event) => event.stopPropagation()}>
               <DeleteOutlined />
             </button>
           </Popconfirm>
@@ -1017,6 +629,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     );
   }, [handleDeleteHost, openEditHostModal, openHostSession, t, tText]);
 
+  // ── Asset tree data ──
   const assetTreeData = useMemo<HostTreeNode[]>(() => {
     const hostsByGroup = new Map<string, Host[]>();
     for (const host of filteredHosts) {
@@ -1039,11 +652,6 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       const childGroups = groupsByParent.get(groupId) ?? [];
       return {
         key: groupId,
-        selectable: false,
-        isLeaf: false,
-        nodeType: 'group',
-        groupId,
-        depth,
         title: (
           <DroppableGroupTitle
             groupId={groupId}
@@ -1053,9 +661,12 @@ export default function MainLayout({ children }: { children: ReactNode }) {
             onContextMenu={handleGroupContextMenu}
           />
         ),
+        nodeType: 'group',
+        groupId,
+        depth,
         children: [
           ...childGroups.map((cg) => buildGroupNode(cg.id, cg.name, depth + 1)),
-          ...groupHosts.map<HostTreeNode>((host) => ({
+          ...groupHosts.map((host): HostTreeNode => ({
             key: host.id,
             title: (
               <DraggableHostTitle host={host}>
@@ -1072,19 +683,14 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     };
 
     const groupNodes: HostTreeNode[] = [];
-
-    // Default group first
     groupNodes.push(buildGroupNode(DEFAULT_GROUP_ID, displayedDefaultGroupName));
-
-    // Top-level custom groups (no parentId)
     for (const group of groupsByParent.get('') ?? []) {
       groupNodes.push(buildGroupNode(group.id, group.name));
     }
-
     return groupNodes;
   }, [filteredHosts, groups, displayedDefaultGroupName, renderHostTitle, handleGroupContextMenu]);
 
-  // Build a flat tree structure for the group picker (TreeSelect)
+  // ── Group tree data (TreeSelect) ──
   const groupTreeData = useMemo<TreeSelectOption[]>(() => {
     const groupById = new Map(groups.map((group) => [group.id, group]));
     const groupsByParent = new Map<string, AssetGroup[]>();
@@ -1094,7 +700,6 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       if (!list) { list = []; groupsByParent.set(parentId, list); }
       list.push(group);
     }
-
     const toOption = (gId: string): TreeSelectOption => {
       const group = groupById.get(gId);
       const label = gId === DEFAULT_GROUP_ID ? tText('assets.defaultGroup') : (group?.name ?? '?');
@@ -1107,11 +712,10 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     ];
   }, [groups, tText]);
 
-  // Auto-expand groups that contain hosts
+  // ── Auto-expand ──
   const autoExpandedKeys = useMemo(() => {
     const groupsWithHosts = new Set<string>();
     const parentByGroup = new Map(groups.map((group) => [group.id, group.parentId]));
-
     for (const host of hosts) {
       const groupId = host.groupId ?? DEFAULT_GROUP_ID;
       groupsWithHosts.add(groupId);
@@ -1121,7 +725,6 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         parentId = parentByGroup.get(parentId);
       }
     }
-
     return groupsWithHosts;
   }, [hosts, groups]);
 
@@ -1132,6 +735,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     return [...keys];
   }, [autoExpandedKeys, assetExpandedKeys, userCollapsedKeys]);
 
+  // ── Batch operations ──
   const selectedLinuxHostIds = useMemo(
     () => getLinuxHostIds(selectedHostIds, hosts),
     [hosts, selectedHostIds],
@@ -1139,24 +743,19 @@ export default function MainLayout({ children }: { children: ReactNode }) {
 
   const openBatchTerminal = useCallback(async () => {
     if (selectedHostIds.length === 0) return;
-    if (selectedLinuxHostIds.length === 0) {
-      message.warning(tText('assets.selectLinuxHostsFirst'));
-      return;
-    }
+    if (selectedLinuxHostIds.length === 0) { message.warning(tText('assets.selectLinuxHostsFirst')); return; }
     if (!(await requestKeychainNotice())) return;
     await invoke('open_managed_window', { kind: 'batch-terminal', hostIds: selectedLinuxHostIds });
   }, [requestKeychainNotice, selectedHostIds.length, selectedLinuxHostIds, tText]);
 
   const openBatchTransfer = useCallback(async () => {
     if (selectedHostIds.length === 0) return;
-    if (selectedLinuxHostIds.length === 0) {
-      message.warning(tText('assets.selectLinuxHostsFirst'));
-      return;
-    }
+    if (selectedLinuxHostIds.length === 0) { message.warning(tText('assets.selectLinuxHostsFirst')); return; }
     if (!(await requestKeychainNotice())) return;
     await invoke('open_managed_window', { kind: 'batch-transfer', hostIds: selectedLinuxHostIds });
   }, [requestKeychainNotice, selectedHostIds.length, selectedLinuxHostIds, tText]);
 
+  // ── Window actions ──
   const openSettingsWindow = useCallback(async () => {
     await invoke('open_managed_window', { kind: 'settings' });
   }, []);
@@ -1165,131 +764,13 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     await invoke('open_managed_window', { kind: 'global-log' });
   }, []);
 
-  const checkForUpdates = useCallback(async (silent = false) => {
-    if (updateCheckInFlightRef.current) return null;
-    updateCheckInFlightRef.current = true;
-    try {
-      const nextInfo = await invoke<AppUpdateInfo>('check_app_update');
-      setUpdateInfo(nextInfo);
-      if (!silent) {
-        if (nextInfo.hasUpdate) {
-          message.success(tText('appUpdate.available', { version: nextInfo.latestVersion ?? '' }));
-        } else {
-          message.success(tText('appUpdate.upToDate', { version: nextInfo.currentVersion }));
-        }
-      }
-      return nextInfo;
-    } catch (error) {
-      if (!silent) message.error(tText('appUpdate.checkFailed', { error: String(error) }));
-      return null;
-    } finally {
-      updateCheckInFlightRef.current = false;
-    }
-  }, [tText]);
+  // ── Update (extracted hook) ──
+  const updateState = useUpdate();
 
-  useEffect(() => {
-    if (startupUpdateRequestedRef.current) return;
-    startupUpdateRequestedRef.current = true;
-    void checkForUpdates(true);
-  }, [checkForUpdates]);
-
-  const handleUpdateClick = useCallback(async () => {
-    setUpdateModalOpen(true);
-    if (!updateInfo) void checkForUpdates(false);
-  }, [checkForUpdates, updateInfo]);
-
-  const resetUpdateInstall = useCallback(() => {
-    setUpdateInstallState({ phase: 'idle', downloaded: 0 });
-  }, []);
-
-  const downloadAndInstallUpdate = useCallback(async () => {
-    setUpdateInstallState({ phase: 'checking', downloaded: 0 });
-    try {
-      const tauriUpdate = await checkTauriUpdate();
-      if (!tauriUpdate) {
-        setUpdateInstallState({ phase: 'idle', downloaded: 0 });
-        const latestInfo = await checkForUpdates(true);
-        message.info(tText('appUpdate.noInstallableUpdate', { version: latestInfo?.currentVersion ?? updateInfo?.currentVersion ?? '' }));
-        return;
-      }
-
-      let downloaded = 0;
-      await tauriUpdate.downloadAndInstall((event: DownloadEvent) => {
-        if (event.event === 'Started') {
-          downloaded = 0;
-          setUpdateInstallState({
-            phase: 'downloading',
-            downloaded: 0,
-            total: event.data.contentLength,
-          });
-          return;
-        }
-        if (event.event === 'Progress') {
-          downloaded += event.data.chunkLength;
-          setUpdateInstallState((current) => ({
-            ...current,
-            phase: 'downloading',
-            downloaded,
-          }));
-          return;
-        }
-        setUpdateInstallState((current) => ({
-          ...current,
-          phase: 'installing',
-          downloaded,
-        }));
-      });
-      setUpdateInstallState((current) => ({
-        ...current,
-        phase: 'ready',
-        downloaded: current.total ?? current.downloaded,
-      }));
-      message.success(tText('appUpdate.installReady'));
-    } catch (error) {
-      setUpdateInstallState((current) => ({
-        ...current,
-        phase: 'error',
-        error: String(error),
-      }));
-      message.error(tText('appUpdate.installFailed', { error: String(error) }));
-    }
-  }, [checkForUpdates, tText, updateInfo?.currentVersion]);
-
-  const restartForUpdate = useCallback(async () => {
-    try {
-      await relaunch();
-    } catch (error) {
-      message.error(tText('appUpdate.restartFailed', { error: String(error) }));
-    }
-  }, [tText]);
-
-  const updateBusy = updateInstallState.phase === 'checking'
-    || updateInstallState.phase === 'downloading'
-    || updateInstallState.phase === 'installing';
-  const updatePercent = updateInstallState.total
-    ? Math.min(100, Math.round((updateInstallState.downloaded / updateInstallState.total) * 100))
-    : 0;
-  const updateProgressLabel = updateInstallState.total
-    ? `${formatUpdateBytes(updateInstallState.downloaded)} / ${formatUpdateBytes(updateInstallState.total)}`
-    : formatUpdateBytes(updateInstallState.downloaded);
-  const updateActionLabel = updateInstallState.phase === 'ready'
-    ? t('appUpdate.restartNow')
-    : updateInstallState.phase === 'checking'
-      ? t('appUpdate.prepareDownload')
-      : updateInstallState.phase === 'installing'
-        ? t('appUpdate.installing')
-        : updateInstallState.phase === 'downloading'
-          ? t('appUpdate.downloading')
-          : updateInstallState.phase === 'error'
-            ? t('common.retry')
-            : t('appUpdate.downloadAndInstall');
-  const updateActionDisabled = updateBusy || !updateInfo?.hasUpdate;
-  const updateAction = updateInstallState.phase === 'ready' ? restartForUpdate : downloadAndInstallUpdate;
-
+  // ── GSAP animations ──
   useGSAP(() => {
     const root = layoutRef.current;
     if (!root) return;
-
     const topbar = root.querySelector<HTMLElement>('.workbench-topbar');
     const shell = root.querySelector<HTMLElement>('.workbench-shell');
     const introTargets = [topbar, shell].filter((target): target is HTMLElement => Boolean(target));
@@ -1303,60 +784,36 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     const timeline = gsap.timeline({ defaults: { duration: 0.42, ease: 'power3.out' } });
     if (topbar) timeline.from(topbar, { y: -8, autoAlpha: 0 }, 0);
     if (shell) timeline.from(shell, { y: 10, autoAlpha: 0 }, 0.08);
-
     return () => timeline.kill();
   }, { scope: layoutRef, dependencies: [motionSettingsLoaded], revertOnUpdate: true });
 
   useGSAP(() => {
     if (previousActiveModeRef.current === activeMode) return;
     previousActiveModeRef.current = activeMode;
-
     const activeTab = layoutRef.current?.querySelector<HTMLElement>('.workbench-mode-tab-active');
     if (!activeTab) return;
-
-    if (reduceMotion) {
-      gsap.set(activeTab, { clearProps: 'transform' });
-      return;
-    }
-
-    const tween = gsap.fromTo(
-      activeTab,
-      { scale: 0.96 },
-      { scale: 1, duration: 0.24, ease: 'back.out(1.6)', clearProps: 'transform' },
-    );
+    if (reduceMotion) { gsap.set(activeTab, { clearProps: 'transform' }); return; }
+    const tween = gsap.fromTo(activeTab, { scale: 0.96 }, { scale: 1, duration: 0.24, ease: 'back.out(1.6)', clearProps: 'transform' });
     return () => tween.kill();
   }, { scope: layoutRef, dependencies: [activeMode, reduceMotion], revertOnUpdate: true });
 
   useGSAP(() => {
     const pathnameChanged = previousPathnameRef.current !== location.pathname;
     previousPathnameRef.current = location.pathname;
-    if (!pathnameChanged || isTerminal) return;
-
-    const panel = mainPanelRef.current;
-    if (!panel) return;
-
-    if (reduceMotion) {
-      gsap.set(panel, { autoAlpha: 1, clearProps: 'transform,opacity,visibility' });
-      return;
-    }
-
-    const tween = gsap.fromTo(
-      panel,
-      { y: 8, autoAlpha: 0.86 },
-      { y: 0, autoAlpha: 1, duration: 0.26, ease: 'power2.out', clearProps: 'transform,opacity,visibility' },
-    );
+    if (!pathnameChanged || !layoutRef.current) return;
+    const shell = layoutRef.current.querySelector<HTMLElement>('.workbench-shell');
+    if (!shell) return;
+    if (reduceMotion) { gsap.set(shell, { clearProps: 'transform' }); return; }
+    const tween = gsap.fromTo(shell, { opacity: 0.85 }, { opacity: 1, duration: 0.2, ease: 'power2.out', clearProps: 'opacity' });
     return () => tween.kill();
-  }, { scope: mainPanelRef, dependencies: [location.pathname, reduceMotion], revertOnUpdate: true });
+  }, { scope: layoutRef, dependencies: [location.pathname, reduceMotion], revertOnUpdate: true });
 
   useGSAP(() => {
+    if (!assetPanelVisible || !layoutRef.current) return;
     const panel = assetPanelRef.current;
-    if (!assetPanelVisible || !panel) {
-      assetPanelIntroPlayedRef.current = false;
-      return;
-    }
-
+    if (!panel) return;
     const chromeTargets = Array.from(panel.querySelectorAll<HTMLElement>(
-      '.asset-sidebar-header, .asset-sidebar-panel > .ui-input-prefix, .asset-sidebar-action-grid, .asset-sidebar-selection, .asset-sidebar-loading, .ui-empty',
+      '.asset-sidebar-header, .asset-sidebar-action-grid, .asset-sidebar-selection, .asset-sidebar-loading, .ui-empty',
     ));
     const rowTargets = Array.from(panel.querySelectorAll<HTMLElement>('.asset-tree .ui-tree-node')).slice(0, 18);
     const detailTargets = [...chromeTargets, ...rowTargets];
@@ -1369,14 +826,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
 
     if (assetPanelIntroPlayedRef.current) {
       const rowTween = rowTargets.length > 0
-        ? gsap.from(rowTargets, {
-          y: 4,
-          autoAlpha: 0,
-          duration: 0.16,
-          stagger: 0.018,
-          ease: 'power2.out',
-          clearProps: 'transform,opacity,visibility',
-        })
+        ? gsap.from(rowTargets, { y: 4, autoAlpha: 0, duration: 0.16, stagger: 0.018, ease: 'power2.out', clearProps: 'transform,opacity,visibility' })
         : null;
       return () => rowTween?.kill();
     }
@@ -1384,26 +834,17 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     assetPanelIntroPlayedRef.current = true;
     const timeline = gsap.timeline({ defaults: { ease: 'power2.out' } });
     timeline.from(panel, { x: -18, autoAlpha: 0, duration: 0.32, ease: 'power3.out' });
-    timeline.from(detailTargets, {
-      y: 6,
-      autoAlpha: 0,
-      duration: 0.2,
-      stagger: 0.025,
-      clearProps: 'transform,opacity,visibility',
-    }, '-=0.16');
-
+    timeline.from(detailTargets, { y: 6, autoAlpha: 0, duration: 0.2, stagger: 0.025, clearProps: 'transform,opacity,visibility' }, '-=0.16');
     return () => timeline.kill();
   }, { scope: layoutRef, dependencies: [assetPanelVisible, assetTreeData.length, reduceMotion], revertOnUpdate: true });
 
   useGSAP(() => {
     const menu = ctxMenuRef.current;
     if (!ctxMenu || !menu) return;
-
     if (reduceMotion) {
       gsap.set(menu, { autoAlpha: 1, scale: 1, clearProps: 'transform,opacity,visibility' });
       return;
     }
-
     const tween = gsap.fromTo(
       menu,
       { autoAlpha: 0, scale: 0.97, y: -2, transformOrigin: 'left top' },
@@ -1412,6 +853,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     return () => tween.kill();
   }, { scope: layoutRef, dependencies: [ctxMenu, reduceMotion], revertOnUpdate: true });
 
+  // ── Render ──
   return (
     <div ref={layoutRef} className="app-layout workbench-layout">
       <header
@@ -1443,12 +885,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
 
         <div className="workbench-tools">
           <Tooltip title={t('nav.globalLog')}>
-            <button
-              type="button"
-              className="tool-icon-button"
-              onClick={openLogWindow}
-              aria-label={tText('nav.globalLog')}
-            >
+            <button type="button" className="tool-icon-button" onClick={openLogWindow} aria-label={tText('nav.globalLog')}>
               <ProfileOutlined />
             </button>
           </Tooltip>
@@ -1458,133 +895,36 @@ export default function MainLayout({ children }: { children: ReactNode }) {
             </button>
           </Tooltip>
           <Tooltip
-            title={updateInfo?.hasUpdate
-              ? t('appUpdate.availableTooltip', { version: updateInfo.latestVersion ?? '' })
+            title={updateState.updateInfo?.hasUpdate
+              ? t('appUpdate.availableTooltip', { version: updateState.updateInfo.latestVersion ?? '' })
               : t('appUpdate.check')}
           >
             <button
               type="button"
-              className={`tool-icon-button update-icon-button${updateInfo?.hasUpdate ? ' update-icon-button-has-update' : ''}`}
-              onClick={handleUpdateClick}
-              aria-label={tText(updateInfo?.hasUpdate ? 'appUpdate.availableAria' : 'appUpdate.check')}
+              className={`tool-icon-button update-icon-button${updateState.updateInfo?.hasUpdate ? ' update-icon-button-has-update' : ''}`}
+              onClick={updateState.handleUpdateClick}
+              aria-label={tText(updateState.updateInfo?.hasUpdate ? 'appUpdate.availableAria' : 'appUpdate.check')}
             >
               <UpdateOutlined />
-              {updateInfo?.hasUpdate && <span className="update-icon-dot" aria-hidden="true" />}
+              {updateState.updateInfo?.hasUpdate && <span className="update-icon-dot" aria-hidden="true" />}
             </button>
           </Tooltip>
         </div>
       </header>
 
-      <Modal
-        className="app-update-modal"
-        title={t('appUpdate.modalTitle')}
-        open={updateModalOpen}
-        onCancel={() => {
-          if (!updateBusy) setUpdateModalOpen(false);
-        }}
-        width={560}
-        footer={
-          <>
-            <Button
-              onClick={() => setUpdateModalOpen(false)}
-              disabled={updateBusy}
-            >
-              {t('common.close')}
-            </Button>
-            {updateInstallState.phase === 'error' ? (
-              <Button onClick={resetUpdateInstall}>{t('common.cancel')}</Button>
-            ) : null}
-            <Button
-              type="primary"
-              loading={updateBusy}
-              disabled={updateActionDisabled}
-              onClick={() => {
-                void updateAction();
-              }}
-            >
-              {updateActionLabel}
-            </Button>
-          </>
-        }
-      >
-        <div className="app-update-panel">
-          <div className={`app-update-status${updateInfo?.hasUpdate ? ' app-update-status-new' : ''}`}>
-            <span className="app-update-status-icon"><UpdateOutlined /></span>
-            <div>
-              <div className="app-update-status-title">
-                {updateInfo
-                  ? updateInfo.hasUpdate
-                    ? t('appUpdate.available', { version: updateInfo.latestVersion ?? '' })
-                    : t('appUpdate.upToDate', { version: updateInfo.currentVersion })
-                  : t('appUpdate.checking')}
-              </div>
-              <div className="app-update-status-desc">
-                {updateInfo
-                  ? updateInfo.hasUpdate
-                    ? t('appUpdate.availableDesc')
-                    : t('appUpdate.upToDateDesc')
-                  : t('appUpdate.checkingDesc')}
-              </div>
-            </div>
-          </div>
-
-          <div className="app-update-version-grid">
-            <div>
-              <span>{t('appUpdate.currentVersion')}</span>
-              <strong>{updateInfo?.currentVersion ?? '-'}</strong>
-            </div>
-            <div>
-              <span>{t('appUpdate.latestVersion')}</span>
-              <strong>{updateInfo?.latestVersion ?? '-'}</strong>
-            </div>
-          </div>
-
-          {updateInfo?.hasUpdate ? (
-            <div className={`app-update-download app-update-download-${updateInstallState.phase}`}>
-              <div className="app-update-download-header">
-                <span>
-                  {updateInstallState.phase === 'ready'
-                    ? t('appUpdate.readyToRestart')
-                    : updateInstallState.phase === 'installing'
-                      ? t('appUpdate.installing')
-                      : updateInstallState.phase === 'checking'
-                        ? t('appUpdate.prepareDownload')
-                        : updateInstallState.phase === 'error'
-                          ? t('appUpdate.downloadError')
-                          : t('appUpdate.downloadProgress')}
-                </span>
-                <strong>{updateInstallState.total ? `${updatePercent}%` : updateProgressLabel}</strong>
-              </div>
-              <div
-                className="app-update-progress"
-                role="progressbar"
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={updateInstallState.total ? updatePercent : undefined}
-              >
-                <span style={{ width: updateInstallState.total ? `${updatePercent}%` : updateBusy ? '42%' : updateInstallState.phase === 'ready' ? '100%' : '0%' }} />
-              </div>
-              <div className="app-update-download-meta">
-                {updateInstallState.phase === 'ready'
-                  ? t('appUpdate.readyDesc')
-                  : updateInstallState.phase === 'error'
-                    ? updateInstallState.error || t('appUpdate.downloadError')
-                    : updateInstallState.phase === 'idle'
-                      ? t('appUpdate.inAppInstallDesc')
-                      : updateProgressLabel}
-              </div>
-            </div>
-          ) : null}
-
-          <div className="app-update-notes">
-            <div className="app-update-notes-header">
-              <span>{updateInfo?.releaseTitle || t('appUpdate.releaseNotes')}</span>
-              {updateInfo?.publishedAt && <small>{updateInfo.publishedAt}</small>}
-            </div>
-            <pre>{updateInfo?.releaseNotes?.trim() || tText('appUpdate.noReleaseNotes')}</pre>
-          </div>
-        </div>
-      </Modal>
+      <UpdateModal
+        updateInfo={updateState.updateInfo}
+        updateModalOpen={updateState.updateModalOpen}
+        setUpdateModalOpen={updateState.setUpdateModalOpen}
+        updateInstallState={updateState.updateInstallState}
+        updateBusy={updateState.updateBusy}
+        updatePercent={updateState.updatePercent}
+        updateProgressLabel={updateState.updateProgressLabel}
+        updateActionLabel={updateState.updateActionLabel}
+        updateActionDisabled={updateState.updateActionDisabled}
+        updateAction={updateState.updateAction}
+        resetUpdateInstall={updateState.resetUpdateInstall}
+      />
 
       <div className="workbench-body">
         {assetPanelVisible && (
@@ -1597,23 +937,10 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                 </div>
                 <div className="asset-sidebar-header-actions">
                   <Tooltip title={t('assets.refresh')}>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<ReloadOutlined spin={loading} />}
-                      loading={loading}
-                      onClick={() => {
-                        void loadHosts();
-                      }}
-                    />
+                    <Button type="text" size="small" icon={<ReloadOutlined spin={loading} />} loading={loading} onClick={() => { void loadHosts(); }} />
                   </Tooltip>
                   <Tooltip title={t('assets.hide')}>
-                    <Button
-                      type="text"
-                      size="small"
-                      icon={<CloseOutlined />}
-                      onClick={() => closeAssetPanel()}
-                    />
+                    <Button type="text" size="small" icon={<CloseOutlined />} onClick={() => closeAssetPanel()} />
                   </Tooltip>
                 </div>
               </div>
@@ -1630,23 +957,8 @@ export default function MainLayout({ children }: { children: ReactNode }) {
               <div className="asset-sidebar-action-grid asset-sidebar-action-grid-4">
                 <Button size="small" type="primary" icon={<PlusOutlined />} onClick={() => openNewHostModal()}>{t('common.add')}</Button>
                 <Button size="small" icon={<CloudServerOutlined />} onClick={() => setCloudImportOpen(true)}>{t('assets.cloudImport')}</Button>
-                <Button
-                  size="small"
-                  type="primary"
-                  icon={<CodeOutlined />}
-                  disabled={selectedHostIds.length === 0}
-                  onClick={openBatchTerminal}
-                >
-                  {t('assets.broadcastTerminal')}
-                </Button>
-                <Button
-                  size="small"
-                  icon={<UploadOutlined />}
-                  disabled={selectedHostIds.length === 0}
-                  onClick={openBatchTransfer}
-                >
-                  {t('assets.batchUpload')}
-                </Button>
+                <Button size="small" type="primary" icon={<CodeOutlined />} disabled={selectedHostIds.length === 0} onClick={openBatchTerminal}>{t('assets.broadcastTerminal')}</Button>
+                <Button size="small" icon={<UploadOutlined />} disabled={selectedHostIds.length === 0} onClick={openBatchTransfer}>{t('assets.batchUpload')}</Button>
               </div>
 
               <div className="asset-sidebar-selection">
@@ -1697,14 +1009,11 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                     />
                   </DndContext>
                 ) : (
-                  <Empty
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description={assetSearchText ? t('assets.noMatchedHosts') : t('assets.noHosts')}
-                  />
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={assetSearchText ? t('assets.noMatchedHosts') : t('assets.noHosts')} />
                 )}
               </div>
 
-              {/* Right-click context menu */}
+              {/* Context menu */}
               {ctxMenu && (
                 <div
                   ref={ctxMenuRef}
@@ -1720,37 +1029,15 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                     const openIcon = vncHost || isWindowsHost(host) ? <CloudServerOutlined /> : <CodeOutlined />;
                     return (
                       <>
-                        <button type="button" className="asset-ctx-menu-item"
-                          onClick={() => { setCtxMenu(null); void openHostSession(host); }}
-                        >{openIcon} {openLabel}</button>
-                        <button type="button" className="asset-ctx-menu-item"
-                          onClick={() => { setCtxMenu(null); openEditHostModal(host); }}
-                        ><EditOutlined /> {t('common.edit')}</button>
+                        <button type="button" className="asset-ctx-menu-item" onClick={() => { setCtxMenu(null); void openHostSession(host); }}>{openIcon} {openLabel}</button>
+                        <button type="button" className="asset-ctx-menu-item" onClick={() => { setCtxMenu(null); openEditHostModal(host); }}><EditOutlined /> {t('common.edit')}</button>
                         <div className="asset-ctx-menu-divider" />
-                        <button type="button" className="asset-ctx-menu-item"
-                          onClick={() => {
-                            setCtxMenu(null);
-                            void updateHost({ ...host, groupId: undefined });
-                          }}
-                        ><FolderOpenOutlined /> {t('assets.moveToDefaultGroup')}</button>
+                        <button type="button" className="asset-ctx-menu-item" onClick={() => { setCtxMenu(null); void updateHost({ ...host, groupId: undefined }); }}><FolderOpenOutlined /> {t('assets.moveToDefaultGroup')}</button>
                         {groups.map((g) => (
-                          <button
-                            key={g.id}
-                            type="button"
-                            className={`asset-ctx-menu-item${host.groupId === g.id ? ' asset-ctx-menu-item-active' : ''}`}
-                            onClick={() => {
-                              setCtxMenu(null);
-                              if (host.groupId !== g.id) void updateHost({ ...host, groupId: g.id });
-                            }}
-                          ><FolderOpenOutlined /> {g.name}</button>
+                          <button key={g.id} type="button" className={`asset-ctx-menu-item${host.groupId === g.id ? ' asset-ctx-menu-item-active' : ''}`} onClick={() => { setCtxMenu(null); if (host.groupId !== g.id) void updateHost({ ...host, groupId: g.id }); }}><FolderOpenOutlined /> {g.name}</button>
                         ))}
                         <div className="asset-ctx-menu-divider" />
-                        <button type="button" className="asset-ctx-menu-item asset-ctx-menu-item-danger"
-                          onClick={() => {
-                            setCtxMenu(null);
-                            if (window.confirm(tText('assets.deleteHostNamedConfirm', { name: host.name }))) void handleDeleteHost(host.id);
-                          }}
-                        ><DeleteOutlined /> {t('common.delete')}</button>
+                        <button type="button" className="asset-ctx-menu-item asset-ctx-menu-item-danger" onClick={() => { setCtxMenu(null); if (window.confirm(tText('assets.deleteHostNamedConfirm', { name: host.name }))) void handleDeleteHost(host.id); }}><DeleteOutlined /> {t('common.delete')}</button>
                       </>
                     );
                   })()}
@@ -1761,44 +1048,27 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                     const isDefault = groupId === DEFAULT_GROUP_ID;
                     return (
                       <>
-                        {!isDefault && (
-                          <button type="button" className="asset-ctx-menu-item"
-                            onClick={() => { setCtxMenu(null); openNewHostModal(groupId); }}
-                          ><PlusOutlined /> {t('assets.addHostToGroup')}</button>
-                        )}
-                        <button type="button" className="asset-ctx-menu-item"
-                          onClick={() => handleCtxAddGroup(isDefault ? undefined : groupId)}
-                        ><FolderOpenOutlined /> {t('assets.newGroup')}</button>
-                        <button type="button" className="asset-ctx-menu-item"
-                          onClick={() => handleCtxAddGroup(isDefault ? undefined : groupId)}
-                        ><FolderOpenOutlined /> {t('assets.newSubgroup')}</button>
+                        {!isDefault && (<button type="button" className="asset-ctx-menu-item" onClick={() => { setCtxMenu(null); openNewHostModal(groupId); }}><PlusOutlined /> {t('assets.addHostToGroup')}</button>)}
+                        <button type="button" className="asset-ctx-menu-item" onClick={() => handleCtxAddGroup(isDefault ? undefined : groupId)}><FolderOpenOutlined /> {t('assets.newGroup')}</button>
+                        <button type="button" className="asset-ctx-menu-item" onClick={() => handleCtxAddGroup(isDefault ? undefined : groupId)}><FolderOpenOutlined /> {t('assets.newSubgroup')}</button>
                         <div className="asset-ctx-menu-divider" />
-                        <button type="button" className="asset-ctx-menu-item"
-                          onClick={handleCtxEditGroup}
-                        ><EditOutlined /> {t('assets.editGroup')}</button>
-                        {!isDefault && (
-                          <button type="button" className="asset-ctx-menu-item asset-ctx-menu-item-danger"
-                            onClick={handleCtxDeleteGroup}
-                          ><DeleteOutlined /> {t('assets.deleteGroup')}</button>
-                        )}
+                        <button type="button" className="asset-ctx-menu-item" onClick={handleCtxEditGroup}><EditOutlined /> {t('assets.editGroup')}</button>
+                        {!isDefault && (<button type="button" className="asset-ctx-menu-item asset-ctx-menu-item-danger" onClick={handleCtxDeleteGroup}><DeleteOutlined /> {t('assets.deleteGroup')}</button>)}
                       </>
                     );
                   })()}
 
                   {ctxMenu.target.type === 'empty' && (
-                    <button type="button" className="asset-ctx-menu-item"
-                      onClick={() => handleCtxAddGroup()}
-                    ><FolderOpenOutlined /> {t('assets.newGroup')}</button>
+                    <button type="button" className="asset-ctx-menu-item" onClick={() => handleCtxAddGroup()}><FolderOpenOutlined /> {t('assets.newGroup')}</button>
                   )}
                 </div>
               )}
 
+              {/* Host Modal */}
               <Modal
                 title={editingHost ? t('assets.editHost') : t('assets.addHost')}
                 open={hostModalOpen}
-                onOk={() => {
-                  void handleSaveHost();
-                }}
+                onOk={() => { void handleSaveHost(); }}
                 onCancel={closeHostModal}
                 width={520}
                 className="asset-host-modal"
@@ -1817,15 +1087,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                               <Input placeholder={tText('assets.hostNamePlaceholder')} />
                             </Form.Item>
                             <Form.Item label={t('assets.system')}>
-                              <Select<Host['os']>
-                                value={os}
-                                options={[
-                                  { value: 'linux', label: t('assets.linuxHost') },
-                                  { value: 'windows', label: t('assets.windowsHost') },
-                                  { value: 'vnc', label: t('assets.vncHost') },
-                                ]}
-                                onChange={handleHostOsChange}
-                              />
+                              <Select<Host['os']> value={os} options={[{ value: 'linux', label: t('assets.linuxHost') }, { value: 'windows', label: t('assets.windowsHost') }, { value: 'vnc', label: t('assets.vncHost') }]} onChange={handleHostOsChange} />
                             </Form.Item>
                           </div>
                           <div className="asset-host-form-grid asset-host-form-grid-address">
@@ -1839,186 +1101,88 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                           {os === 'vnc' ? null : (
                             <div className="asset-host-form-grid asset-host-form-grid-auth">
                               <Form.Item name="authType" label={t('assets.auth')} rules={[{ required: true, message: tText('common.required') }]}>
-                                <Select<Host['authType']> options={[
-                                  { value: 'password', label: t('assets.passwordAuth') },
-                                  ...(os === 'windows' ? [] : [{ value: 'key' as const, label: t('assets.keyAuth') }]),
-                                ]} />
+                                <Select<Host['authType']> options={[{ value: 'password', label: t('assets.passwordAuth') }, ...(os === 'windows' ? [] : [{ value: 'key' as const, label: t('assets.keyAuth') }])]} />
                               </Form.Item>
                               <Form.Item name="username" label={t('assets.username')} rules={[{ required: true, message: tText('common.required') }]}>
                                 <Input placeholder={os === 'windows' ? 'Administrator' : 'root'} />
                               </Form.Item>
                               {os !== 'windows' && getFieldValue('authType') === 'key' ? (
-                                <Form.Item name="privateKey" label={t('assets.sshPrivateKey')}>
-                                  <Input.TextArea rows={1} placeholder={tText('assets.pastePrivateKey')} />
-                                </Form.Item>
+                                <Form.Item name="privateKey" label={t('assets.sshPrivateKey')}><Input.TextArea rows={1} placeholder={tText('assets.pastePrivateKey')} /></Form.Item>
                               ) : (
-                                <Form.Item name="password" label={t('assets.password')}>
-                                  <Input.Password placeholder={editingHost ? tText('assets.passwordKeepPlaceholder') : tText('assets.passwordPlaceholder')} />
-                                </Form.Item>
+                                <Form.Item name="password" label={t('assets.password')}><Input.Password placeholder={editingHost ? tText('assets.passwordKeepPlaceholder') : tText('assets.passwordPlaceholder')} /></Form.Item>
                               )}
                             </div>
                           )}
                           <div className="asset-host-form-grid asset-host-form-grid-meta">
-                            <Form.Item name="groupId" label={t('assets.group')}>
-                              <TreeSelect
-                                options={groupTreeData}
-                                placeholder={tText('assets.selectGroup')}
-                              />
-                            </Form.Item>
-                            <Form.Item name="remark" label={t('assets.remark')}>
-                              <Input placeholder={tText('assets.remarkPlaceholder')} />
-                            </Form.Item>
+                            <Form.Item name="groupId" label={t('assets.group')}><TreeSelect options={groupTreeData} placeholder={tText('assets.selectGroup')} /></Form.Item>
+                            <Form.Item name="remark" label={t('assets.remark')}><Input placeholder={tText('assets.remarkPlaceholder')} /></Form.Item>
                           </div>
                         </div>
                       );
                       const proxySettingsBlock = (
                         <div className="asset-host-proxy-settings">
-                          <div className="asset-host-rdp-settings-header">
+                          <div className="asset-host-proxy-settings-header">
                             <span>{t('assets.proxySettings')}</span>
                             <small>{t('assets.proxySettingsExtra')}</small>
                           </div>
-                          <div className="asset-host-rdp-options asset-host-proxy-toggle">
-                            <Form.Item name="proxyEnabled" valuePropName="checked" className="asset-host-rdp-option">
-                              <Switch />
-                            </Form.Item>
-                            <div className="asset-host-rdp-option-copy">
-                              <span>{t('assets.proxyEnabled')}</span>
-                              <small>{t('assets.proxyEnabledExtra')}</small>
-                            </div>
+                          <div className="asset-host-form-grid asset-host-form-grid-proxy">
+                            <Form.Item name="proxyEnabled" valuePropName="checked"><Switch /></Form.Item>
+                            <div className="asset-host-proxy-toggle-copy"><span>{t('assets.proxyEnabled')}</span><small>{t('assets.proxyEnabledExtra')}</small></div>
                           </div>
-                          {proxyEnabled ? (
-                            <>
-                              <div className="asset-host-form-grid asset-host-form-grid-proxy">
-                                <Form.Item name="proxyType" label={t('assets.proxyType')}>
-                                  <Select<ProxySettings['type']>
-                                    options={[
-                                      { value: 'socks5', label: t('assets.proxyTypeSocks5') },
-                                      { value: 'http', label: t('assets.proxyTypeHttp') },
-                                    ]}
-                                    onChange={(value) => {
-                                      if (!hostForm.getFieldValue('proxyPort')) {
-                                        hostForm.setFieldValue('proxyPort', DEFAULT_PROXY_PORTS[value]);
-                                      }
-                                    }}
-                                  />
-                                </Form.Item>
-                                <Form.Item name="proxyHost" label={t('assets.proxyHost')} rules={[{ required: true, message: tText('common.required') }]}>
-                                  <Input placeholder={tText('assets.proxyHostPlaceholder')} />
-                                </Form.Item>
-                                <Form.Item name="proxyPort" label={t('assets.proxyPort')} rules={[{ required: true, message: tText('common.required') }]}>
-                                  <InputNumber min={1} max={65535} />
-                                </Form.Item>
-                              </div>
-                              <div className="asset-host-form-grid asset-host-form-grid-proxy-auth">
-                                <Form.Item name="proxyUsername" label={t('assets.proxyUsername')}>
-                                  <Input placeholder={tText('assets.proxyUsernamePlaceholder')} />
-                                </Form.Item>
-                                <Form.Item name="proxyPassword" label={t('assets.proxyPassword')}>
-                                  <Input.Password placeholder={editingHost ? tText('assets.passwordKeepPlaceholder') : tText('assets.proxyPasswordPlaceholder')} />
-                                </Form.Item>
-                              </div>
-                            </>
-                          ) : null}
+                          {proxyEnabled && (
+                            <div className="asset-host-form-grid asset-host-form-grid-proxy-detail">
+                              <Form.Item name="proxyType" label={t('assets.proxyType')}><Select<ProxySettings['type']> options={[{ value: 'socks5', label: 'SOCKS5' }, { value: 'http', label: 'HTTP' }]} /></Form.Item>
+                              <Form.Item name="proxyHost" label={t('assets.proxyHost')}><Input placeholder={tText('assets.proxyHostPlaceholder')} /></Form.Item>
+                              <Form.Item name="proxyPort" label={t('assets.proxyPort')}><InputNumber min={1} max={65535} /></Form.Item>
+                              <Form.Item name="proxyUsername" label={t('assets.proxyUsername')}><Input placeholder={tText('assets.proxyUsernamePlaceholder')} /></Form.Item>
+                              <Form.Item name="proxyPassword" label={t('assets.proxyPassword')}><Input.Password placeholder={tText('assets.proxyPasswordPlaceholder')} /></Form.Item>
+                            </div>
+                          )}
                         </div>
                       );
                       const linuxAdvancedTab = (
-                        <div className="asset-host-tab-pane asset-host-rdp-settings">
-                          <div className="asset-host-rdp-settings-header">
-                            <span>{t('assets.linuxAdvanced')}</span>
-                            <small>{t('assets.linuxAdvancedExtra')}</small>
+                        <div className="asset-host-tab-pane">
+                          <div className="asset-host-form-grid asset-host-form-grid-jump">
+                            <Form.Item name="jumpChain" label={t('assets.jumpChain')}>
+                              <Select mode="multiple" placeholder={tText('assets.directNoJump')} options={hosts.filter((h) => h.os === 'linux' && h.id !== editingHost?.id).map((h) => ({ value: h.id, label: `${h.name} (${h.ip})` }))} />
+                            </Form.Item>
                           </div>
-                          <Form.Item name="jumpChain" label={t('assets.jumpChain')} extra={t('assets.jumpChainExtra')} className="asset-host-form-jump">
-                            <Select
-                              mode="multiple"
-                              allowClear
-                              placeholder={tText('assets.directNoJump')}
-                              options={hosts.filter((h) => h.os === 'linux').map((h) => ({ value: h.id, label: `${h.name} (${h.ip})` }))}
-                            />
-                          </Form.Item>
                           {proxySettingsBlock}
                         </div>
                       );
                       const vncTab = (
-                        <div className="asset-host-tab-pane asset-host-rdp-settings">
-                          <div className="asset-host-rdp-settings-header">
-                            <span>{t('assets.vncAdvanced')}</span>
-                            <small>{t('assets.vncAdvancedExtra')}</small>
-                          </div>
-                          <div className="asset-host-form-grid asset-host-form-grid-rdp">
-                            <Form.Item name="vncPort" label={t('assets.vncPort')}>
-                              <InputNumber min={1} max={65535} />
-                            </Form.Item>
-                            <Form.Item name="vncUsername" label={t('assets.vncUsername')}>
-                              <Input placeholder={tText('assets.vncUsernamePlaceholder')} />
-                            </Form.Item>
-                            <Form.Item name="vncPassword" label={t('assets.vncPassword')}>
-                              <Input.Password placeholder={tText('assets.vncPasswordPlaceholder')} />
-                            </Form.Item>
-                          </div>
-                          <div className="asset-host-rdp-options">
-                            <Form.Item name="vncShared" valuePropName="checked" className="asset-host-rdp-option">
-                              <Switch />
-                            </Form.Item>
-                            <div className="asset-host-rdp-option-copy">
-                              <span>{t('assets.vncShared')}</span>
-                              <small>{t('assets.vncSharedExtra')}</small>
-                            </div>
-                            <Form.Item name="vncViewOnly" valuePropName="checked" className="asset-host-rdp-option">
-                              <Switch />
-                            </Form.Item>
-                            <div className="asset-host-rdp-option-copy">
-                              <span>{t('assets.vncViewOnly')}</span>
-                              <small>{t('assets.vncViewOnlyExtra')}</small>
+                        <div className="asset-host-tab-pane">
+                          <div className="asset-host-form-grid asset-host-form-grid-vnc">
+                            <Form.Item name="vncPort" label={t('assets.vncPort')}><InputNumber min={1} max={65535} /></Form.Item>
+                            <Form.Item name="vncUsername" label={t('assets.vncUsername')}><Input placeholder={tText('assets.vncUsernamePlaceholder')} /></Form.Item>
+                            <Form.Item name="vncPassword" label={t('assets.vncPassword')}><Input.Password placeholder={tText('assets.vncPasswordPlaceholder')} /></Form.Item>
+                            <div className="asset-host-vnc-options">
+                              <Form.Item name="vncViewOnly" valuePropName="checked" className="asset-host-rdp-option"><Switch /></Form.Item>
+                              <div className="asset-host-rdp-option-copy"><span>{t('assets.vncViewOnly')}</span><small>{t('assets.vncViewOnlyExtra')}</small></div>
+                              <Form.Item name="vncShared" valuePropName="checked" className="asset-host-rdp-option"><Switch /></Form.Item>
+                              <div className="asset-host-rdp-option-copy"><span>{t('assets.vncShared')}</span><small>{t('assets.vncSharedExtra')}</small></div>
                             </div>
                           </div>
                           {proxySettingsBlock}
                         </div>
                       );
                       const rdpTab = (
-                        <div className="asset-host-tab-pane asset-host-rdp-settings">
-                          <div className="asset-host-rdp-settings-header">
-                            <span>{t('assets.rdpAdvanced')}</span>
-                            <small>{t('assets.rdpAdvancedExtra')}</small>
-                          </div>
+                        <div className="asset-host-tab-pane">
+                          <div className="asset-host-proxy-settings-header"><span>{t('assets.rdpAdvanced')}</span><small>{t('assets.rdpAdvancedExtra')}</small></div>
                           <div className="asset-host-form-grid asset-host-form-grid-rdp">
-                            <Form.Item name="rdpDomain" label={t('assets.rdpDomain')}>
-                              <Input placeholder={tText('assets.rdpDomainPlaceholder')} />
-                            </Form.Item>
-                            <Form.Item name="rdpDesktopWidth" label={t('assets.rdpDesktopWidth')}>
-                              <InputNumber min={MIN_RDP_DESKTOP_WIDTH} max={MAX_RDP_DESKTOP_WIDTH} />
-                            </Form.Item>
-                            <Form.Item name="rdpDesktopHeight" label={t('assets.rdpDesktopHeight')}>
-                              <InputNumber min={MIN_RDP_DESKTOP_HEIGHT} max={MAX_RDP_DESKTOP_HEIGHT} />
-                            </Form.Item>
+                            <Form.Item name="rdpDomain" label={t('assets.rdpDomain')}><Input placeholder={tText('assets.rdpDomainPlaceholder')} /></Form.Item>
+                            <Form.Item name="rdpDesktopWidth" label={t('assets.rdpDesktopWidth')}><InputNumber min={MIN_RDP_DESKTOP_WIDTH} max={MAX_RDP_DESKTOP_WIDTH} /></Form.Item>
+                            <Form.Item name="rdpDesktopHeight" label={t('assets.rdpDesktopHeight')}><InputNumber min={MIN_RDP_DESKTOP_HEIGHT} max={MAX_RDP_DESKTOP_HEIGHT} /></Form.Item>
                           </div>
                           <div className="asset-host-rdp-options">
-                            <Form.Item name="rdpEnableClipboard" valuePropName="checked" className="asset-host-rdp-option">
-                              <Switch />
-                            </Form.Item>
-                            <div className="asset-host-rdp-option-copy">
-                              <span>{t('assets.rdpEnableClipboard')}</span>
-                              <small>{t('assets.rdpEnableClipboardExtra')}</small>
-                            </div>
-                            <Form.Item name="rdpEnableAudio" valuePropName="checked" className="asset-host-rdp-option">
-                              <Switch />
-                            </Form.Item>
-                            <div className="asset-host-rdp-option-copy">
-                              <span>{t('assets.rdpEnableAudio')}</span>
-                              <small>{t('assets.rdpEnableAudioExtra')}</small>
-                            </div>
-                            <Form.Item name="rdpMapDisk" valuePropName="checked" className="asset-host-rdp-option">
-                              <Switch />
-                            </Form.Item>
-                            <div className="asset-host-rdp-option-copy">
-                              <span>{t('assets.rdpMapDisk')}</span>
-                              <small>{t('assets.rdpMapDiskExtra')}</small>
-                            </div>
+                            <Form.Item name="rdpEnableClipboard" valuePropName="checked" className="asset-host-rdp-option"><Switch /></Form.Item>
+                            <div className="asset-host-rdp-option-copy"><span>{t('assets.rdpEnableClipboard')}</span><small>{t('assets.rdpEnableClipboardExtra')}</small></div>
+                            <Form.Item name="rdpEnableAudio" valuePropName="checked" className="asset-host-rdp-option"><Switch /></Form.Item>
+                            <div className="asset-host-rdp-option-copy"><span>{t('assets.rdpEnableAudio')}</span><small>{t('assets.rdpEnableAudioExtra')}</small></div>
+                            <Form.Item name="rdpMapDisk" valuePropName="checked" className="asset-host-rdp-option"><Switch /></Form.Item>
+                            <div className="asset-host-rdp-option-copy"><span>{t('assets.rdpMapDisk')}</span><small>{t('assets.rdpMapDiskExtra')}</small></div>
                           </div>
-                          {mapDisk ? (
-                            <Form.Item name="rdpDiskPath" label={t('assets.rdpDiskPath')}>
-                              <Input placeholder={tText('assets.rdpDiskPathPlaceholder')} />
-                            </Form.Item>
-                          ) : null}
+                          {mapDisk ? (<Form.Item name="rdpDiskPath" label={t('assets.rdpDiskPath')}><Input placeholder={tText('assets.rdpDiskPathPlaceholder')} /></Form.Item>) : null}
                           {proxySettingsBlock}
                         </div>
                       );

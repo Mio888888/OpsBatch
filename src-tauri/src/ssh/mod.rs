@@ -390,13 +390,14 @@ impl SshConnection {
             .map_err(|e| format!("channel failed: {}", e))
     }
 
+    #[allow(dead_code)]
     pub fn into_shared(self) -> SharedSshConnection {
         SharedSshConnection::from_connection(self)
     }
 }
 
 struct SharedSshConnectionInner {
-    runtime: Runtime,
+    runtime: Arc<Runtime>,
     handle: tokio::sync::Mutex<client::Handle<ClientHandler>>,
 }
 
@@ -427,10 +428,20 @@ pub struct SharedSshConnection {
 }
 
 impl SharedSshConnection {
+    fn from_parts(runtime: Arc<Runtime>, handle: client::Handle<ClientHandler>) -> Self {
+        Self {
+            inner: Arc::new(SharedSshConnectionInner {
+                runtime,
+                handle: tokio::sync::Mutex::new(handle),
+            }),
+        }
+    }
+
+    #[allow(dead_code)]
     fn from_connection(conn: SshConnection) -> Self {
         Self {
             inner: Arc::new(SharedSshConnectionInner {
-                runtime: conn.runtime,
+                runtime: Arc::new(conn.runtime),
                 handle: tokio::sync::Mutex::new(conn.handle),
             }),
         }
@@ -594,11 +605,162 @@ fn connect_internal_with_host_id(
     Ok(SshConnection { handle, runtime })
 }
 
+/// Connect and authenticate on a shared runtime, returning only the client handle.
+/// Used by the connection pool to avoid creating a per-connection tokio Runtime.
+fn connect_handle_on_runtime(
+    runtime: &Runtime,
+    host_id: &str,
+    config: &SshConfig,
+    timeout_secs: u64,
+) -> Result<client::Handle<ClientHandler>, String> {
+    let config_clone = config.clone();
+
+    let tcp = connect_tcp_for_ssh(&config_clone, timeout_secs)?;
+    tcp.set_nonblocking(true)
+        .map_err(|e| format!("设置非阻塞失败: {}", e))?;
+
+    let config_clone = config.clone();
+    let verifier_id = host_id.to_string();
+
+    let handle = runtime.block_on(async move {
+        let tcp = tokio::net::TcpStream::from_std(tcp)
+            .map_err(|e| format!("TcpStream转换失败: {}", e))?;
+
+        let ssh_config = build_ssh_client_config();
+        let handler = ClientHandler::new(verifier_id);
+
+        let mut handle = client::connect_stream(Arc::new(ssh_config), tcp, handler)
+            .await
+            .map_err(|e| format!("SSH握手失败: {}", e))?;
+
+        let auth_result = match config_clone.auth_type.as_str() {
+            "password" => handle
+                .authenticate_password(
+                    &config_clone.username,
+                    config_clone.password.as_deref().unwrap_or(""),
+                )
+                .await
+                .map_err(|e| format!("认证失败: {}", e))?,
+            "key" => {
+                let key_data = config_clone.private_key.as_deref().unwrap_or("");
+                if key_data.is_empty() {
+                    return Err("私钥内容为空".to_string());
+                }
+                let key_pair = russh::keys::decode_secret_key(key_data, None)
+                    .map_err(|e| format!("私钥解析失败: {}", e))?;
+                let hash_alg = handle
+                    .best_supported_rsa_hash()
+                    .await
+                    .map_err(|e| format!("hash alg error: {}", e))?;
+                let key_with_alg =
+                    russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key_pair), hash_alg.flatten());
+                handle
+                    .authenticate_publickey(&config_clone.username, key_with_alg)
+                    .await
+                    .map_err(|e| format!("密钥认证失败: {}", e))?
+            }
+            _ => return Err(format!("不支持的认证类型: {}", config_clone.auth_type)),
+        };
+
+        match auth_result {
+            russh::client::AuthResult::Success => {}
+            russh::client::AuthResult::Failure { .. } => {
+                return Err("认证被拒绝".to_string());
+            }
+        }
+
+        Ok(handle)
+    })?;
+
+    Ok(handle)
+}
+
+/// Connect through a jump chain on a shared runtime, returning only the client handle.
+fn connect_via_jump_handle_on_runtime(
+    runtime: &Runtime,
+    target_config: &SshConfig,
+    jump_configs: &[SshConfig],
+    timeout_secs: u64,
+) -> Result<client::Handle<ClientHandler>, String> {
+    if jump_configs.is_empty() {
+        let host_id = format!("{}:{}", target_config.host, target_config.port);
+        return connect_handle_on_runtime(runtime, &host_id, target_config, timeout_secs);
+    }
+
+    // Step 1: Direct TCP connect to first jump host
+    let first_config = &jump_configs[0];
+    let tcp = connect_tcp_for_ssh(first_config, timeout_secs)
+        .map_err(|e| format!("跳板机 {} 连接失败: {}", first_config.host, e))?;
+    tcp.set_nonblocking(true)
+        .map_err(|e| format!("设置非阻塞失败: {}", e))?;
+
+    // Step 2: SSH handshake + auth on first jump
+    let first_config_clone = first_config.clone();
+    let mut current_handle = runtime.block_on(async move {
+        let tcp = tokio::net::TcpStream::from_std(tcp)
+            .map_err(|e| format!("TcpStream转换失败: {}", e))?;
+        let ssh_config = build_ssh_client_config();
+        let mut handle = client::connect_stream(
+            Arc::new(ssh_config),
+            tcp,
+            ClientHandler::new(format!(
+                "{}:{}",
+                first_config_clone.host, first_config_clone.port
+            )),
+        )
+        .await
+        .map_err(|e| format!("跳板机 {} SSH握手失败: {}", first_config_clone.host, e))?;
+        authenticate_handle(&mut handle, &first_config_clone).await?;
+        Ok::<_, String>(handle)
+    })?;
+
+    // Step 3: For each subsequent hop, open direct-tcpip channel -> SSH handshake
+    let hops: Vec<&SshConfig> = jump_configs[1..]
+        .iter()
+        .chain(std::iter::once(target_config))
+        .collect();
+
+    for (i, hop_config) in hops.iter().enumerate() {
+        let is_target = i == hops.len() - 1;
+        let label = if is_target { "目标主机" } else { "跳板机" };
+        let hop = (*hop_config).clone();
+
+        current_handle = runtime.block_on(async move {
+            let channel = current_handle
+                .channel_open_direct_tcpip(&hop.host, hop.port as u32, "127.0.0.1", 0)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "{} {}:{} direct-tcpip 通道打开失败: {}",
+                        label, hop.host, hop.port, e
+                    )
+                })?;
+
+            let stream = channel.into_stream();
+            let ssh_config = build_ssh_client_config();
+            let mut handle = client::connect_stream(
+                Arc::new(ssh_config),
+                stream,
+                ClientHandler::new(format!("{}:{}", hop.host, hop.port)),
+            )
+            .await
+            .map_err(|e| format!("{} {}:{} SSH握手失败: {}", label, hop.host, hop.port, e))?;
+
+            authenticate_handle(&mut handle, &hop).await?;
+
+            Ok::<_, String>(handle)
+        })?;
+    }
+
+    Ok(current_handle)
+}
+
 /// Connect to a target host through a chain of jump hosts using recursive direct-tcpip channels.
 ///
 /// Connection flow: Client → Jump1 → Jump2 → … → Target
 /// Each jump opens a `direct-tcpip` channel on the previous host's SSH session,
 /// then converts it to a stream via `channel.into_stream()` for the next SSH handshake.
+#[allow(dead_code)]
 pub fn connect_via_jump_chain(
     target_config: &SshConfig,
     jump_configs: &[SshConfig],
@@ -957,6 +1119,7 @@ pub struct SshConnectionRegistry {
     app_handle: Mutex<Option<tauri::AppHandle>>,
     idle_timeout: Duration,
     config_cache_ttl: Duration,
+    shared_runtime: Arc<Runtime>,
 }
 
 impl SshConnectionRegistry {
@@ -968,6 +1131,9 @@ impl SshConnectionRegistry {
             app_handle: Mutex::new(None),
             idle_timeout: Duration::from_secs(15 * 60),
             config_cache_ttl: Duration::from_secs(120),
+            shared_runtime: Arc::new(
+                Runtime::new().expect("shared tokio runtime init failed"),
+            ),
         }
     }
 
@@ -980,6 +1146,9 @@ impl SshConnectionRegistry {
             app_handle: Mutex::new(None),
             idle_timeout: Duration::from_secs(15 * 60),
             config_cache_ttl,
+            shared_runtime: Arc::new(
+                Runtime::new().expect("shared tokio runtime init failed"),
+            ),
         }
     }
 
@@ -1283,9 +1452,9 @@ impl SshConnectionRegistry {
             ),
         );
 
-        match connect_internal_with_host_id(host_id, config, timeout_secs) {
-            Ok(conn) => {
-                let shared = conn.into_shared();
+        match connect_handle_on_runtime(&self.shared_runtime, host_id, config, timeout_secs) {
+            Ok(handle) => {
+                let shared = SharedSshConnection::from_parts(self.shared_runtime.clone(), handle);
 
                 if let Some(existing) = self.connections.get(host_id) {
                     if !existing.connection.is_closed() {
@@ -1351,8 +1520,13 @@ impl SshConnectionRegistry {
             return Ok(conn);
         }
 
-        let conn = connect_via_jump_chain(target_config, jump_configs, timeout_secs)?;
-        let shared = conn.into_shared();
+        let handle = connect_via_jump_handle_on_runtime(
+            &self.shared_runtime,
+            target_config,
+            jump_configs,
+            timeout_secs,
+        )?;
+        let shared = SharedSshConnection::from_parts(self.shared_runtime.clone(), handle);
 
         self.connections
             .insert(pool_key, ConnectionEntry::new(shared.clone()));

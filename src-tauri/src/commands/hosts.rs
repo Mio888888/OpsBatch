@@ -101,6 +101,43 @@ struct HostConnectionInfo {
     os: String,
 }
 
+const HOST_SELECT_FIELDS: &str = "id, name, ip, port, auth_type, username, password, private_key, os, tags, group_id, remark, status, jump_chain, COALESCE(rdp_settings, '{}'), COALESCE(proxy_settings, '{}'), created_at, updated_at";
+
+fn map_host_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Host> {
+    Ok(Host {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        ip: row.get(2)?,
+        port: row.get(3)?,
+        auth_type: row.get(4)?,
+        username: row.get(5)?,
+        password: mask_secret_for_frontend(row.get(6)?),
+        private_key: mask_secret_for_frontend(row.get(7)?),
+        os: row.get(8)?,
+        tags: row.get(9)?,
+        group_id: row.get(10)?,
+        remark: row.get(11)?,
+        status: row.get(12)?,
+        jump_chain: row
+            .get::<_, Option<String>>(13)?
+            .unwrap_or_else(|| "[]".to_string()),
+        rdp_settings: row
+            .get::<_, Option<String>>(14)?
+            .unwrap_or_else(|| "{}".to_string()),
+        proxy_settings: row
+            .get::<_, Option<String>>(15)?
+            .unwrap_or_else(|| "{}".to_string()),
+        created_at: row.get(16)?,
+        updated_at: row.get(17)?,
+    })
+}
+
+fn get_host_by_id(conn: &rusqlite::Connection, id: &str) -> Result<Host, String> {
+    let sql = format!("SELECT {} FROM hosts WHERE id=?1", HOST_SELECT_FIELDS);
+    conn.query_row(&sql, params![id], map_host_row)
+        .map_err(|e| format!("host {} not found: {}", id, e))
+}
+
 pub(crate) fn parse_host_proxy_settings(value: Option<String>) -> Option<ssh::ProxySettings> {
     value
         .and_then(|raw| serde_json::from_str::<ssh::ProxySettings>(&raw).ok())
@@ -618,39 +655,19 @@ pub async fn list_hosts(db: tauri::State<'_, Database>) -> Result<Vec<Host>, Str
     let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let conn = conn.get().map_err(|e| e.to_string())?;
-        let mut stmt = conn.prepare(
-            "SELECT id, name, ip, port, auth_type, username, password, private_key, os, tags, group_id, remark, status, jump_chain, COALESCE(rdp_settings, '{}'), COALESCE(proxy_settings, '{}'), created_at, updated_at FROM hosts ORDER BY name"
-        ).map_err(|e| e.to_string())?;
+        let sql = format!("SELECT {} FROM hosts ORDER BY name", HOST_SELECT_FIELDS);
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
 
         let hosts = stmt
-            .query_map([], |row| {
-                Ok(Host {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    ip: row.get(2)?,
-                    port: row.get(3)?,
-                    auth_type: row.get(4)?,
-                    username: row.get(5)?,
-                    password: mask_secret_for_frontend(row.get(6)?),
-                    private_key: mask_secret_for_frontend(row.get(7)?),
-                    os: row.get(8)?,
-                    tags: row.get(9)?,
-                    group_id: row.get(10)?,
-                    remark: row.get(11)?,
-                    status: row.get(12)?,
-                    jump_chain: row.get::<_, Option<String>>(13)?.unwrap_or_else(|| "[]".to_string()),
-                    rdp_settings: row.get::<_, Option<String>>(14)?.unwrap_or_else(|| "{}".to_string()),
-                    proxy_settings: row.get::<_, Option<String>>(15)?.unwrap_or_else(|| "{}".to_string()),
-                    created_at: row.get(16)?,
-                    updated_at: row.get(17)?,
-                })
-            })
+            .query_map([], map_host_row)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
 
         Ok(hosts)
-    }).await.map_err(|e| e.to_string())?
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[derive(Deserialize)]
@@ -672,7 +689,7 @@ pub struct NewHost {
 }
 
 #[tauri::command]
-pub async fn add_host(db: tauri::State<'_, Database>, host: NewHost) -> Result<String, String> {
+pub async fn add_host(db: tauri::State<'_, Database>, host: NewHost) -> Result<Host, String> {
     let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let id = uuid::Uuid::new_v4().to_string();
@@ -698,7 +715,7 @@ pub async fn add_host(db: tauri::State<'_, Database>, host: NewHost) -> Result<S
                 host.proxy_settings.unwrap_or_else(|| "{}".into()),
             ],
         ).map_err(|e| e.to_string())?;
-        Ok(id)
+        get_host_by_id(&conn, &id)
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -707,7 +724,7 @@ pub async fn update_host(
     app: tauri::AppHandle,
     db: tauri::State<'_, Database>,
     host: UpdateHost,
-) -> Result<(), String> {
+) -> Result<Host, String> {
     let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         crate::commands::app_log::emit_log(
@@ -753,13 +770,14 @@ pub async fn update_host(
             crate::keychain::get_host_private_key,
         )?;
 
-        {
+        let updated_host = {
             let conn = conn.get().map_err(|e| e.to_string())?;
             conn.execute(
                 "UPDATE hosts SET name=?1, ip=?2, port=?3, auth_type=?4, username=?5, password=?6, private_key=?7, os=?8, tags=?9, group_id=?10, remark=?11, jump_chain=?12, rdp_settings=?13, proxy_settings=?14, updated_at=datetime('now','localtime') WHERE id=?15",
                 params![host.name, host.ip, host.port, host.auth_type, host.username, password, private_key, host.os, host.tags, host.group_id, host.remark, host.jump_chain.as_deref().unwrap_or("[]"), host.rdp_settings.as_deref().unwrap_or("{}"), host.proxy_settings.as_deref().unwrap_or("{}"), host.id],
             ).map_err(|e| e.to_string())?;
-        }
+            get_host_by_id(&conn, &host.id)?
+        };
         crate::commands::app_log::emit_log(
             &app,
             "info",
@@ -771,7 +789,7 @@ pub async fn update_host(
             .forget_config(&host.id);
         app.state::<crate::ssh::SshConnectionRegistry>()
             .remove_connection(&host.id);
-        Ok(())
+        Ok(updated_host)
     }).await.map_err(|e| e.to_string())?
 }
 

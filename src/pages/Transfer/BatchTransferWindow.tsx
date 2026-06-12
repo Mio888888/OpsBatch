@@ -51,7 +51,9 @@ function getFileName(path: string) {
 
 export default function BatchTransferWindow() {
   const [searchParams] = useSearchParams();
-  const hostIds = searchParams.get('hostIds')?.split(',').filter(Boolean) || [];
+  const hostIdsParam = searchParams.get('hostIds') || '';
+  const hostIds = useMemo(() => hostIdsParam.split(',').filter(Boolean), [hostIdsParam]);
+  const hostIdSet = useMemo(() => new Set(hostIds), [hostIds]);
 
   const [hosts, setHosts] = useState<Host[]>([]);
   const [hostsLoading, setHostsLoading] = useState(true);
@@ -65,6 +67,7 @@ export default function BatchTransferWindow() {
   const [targetsExpanded, setTargetsExpanded] = useState(false);
 
   const listenersRef = useRef<UnlistenFn[]>([]);
+  const resultIndexByHostIdRef = useRef<Map<string, number>>(new Map());
 
   const cleanupListeners = useCallback(() => {
     listenersRef.current.forEach((fn) => fn());
@@ -75,7 +78,7 @@ export default function BatchTransferWindow() {
 
   useEffect(() => {
     invoke<Host[]>('list_hosts').then((all) => {
-      setHosts(all.filter((h) => hostIds.includes(h.id)));
+      setHosts(all.filter((h) => hostIdSet.has(h.id)));
       setHostsLoading(false);
       WebviewWindow.getByLabel('batch-transfer').then((win) => {
         if (win) win.setTitle(`批量上传 - ${hostIds.length} 台主机`);
@@ -84,7 +87,7 @@ export default function BatchTransferWindow() {
       void logHandledError('transfer.loadHosts', error, 'warn');
       setHostsLoading(false);
     });
-  }, []);
+  }, [hostIdSet, hostIds.length]);
 
   useEffect(() => {
     let unlisteners: UnlistenFn[] = [];
@@ -93,7 +96,16 @@ export default function BatchTransferWindow() {
     const setup = async () => {
       const un1 = await listen(`transfer:${activeTaskId}:progress`, (event) => {
         const data = event.payload as TransferProgress;
-        setResults((prev) => [...prev, data]);
+        setResults((prev) => {
+          const index = resultIndexByHostIdRef.current.get(data.hostId);
+          if (index === undefined) {
+            resultIndexByHostIdRef.current.set(data.hostId, prev.length);
+            return [...prev, data];
+          }
+          const next = prev.slice();
+          next[index] = data;
+          return next;
+        });
       });
       const un2 = await listen(`transfer:${activeTaskId}:done`, () => {
         setTransferring(false);
@@ -138,6 +150,7 @@ export default function BatchTransferWindow() {
 
     try {
       setTransferring(true);
+      resultIndexByHostIdRef.current.clear();
       setResults([]);
       const taskId = await invoke<string>('file_transfer', {
         request: {
@@ -156,8 +169,18 @@ export default function BatchTransferWindow() {
     }
   };
 
-  const successCount = useMemo(() => results.filter((r) => r.success).length, [results]);
-  const failCount = useMemo(() => results.filter((r) => !r.success).length, [results]);
+  const { successCount, failCount } = useMemo(() => {
+    let success = 0;
+    let failed = 0;
+    for (const result of results) {
+      if (result.success) {
+        success += 1;
+      } else {
+        failed += 1;
+      }
+    }
+    return { successCount: success, failCount: failed };
+  }, [results]);
   const doneCount = successCount + failCount;
   const pendingCount = Math.max(hostIds.length - doneCount, 0);
   const progress = hostIds.length > 0 ? (doneCount / hostIds.length) * 100 : 0;
@@ -348,7 +371,7 @@ export default function BatchTransferWindow() {
             <div className="batch-results-tools">
               <span className="batch-result-counter">{doneCount}/{hostIds.length}</span>
               {results.length > 0 && (
-                <Button size="small" onClick={() => { setResults([]); setActiveTaskId(null); setTransferring(false); }}>
+                <Button size="small" onClick={() => { resultIndexByHostIdRef.current.clear(); setResults([]); setActiveTaskId(null); setTransferring(false); }}>
                   清除
                 </Button>
               )}

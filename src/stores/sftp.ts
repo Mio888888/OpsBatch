@@ -45,6 +45,7 @@ interface SftpState {
   selectedRemote: FileEntry | null;
   selectedLocal: FileEntry | null;
   transfers: TransferItem[];
+  transferIndexById: Record<string, number>;
   bookmarks: SftpBookmark[];
   previewFile: { side: 'local' | 'remote'; entry: FileEntry; data: string | null } | null;
   previewLoading: boolean;
@@ -93,34 +94,49 @@ function saveBookmarks(bookmarks: SftpBookmark[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(bookmarks));
 }
 
-function applyTransferDone(
+type TransferDonePayload = { success: boolean; fileSize?: number; durationMs?: number; error?: string };
+
+function updateTransferAt(
   transfers: TransferItem[],
-  transferId: string,
+  index: number | undefined,
+  updater: (transfer: TransferItem) => TransferItem,
+) {
+  if (index === undefined || index < 0 || index >= transfers.length) return transfers;
+  const next = transfers.slice();
+  next[index] = updater(transfers[index]);
+  return next;
+}
+
+function applyTransferDone(
+  transfer: TransferItem,
   payload: { success: boolean; fileSize?: number; durationMs?: number; error?: string },
 ) {
-  return transfers.map((t) =>
-    t.id === transferId
-      ? {
-          ...t,
-          status: payload.success ? 'done' as const : 'error' as const,
-          progress: payload.success ? 100 : t.progress,
-          fileSize: payload.fileSize || t.fileSize,
-          durationMs: payload.durationMs || null,
-          error: payload.error || null,
-          speed: payload.durationMs ? (payload.fileSize || 0) / payload.durationMs : 0,
-        }
-      : t
-  );
+  return {
+    ...transfer,
+    status: payload.success ? 'done' as const : 'error' as const,
+    progress: payload.success ? 100 : transfer.progress,
+    fileSize: payload.fileSize || transfer.fileSize,
+    durationMs: payload.durationMs || null,
+    error: payload.error || null,
+    speed: payload.durationMs ? (payload.fileSize || 0) / payload.durationMs : 0,
+  };
 }
 
 function applyTransferStart(
-  transfers: TransferItem[],
-  transferId: string,
+  transfer: TransferItem,
   payload: { fileSize?: number },
 ) {
-  return transfers.map((t) =>
-    t.id === transferId ? { ...t, fileSize: payload.fileSize || t.fileSize } : t
-  );
+  return { ...transfer, fileSize: payload.fileSize || transfer.fileSize };
+}
+
+function appendTransferState(state: SftpState, transfer: TransferItem) {
+  return {
+    transfers: [...state.transfers, transfer],
+    transferIndexById: {
+      ...state.transferIndexById,
+      [transfer.id]: state.transfers.length,
+    },
+  };
 }
 
 export const useSftpStore = create<SftpState>((set, get) => ({
@@ -135,6 +151,7 @@ export const useSftpStore = create<SftpState>((set, get) => ({
   selectedRemote: null,
   selectedLocal: null,
   transfers: [],
+  transferIndexById: {},
   bookmarks: loadBookmarks(),
   previewFile: null,
   previewLoading: false,
@@ -237,7 +254,7 @@ export const useSftpStore = create<SftpState>((set, get) => ({
       error: null,
     };
 
-    set((s) => ({ transfers: [...s.transfers, transfer] }));
+    set((s) => appendTransferState(s, transfer));
 
     let settled = false;
     let unlistenDone: (() => void) | undefined;
@@ -248,11 +265,17 @@ export const useSftpStore = create<SftpState>((set, get) => ({
       unlistenDone = undefined;
       unlistenStart = undefined;
     };
-    const finishTransfer = (payload: { success: boolean; fileSize?: number; durationMs?: number; error?: string }) => {
+    const finishTransfer = (payload: TransferDonePayload) => {
       if (settled) return;
       settled = true;
       cleanupListeners();
-      set((s) => ({ transfers: applyTransferDone(s.transfers, transferId, payload) }));
+      set((s) => ({
+        transfers: updateTransferAt(
+          s.transfers,
+          s.transferIndexById[transferId],
+          (current) => applyTransferDone(current, payload),
+        ),
+      }));
       if (payload.success) {
         get().refreshRemote(hostId);
       }
@@ -261,7 +284,11 @@ export const useSftpStore = create<SftpState>((set, get) => ({
     try {
       unlistenStart = await listen(`sftp-transfer:${transferId}:start`, (event) => {
         set((s) => ({
-          transfers: applyTransferStart(s.transfers, transferId, event.payload as { fileSize?: number }),
+          transfers: updateTransferAt(
+            s.transfers,
+            s.transferIndexById[transferId],
+            (current) => applyTransferStart(current, event.payload as { fileSize?: number }),
+          ),
         }));
       });
       unlistenDone = await listen(`sftp-transfer:${transferId}:done`, (event) => {
@@ -303,7 +330,7 @@ export const useSftpStore = create<SftpState>((set, get) => ({
       error: null,
     };
 
-    set((s) => ({ transfers: [...s.transfers, transfer] }));
+    set((s) => appendTransferState(s, transfer));
 
     let settled = false;
     let unlistenDone: (() => void) | undefined;
@@ -314,11 +341,17 @@ export const useSftpStore = create<SftpState>((set, get) => ({
       unlistenDone = undefined;
       unlistenStart = undefined;
     };
-    const finishTransfer = (payload: { success: boolean; fileSize?: number; durationMs?: number; error?: string }) => {
+    const finishTransfer = (payload: TransferDonePayload) => {
       if (settled) return;
       settled = true;
       cleanupListeners();
-      set((s) => ({ transfers: applyTransferDone(s.transfers, transferId, payload) }));
+      set((s) => ({
+        transfers: updateTransferAt(
+          s.transfers,
+          s.transferIndexById[transferId],
+          (current) => applyTransferDone(current, payload),
+        ),
+      }));
       if (payload.success) {
         get().refreshLocal();
       }
@@ -327,7 +360,11 @@ export const useSftpStore = create<SftpState>((set, get) => ({
     try {
       unlistenStart = await listen(`sftp-transfer:${transferId}:start`, (event) => {
         set((s) => ({
-          transfers: applyTransferStart(s.transfers, transferId, event.payload as { fileSize?: number }),
+          transfers: updateTransferAt(
+            s.transfers,
+            s.transferIndexById[transferId],
+            (current) => applyTransferStart(current, event.payload as { fileSize?: number }),
+          ),
         }));
       });
       unlistenDone = await listen(`sftp-transfer:${transferId}:done`, (event) => {

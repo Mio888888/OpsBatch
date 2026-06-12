@@ -4,9 +4,11 @@ import test from 'node:test';
 
 test('batch terminal and transfer only pass selected Linux hosts', () => {
   const source = readFileSync('src/components/MainLayout.tsx', 'utf8');
+  const constantsSource = readFileSync('src/components/asset/constants.tsx', 'utf8');
 
-  assert.match(source, /function getLinuxHostIds/);
-  assert.match(source, /host\.os === 'linux'/);
+  assert.match(source, /getLinuxHostIds/);
+  assert.match(constantsSource, /function getLinuxHostIds/);
+  assert.match(constantsSource, /host\.os === 'linux'/);
   assert.match(source, /hostIds: selectedLinuxHostIds/);
   assert.match(source, /disabled=\{selectedHostIds\.length === 0\}/);
   assert.doesNotMatch(source, /kind: 'batch-terminal', hostIds: selectedHostIds/);

@@ -1,23 +1,23 @@
 import { useState, useEffect, useCallback, useRef, memo, useMemo, startTransition, useDeferredValue, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
-import { createPortal } from 'react-dom';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Tabs, Empty, Button, Spin } from '../../components/ui';
 import { PlusOutlined } from '../../components/ui/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import TerminalView, { type TerminalController } from '../../components/TerminalView';
-import SftpPanel from '../../components/SftpPanel';
-import AiChatPanel from '../../components/AiChatPanel';
-import AiInlinePanel from '../../components/AiInlinePanel';
-import PortForwardPanel from '../../components/PortForwardPanel';
-import CommandsInlinePanel from '../../components/CommandsInlinePanel';
-import ScriptsInlinePanel from '../../components/ScriptsInlinePanel';
 import { useAssetsStore } from '../../stores/assets';
 import { useAiChatStore } from '../../stores/aiChat';
 import { useTranslation } from '../../i18n';
 import type { HostMonitorNetwork, HostMonitorSnapshot } from '../../types';
 import { getTerminalTabCloseTargets, type TerminalTabCloseMode } from '../../utils/terminalTabs';
 import { logHandledError } from '../../utils/globalLogger';
+import BottomPanel from './BottomPanel';
+import {
+  SplitContextMenu,
+  TabContextMenu,
+  type TerminalSplitContextMenu,
+  type TerminalTabContextMenu,
+} from './TerminalContextMenus';
 
 interface TerminalTab {
   key: string;
@@ -34,21 +34,6 @@ interface TerminalTab {
   connectionId?: string;
   splitConnectionId?: string;
   auxiliaryReady?: boolean;
-}
-
-interface TerminalSplitContextMenu {
-  tabKey: string;
-  terminalKey: string;
-  x: number;
-  y: number;
-  selectedText?: string;
-}
-
-interface TerminalTabContextMenu {
-  kind: 'tab' | 'list';
-  tabKey?: string;
-  x: number;
-  y: number;
 }
 
 interface OpenHostRequest {
@@ -529,217 +514,6 @@ const TerminalTabContent = memo(function TerminalTabContent({
         onTerminalReady={handleTerminalReady}
       />
     </div>
-  );
-});
-
-// ---------------------------------------------------------------------------
-// BottomPanel: unified tab bar for AI / SFTP / Port Forward
-// ---------------------------------------------------------------------------
-
-interface BottomPanelProps {
-  hostId?: string;
-  hostName?: string;
-  hostIp?: string;
-  sessionId?: string;
-  isRemote: boolean;
-  getTerminalBuffer: () => string;
-  executeTerminalCommand: (command: string, options?: Parameters<TerminalController['executeCommand']>[1]) => ReturnType<TerminalController['executeCommand']> | undefined;
-  insertTerminalCommand: (command: string) => ReturnType<TerminalController['insertCommand']> | undefined;
-}
-
-const DEFAULT_BOTTOM_PANEL_HEIGHT = 292;
-const MIN_BOTTOM_PANEL_HEIGHT = 36;
-const MIN_TERMINAL_BODY_HEIGHT = 180;
-
-function clampBottomPanelHeight(nextHeight: number, containerHeight?: number) {
-  const maxHeight = containerHeight
-    ? Math.max(MIN_BOTTOM_PANEL_HEIGHT, containerHeight - MIN_TERMINAL_BODY_HEIGHT)
-    : 520;
-
-  return Math.max(MIN_BOTTOM_PANEL_HEIGHT, Math.min(maxHeight, nextHeight));
-}
-
-const BottomPanel = memo(function BottomPanel({
-  hostId,
-  hostName,
-  hostIp,
-  sessionId,
-  isRemote,
-  getTerminalBuffer,
-  executeTerminalCommand,
-  insertTerminalCommand,
-}: BottomPanelProps) {
-  const { t, tText } = useTranslation();
-  const bottomTab = useAiChatStore((s) => s.bottomTab);
-  const setBottomTab = useAiChatStore((s) => s.setBottomTab);
-  const inlineVisible = useAiChatStore((s) => s.inlineVisible);
-  const setInlineVisible = useAiChatStore((s) => s.setInlineVisible);
-  const [panelHeight, setPanelHeight] = useState(DEFAULT_BOTTOM_PANEL_HEIGHT);
-  const shellRef = useRef<HTMLDivElement>(null);
-  const resizeCleanupRef = useRef<(() => void) | null>(null);
-
-  const effectiveTab = (!isRemote && bottomTab !== 'ai' && bottomTab !== 'commands' && bottomTab !== 'scripts') ? 'ai' : bottomTab;
-
-  useEffect(() => () => {
-    resizeCleanupRef.current?.();
-  }, []);
-
-  useEffect(() => {
-    const parent = shellRef.current?.parentElement;
-    if (!parent) return undefined;
-
-    const clampToContainer = (containerHeight: number) => {
-      if (containerHeight <= 0) return;
-      setPanelHeight((currentHeight) => clampBottomPanelHeight(currentHeight, containerHeight));
-    };
-
-    clampToContainer(parent.clientHeight);
-
-    const resizeObserver = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      clampToContainer(entry?.contentRect.height ?? parent.clientHeight);
-    });
-    resizeObserver.observe(parent);
-
-    return () => resizeObserver.disconnect();
-  }, []);
-
-  const handleResizePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    resizeCleanupRef.current?.();
-
-    const startY = event.clientY;
-    const startHeight = panelHeight;
-    const containerHeight = shellRef.current?.parentElement?.clientHeight;
-
-    const cleanup = () => {
-      window.removeEventListener('pointermove', handlePointerMove);
-      window.removeEventListener('pointerup', handlePointerUp);
-      window.removeEventListener('pointercancel', handlePointerUp);
-      document.body.classList.remove('bottom-panel-resizing');
-      resizeCleanupRef.current = null;
-    };
-
-    const handlePointerMove = (moveEvent: PointerEvent) => {
-      const deltaY = startY - moveEvent.clientY;
-      setPanelHeight(clampBottomPanelHeight(startHeight + deltaY, containerHeight));
-    };
-
-    const handlePointerUp = () => {
-      cleanup();
-    };
-
-    document.body.classList.add('bottom-panel-resizing');
-    resizeCleanupRef.current = cleanup;
-    window.addEventListener('pointermove', handlePointerMove);
-    window.addEventListener('pointerup', handlePointerUp);
-    window.addEventListener('pointercancel', handlePointerUp);
-  }, [panelHeight]);
-
-  return (
-    <>
-      <div ref={shellRef} className="bottom-panel-shell" style={{ height: panelHeight }}>
-        <div
-          className="bottom-panel-resize-handle"
-          role="separator"
-          aria-orientation="horizontal"
-          aria-label={tText('terminal.bottomPanelResizeAria')}
-          onPointerDown={handleResizePointerDown}
-        />
-        <div className="bottom-panel-tab-bar">
-        {isRemote && (
-          <>
-            <button
-              className={`sftp-tab-btn ${effectiveTab === 'sftp' ? 'sftp-tab-btn-active' : ''}`}
-              onClick={() => setBottomTab('sftp')}
-            >
-              SFTP
-            </button>
-            <button
-              className={`sftp-tab-btn ${effectiveTab === 'forward' ? 'sftp-tab-btn-active' : ''}`}
-              onClick={() => setBottomTab('forward')}
-            >
-              {t('terminal.tab.portForward')}
-            </button>
-          </>
-        )}
-        <button
-          className={`sftp-tab-btn ${effectiveTab === 'ai' ? 'sftp-tab-btn-active' : ''}`}
-          onClick={() => setBottomTab('ai')}
-        >
-          AI
-        </button>
-        <button
-          className={`sftp-tab-btn ${effectiveTab === 'commands' ? 'sftp-tab-btn-active' : ''}`}
-          onClick={() => setBottomTab('commands')}
-        >
-          {t('terminal.tab.commands')}
-        </button>
-        <button
-          className={`sftp-tab-btn ${effectiveTab === 'scripts' ? 'sftp-tab-btn-active' : ''}`}
-          onClick={() => setBottomTab('scripts')}
-        >
-          {t('terminal.tab.scripts')}
-        </button>
-        <button
-          className="ai-inline-trigger"
-          onClick={() => setInlineVisible(!inlineVisible)}
-          title={tText('terminal.quickCommandTitle')}
-        >
-          ⌘I
-        </button>
-      </div>
-
-        <div className="bottom-panel-content">
-          {effectiveTab === 'ai' ? (
-            <div className="bottom-panel-pane bottom-panel-pane-active">
-              <AiChatPanel
-                hostId={hostId}
-                hostName={hostName}
-                hostIp={hostIp}
-                sessionId={sessionId}
-                getTerminalBuffer={getTerminalBuffer}
-                executeTerminalCommand={executeTerminalCommand}
-              />
-            </div>
-          ) : null}
-          {isRemote && hostId && effectiveTab === 'sftp' ? (
-            <div className="bottom-panel-pane bottom-panel-pane-active">
-              <SftpPanel hostId={hostId} hideTabBar forceTab="sftp" />
-            </div>
-          ) : null}
-          {isRemote && hostId && effectiveTab === 'forward' ? (
-            <div className="bottom-panel-pane bottom-panel-pane-active">
-              <PortForwardPanel hostId={hostId} />
-            </div>
-          ) : null}
-          {effectiveTab === 'commands' ? (
-            <div className="bottom-panel-pane bottom-panel-pane-active">
-              <CommandsInlinePanel
-                insertCommand={sessionId ? (command) => insertTerminalCommand(command) : undefined}
-              />
-            </div>
-          ) : null}
-          {effectiveTab === 'scripts' ? (
-            <div className="bottom-panel-pane bottom-panel-pane-active">
-              <ScriptsInlinePanel
-                insertCommand={sessionId ? (command) => insertTerminalCommand(command) : undefined}
-              />
-            </div>
-          ) : null}
-        </div>
-      </div>
-
-      {inlineVisible && (
-        <AiInlinePanel
-          sessionId={sessionId}
-          hostId={hostId}
-          visible={inlineVisible}
-          onClose={() => setInlineVisible(false)}
-          terminalBuffer={getTerminalBuffer()}
-        />
-      )}
-    </>
   );
 });
 
@@ -1634,74 +1408,31 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
           />
         )}
 
-        {splitContextMenu ? createPortal(
-          <div
-            className="terminal-context-menu"
-            style={{ left: splitContextMenu.x, top: splitContextMenu.y }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {splitContextMenu.selectedText ? (
-              <button type="button" className="terminal-context-menu-item" onClick={() => handleCopySelection(splitContextMenu.selectedText || '')}>
-                {t('terminal.copy')}
-              </button>
-            ) : (
-              <button type="button" className="terminal-context-menu-item" onClick={() => handlePasteClipboard(splitContextMenu.terminalKey)}>
-                {t('terminal.paste')}
-              </button>
-            )}
-            {splitContextMenu.selectedText && (
-              <>
-                <div className="terminal-context-menu-separator" />
-                <button type="button" className="terminal-context-menu-item terminal-context-menu-item-ai" onClick={() => handleAiAnalyzeSelection(splitContextMenu.tabKey, splitContextMenu.selectedText || '')}>
-                  🔍 {t('terminal.aiAnalyzeError')}
-                </button>
-              </>
-            )}
-            <div className="terminal-context-menu-separator" />
-            <button type="button" className="terminal-context-menu-item" onClick={() => handleOpenSplit(splitContextMenu.tabKey)}>
-              {t('terminal.openSplit')}
-            </button>
-          </div>,
-          document.body,
-        ) : null}
+        <SplitContextMenu
+          menu={splitContextMenu}
+          copyLabel={tText('terminal.copy')}
+          pasteLabel={tText('terminal.paste')}
+          aiAnalyzeLabel={tText('terminal.aiAnalyzeError')}
+          openSplitLabel={tText('terminal.openSplit')}
+          onCopySelection={handleCopySelection}
+          onPasteClipboard={handlePasteClipboard}
+          onAiAnalyzeSelection={handleAiAnalyzeSelection}
+          onOpenSplit={handleOpenSplit}
+        />
 
-        {tabContextMenu ? createPortal(
-          <div
-            className="terminal-context-menu terminal-tab-context-menu"
-            style={{ left: tabContextMenu.x, top: tabContextMenu.y }}
-            onClick={(event) => event.stopPropagation()}
-            onContextMenu={(event) => event.preventDefault()}
-          >
-            {tabContextMenu.kind === 'list' ? (
-              <>
-                <button type="button" className="terminal-context-menu-item" onClick={handleNewConnectionFromContext}>
-                  {t('terminal.context.newConnection')}
-                </button>
-                <div className="terminal-context-menu-separator" />
-                <button type="button" className="terminal-context-menu-item terminal-context-menu-item-danger" onClick={handleCloseAllTabs}>
-                  {t('terminal.context.closeAll')}
-                </button>
-              </>
-            ) : (
-              <>
-                <button type="button" className="terminal-context-menu-item terminal-context-menu-item-danger" onClick={() => tabContextMenu.tabKey && handleCloseTabsByMode(tabContextMenu.tabKey, 'all')}>
-                  {t('terminal.context.closeAll')}
-                </button>
-                <button type="button" className="terminal-context-menu-item" onClick={() => tabContextMenu.tabKey && handleCloseTabsByMode(tabContextMenu.tabKey, 'others')}>
-                  {t('terminal.context.closeOthers')}
-                </button>
-                <div className="terminal-context-menu-separator" />
-                <button type="button" className="terminal-context-menu-item" onClick={() => tabContextMenu.tabKey && handleCloseTabsByMode(tabContextMenu.tabKey, 'left')}>
-                  {t('terminal.context.closeLeft')}
-                </button>
-                <button type="button" className="terminal-context-menu-item" onClick={() => tabContextMenu.tabKey && handleCloseTabsByMode(tabContextMenu.tabKey, 'right')}>
-                  {t('terminal.context.closeRight')}
-                </button>
-              </>
-            )}
-          </div>,
-          document.body,
-        ) : null}
+        <TabContextMenu
+          menu={tabContextMenu}
+          labels={{
+            newConnection: tText('terminal.context.newConnection'),
+            closeAll: tText('terminal.context.closeAll'),
+            closeOthers: tText('terminal.context.closeOthers'),
+            closeLeft: tText('terminal.context.closeLeft'),
+            closeRight: tText('terminal.context.closeRight'),
+          }}
+          onNewConnection={handleNewConnectionFromContext}
+          onCloseAll={handleCloseAllTabs}
+          onCloseTabsByMode={handleCloseTabsByMode}
+        />
       </div>
 
       {hasMonitor && deferredActiveTab && activeRemoteHostId && (

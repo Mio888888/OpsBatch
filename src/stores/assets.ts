@@ -50,6 +50,20 @@ interface BackendHostMonitorSnapshot {
   filesystems: HostMonitorSnapshot['filesystems'];
 }
 
+interface BackendAssetGroup {
+  id: string;
+  name: string;
+  parent_id?: string;
+  sort_order: number;
+}
+
+interface BackendTag {
+  id: string;
+  name: string;
+  color: string;
+  icon?: string;
+}
+
 export interface ImportHostsCsvResult {
   total: number;
   imported: number;
@@ -59,6 +73,16 @@ export interface ImportHostsCsvResult {
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function parseJsonArray(value: string | undefined, fallback: string[] = []) {
+  if (!value) return fallback;
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function secretDebugState(value?: string) {
@@ -169,6 +193,77 @@ function serializeRdpSettings(settings?: RdpSettings): string {
   return JSON.stringify(normalized);
 }
 
+function mapBackendHost(h: BackendHost): Host {
+  return {
+    id: h.id,
+    name: h.name,
+    ip: h.ip,
+    port: h.port,
+    authType: h.auth_type as Host['authType'],
+    username: h.username,
+    password: h.password,
+    privateKey: h.private_key,
+    os: h.os as Host['os'],
+    tags: parseJsonArray(h.tags),
+    groupId: h.group_id ?? undefined,
+    remark: h.remark,
+    jumpChain: parseJsonArray(h.jump_chain),
+    rdpSettings: parseRdpSettings(h.rdp_settings),
+    proxySettings: parseProxySettings(h.proxy_settings),
+    createdAt: h.created_at,
+    updatedAt: h.updated_at,
+  };
+}
+
+function upsertHost(hosts: Host[], host: Host) {
+  const index = hosts.findIndex((item) => item.id === host.id);
+  if (index === -1) {
+    return [...hosts, host].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  const next = hosts.slice();
+  next[index] = host;
+  return next;
+}
+
+function mapBackendGroup(g: BackendAssetGroup): AssetGroup {
+  return {
+    id: g.id,
+    name: g.name,
+    parentId: g.parent_id ?? undefined,
+    sortOrder: g.sort_order,
+  };
+}
+
+function upsertGroup(groups: AssetGroup[], group: AssetGroup) {
+  const index = groups.findIndex((item) => item.id === group.id);
+  if (index === -1) {
+    return [...groups, group].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+  }
+  const next = groups.slice();
+  next[index] = group;
+  return next.sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name));
+}
+
+function mapBackendTag(tag: BackendTag): Tag {
+  return {
+    id: tag.id,
+    name: tag.name,
+    color: tag.color,
+    icon: tag.icon ?? '',
+  };
+}
+
+function upsertTag(tags: Tag[], tag: Tag) {
+  const index = tags.findIndex((item) => item.id === tag.id);
+  if (index === -1) {
+    return [...tags, tag].sort((a, b) => a.name.localeCompare(b.name));
+  }
+  const next = tags.slice();
+  next[index] = tag;
+  return next.sort((a, b) => a.name.localeCompare(b.name));
+}
+
 interface AssetsState {
   hosts: Host[];
   groups: AssetGroup[];
@@ -214,25 +309,7 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
     set({ loading: true });
     try {
       const raw = await invoke<BackendHost[]>('list_hosts');
-      const hosts: Host[] = raw.map((h) => ({
-        id: h.id,
-        name: h.name,
-        ip: h.ip,
-        port: h.port,
-        authType: h.auth_type as Host['authType'],
-        username: h.username,
-        password: h.password,
-        privateKey: h.private_key,
-        os: h.os as Host['os'],
-        tags: JSON.parse(h.tags || '[]'),
-        groupId: h.group_id ?? undefined,
-        remark: h.remark,
-        jumpChain: JSON.parse(h.jump_chain || '[]'),
-        rdpSettings: parseRdpSettings(h.rdp_settings),
-        proxySettings: parseProxySettings(h.proxy_settings),
-        createdAt: h.created_at,
-        updatedAt: h.updated_at,
-      }));
+      const hosts = raw.map(mapBackendHost);
       set({ hosts });
     } catch (e) {
       console.error('Failed to load hosts:', e);
@@ -260,8 +337,8 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
       proxy_settings: serializeProxySettings(host.proxySettings),
     };
     try {
-      await invoke('add_host', { host: backend });
-      await get().loadHosts();
+      const created = await invoke<BackendHost>('add_host', { host: backend });
+      set((s) => ({ hosts: upsertHost(s.hosts, mapBackendHost(created)) }));
     } catch (error: unknown) {
       throw new Error(getErrorMessage(error));
     }
@@ -292,9 +369,9 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
       privateKey: secretDebugState(host.privateKey),
     });
     try {
-      await invoke('update_host', { host: backend });
+      const updated = await invoke<BackendHost>('update_host', { host: backend });
       console.info('[host-secret] update_host succeeded', { hostId: host.id });
-      await get().loadHosts();
+      set((s) => ({ hosts: upsertHost(s.hosts, mapBackendHost(updated)) }));
     } catch (error: unknown) {
       console.error('[host-secret] update_host failed', {
         hostId: host.id,
@@ -307,8 +384,10 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
   deleteHost: async (id) => {
     try {
       await invoke('delete_host', { id });
-      await get().loadHosts();
-      set((s) => ({ selectedHostIds: s.selectedHostIds.filter((h) => h !== id) }));
+      set((s) => ({
+        hosts: s.hosts.filter((host) => host.id !== id),
+        selectedHostIds: s.selectedHostIds.filter((h) => h !== id),
+      }));
     } catch (error: unknown) {
       throw new Error(getErrorMessage(error));
     }
@@ -344,13 +423,8 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
 
   loadGroups: async () => {
     try {
-      const raw = await invoke<{ id: string; name: string; parent_id?: string; sort_order: number }[]>('list_groups');
-      const groups: AssetGroup[] = raw.map((g) => ({
-        id: g.id,
-        name: g.name,
-        parentId: g.parent_id ?? undefined,
-        sortOrder: g.sort_order,
-      }));
+      const raw = await invoke<BackendAssetGroup[]>('list_groups');
+      const groups = raw.map(mapBackendGroup);
       set({ groups });
     } catch {
       set({ groups: [] });
@@ -359,8 +433,8 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
 
   addGroup: async (name, parentId) => {
     try {
-      await invoke('add_group', { name, parentId: parentId ?? null });
-      await get().loadGroups();
+      const group = await invoke<BackendAssetGroup>('add_group', { name, parentId: parentId ?? null });
+      set((s) => ({ groups: upsertGroup(s.groups, mapBackendGroup(group)) }));
     } catch (error: unknown) {
       throw new Error(getErrorMessage(error));
     }
@@ -368,7 +442,7 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
 
   updateGroup: async (group) => {
     try {
-      await invoke('update_group', {
+      const updated = await invoke<BackendAssetGroup>('update_group', {
         group: {
           id: group.id,
           name: group.name,
@@ -376,7 +450,7 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
           sort_order: group.sortOrder,
         },
       });
-      await get().loadGroups();
+      set((s) => ({ groups: upsertGroup(s.groups, mapBackendGroup(updated)) }));
     } catch (error: unknown) {
       throw new Error(getErrorMessage(error));
     }
@@ -385,8 +459,10 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
   deleteGroup: async (id) => {
     try {
       await invoke('delete_group', { id });
-      await get().loadGroups();
-      await get().loadHosts();
+      set((s) => ({
+        groups: s.groups.filter((group) => group.id !== id),
+        hosts: s.hosts.map((host) => (host.groupId === id ? { ...host, groupId: undefined } : host)),
+      }));
     } catch (error: unknown) {
       throw new Error(getErrorMessage(error));
     }
@@ -399,8 +475,8 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
 
   loadTags: async () => {
     try {
-      const tags = await invoke<Tag[]>('list_tags');
-      set({ tags });
+      const tags = await invoke<BackendTag[]>('list_tags');
+      set({ tags: tags.map(mapBackendTag) });
     } catch {
       set({ tags: [] });
     }
@@ -408,8 +484,8 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
 
   addTag: async (name, color, icon) => {
     try {
-      await invoke('add_tag', { name, color, icon });
-      await get().loadTags();
+      const tag = await invoke<BackendTag>('add_tag', { name, color, icon });
+      set((s) => ({ tags: upsertTag(s.tags, mapBackendTag({ ...tag, icon })) }));
     } catch (error: unknown) {
       throw new Error(getErrorMessage(error));
     }
@@ -417,8 +493,8 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
 
   updateTag: async (tag) => {
     try {
-      await invoke('update_tag', { tag });
-      await get().loadTags();
+      const updated = await invoke<BackendTag>('update_tag', { tag });
+      set((s) => ({ tags: upsertTag(s.tags, mapBackendTag({ ...updated, icon: tag.icon })) }));
     } catch (error: unknown) {
       throw new Error(getErrorMessage(error));
     }
@@ -427,7 +503,7 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
   deleteTag: async (id) => {
     try {
       await invoke('delete_tag', { id });
-      await get().loadTags();
+      set((s) => ({ tags: s.tags.filter((tag) => tag.id !== id) }));
     } catch (error: unknown) {
       throw new Error(getErrorMessage(error));
     }

@@ -9,6 +9,23 @@ pub struct Tag {
     pub color: String,
 }
 
+fn map_tag_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Tag> {
+    Ok(Tag {
+        id: row.get(0)?,
+        name: row.get(1)?,
+        color: row.get(2)?,
+    })
+}
+
+fn get_tag_by_id(conn: &rusqlite::Connection, id: &str) -> Result<Tag, String> {
+    conn.query_row(
+        "SELECT id, name, color FROM tags WHERE id=?1",
+        params![id],
+        map_tag_row,
+    )
+    .map_err(|e| format!("tag {} not found: {}", id, e))
+}
+
 #[tauri::command]
 pub async fn list_tags(db: tauri::State<'_, Database>) -> Result<Vec<Tag>, String> {
     let conn = db.pool.clone();
@@ -18,13 +35,7 @@ pub async fn list_tags(db: tauri::State<'_, Database>) -> Result<Vec<Tag>, Strin
             .prepare("SELECT id, name, color FROM tags ORDER BY name")
             .map_err(|e| e.to_string())?;
         let tags = stmt
-            .query_map([], |row| {
-                Ok(Tag {
-                    id: row.get(0)?,
-                    name: row.get(1)?,
-                    color: row.get(2)?,
-                })
-            })
+            .query_map([], map_tag_row)
             .map_err(|e| e.to_string())?
             .collect::<Result<Vec<_>, _>>()
             .map_err(|e| e.to_string())?;
@@ -39,7 +50,7 @@ pub async fn add_tag(
     db: tauri::State<'_, Database>,
     name: String,
     color: String,
-) -> Result<String, String> {
+) -> Result<Tag, String> {
     let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let id = uuid::Uuid::new_v4().to_string();
@@ -49,14 +60,14 @@ pub async fn add_tag(
             params![id, name, color],
         )
         .map_err(|e| e.to_string())?;
-        Ok(id)
+        get_tag_by_id(&conn, &id)
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub async fn update_tag(db: tauri::State<'_, Database>, tag: Tag) -> Result<(), String> {
+pub async fn update_tag(db: tauri::State<'_, Database>, tag: Tag) -> Result<Tag, String> {
     let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let conn = conn.get().map_err(|e| e.to_string())?;
@@ -65,7 +76,7 @@ pub async fn update_tag(db: tauri::State<'_, Database>, tag: Tag) -> Result<(), 
             params![tag.name, tag.color, tag.id],
         )
         .map_err(|e| e.to_string())?;
-        Ok(())
+        get_tag_by_id(&conn, &tag.id)
     })
     .await
     .map_err(|e| e.to_string())?

@@ -1,6 +1,7 @@
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::Database;
@@ -140,8 +141,8 @@ pub fn execute_command(
 
     drop(conn);
 
-    let task_id_clone = task_id.clone();
-    let cmd_clone = command.clone();
+    let task_id_arc: Arc<str> = Arc::from(task_id.as_str());
+    let cmd_arc: Arc<str> = Arc::from(command.as_str());
     let host_count = host_ids.len() as i32;
     let host_ids_str = serde_json::to_string(&host_ids).unwrap_or_default();
     let qa_id_for_thread = quick_action_id.clone();
@@ -164,7 +165,7 @@ pub fn execute_command(
             &app,
             "info",
             "execution",
-            &format!("Execute command [{}], {} host(s)", cmd_clone, host_count),
+            &format!("Execute command [{}], {} host(s)", cmd_arc, host_count),
             "backend",
         );
 
@@ -172,14 +173,14 @@ pub fn execute_command(
         let mut handles: VecDeque<
             std::thread::JoinHandle<(String, String, u32, String, i32, u64)>,
         > = VecDeque::new();
-        let mut pending_db_writes: Vec<(String, String, String, u32, String, i32, u64)> =
+        let mut pending_db_writes: Vec<(String, String, u32, String, i32, u64)> =
             Vec::new();
 
         for (hid, host_name, config) in configs.into_iter() {
-            if is_cancelled(&app, &task_id_clone) {
+            if is_cancelled(&app, &task_id_arc) {
                 fail_count += 1;
                 let _ = app.emit(
-                    &format!("exec:{}:output", task_id_clone),
+                    &format!("exec:{}:output", task_id_arc),
                     serde_json::json!({
                         "hostId": hid,
                         "hostName": host_name,
@@ -193,8 +194,8 @@ pub fn execute_command(
             }
 
             let app_spawn = app.clone();
-            let task_id = task_id_clone.clone();
-            let command = cmd_clone.clone();
+            let task_id = Arc::clone(&task_id_arc);
+            let command = Arc::clone(&cmd_arc);
 
             if handles.len() >= max_concurrent {
                 let old_handle = handles.pop_front().unwrap();
@@ -205,7 +206,6 @@ pub fn execute_command(
                         fail_count += 1;
                     }
                     pending_db_writes.push((
-                        task_id_clone.clone(),
                         host_id.clone(),
                         hn.clone(),
                         result_flag,
@@ -215,10 +215,10 @@ pub fn execute_command(
                     ));
                     let _ = crate::commands::asciinema::write_asciinema_recording(
                         app.clone(),
-                        task_id_clone.clone(),
+                        task_id_arc.to_string(),
                         host_id,
                         hn,
-                        cmd_clone.clone(),
+                        cmd_arc.to_string(),
                         output,
                     );
                 }
@@ -272,7 +272,6 @@ pub fn execute_command(
                     fail_count += 1;
                 }
                 pending_db_writes.push((
-                    task_id_clone.clone(),
                     host_id.clone(),
                     hn.clone(),
                     result_flag,
@@ -282,10 +281,10 @@ pub fn execute_command(
                 ));
                 let _ = crate::commands::asciinema::write_asciinema_recording(
                     app.clone(),
-                    task_id_clone.clone(),
+                    task_id_arc.to_string(),
                     host_id,
                     hn,
-                    cmd_clone.clone(),
+                    cmd_arc.to_string(),
                     output,
                 );
             }
@@ -295,11 +294,11 @@ pub fn execute_command(
         {
             let db = app.state::<Database>();
             if let Ok(conn) = db.pool.get() {
-                for (task_id, host_id, hn, result_flag, output, exit_code, dur) in pending_db_writes
+                for (host_id, hn, result_flag, output, exit_code, dur) in pending_db_writes
                 {
                     if let Err(e) = conn.execute(
                         "INSERT INTO execution_details (history_id, host_id, host_name, status, output, exit_code, duration) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                        rusqlite::params![task_id, host_id, hn, if result_flag == 1 { "success" } else { "failed" }, output, exit_code, dur as i64],
+                        rusqlite::params![&*task_id_arc, host_id, hn, if result_flag == 1 { "success" } else { "failed" }, output, exit_code, dur as i64],
                     ) {
                         eprintln!("[Exec] DB insert failed host={}: {}", host_id, e);
                     }
@@ -315,7 +314,7 @@ pub fn execute_command(
             if let Ok(conn) = db.pool.get() {
                 conn.execute(
                     "UPDATE execution_history SET success_count=?1, fail_count=?2, completed_at=datetime('now','localtime'), duration=?3 WHERE id=?4",
-                    rusqlite::params![success_count, fail_count, duration_ms, task_id_clone],
+                    rusqlite::params![success_count, fail_count, duration_ms, &*task_id_arc],
                 ).ok();
             };
         }
@@ -339,7 +338,7 @@ pub fn execute_command(
         }
 
         let _ = app.emit(
-            &format!("exec:{}:done", task_id_clone),
+            &format!("exec:{}:done", task_id_arc),
             serde_json::json!({
                 "successCount": success_count,
                 "failCount": fail_count,
@@ -352,7 +351,7 @@ pub fn execute_command(
                 "success",
                 format!(
                     "Command [{}]: all succeeded ({} host(s), {}ms)",
-                    cmd_clone, success_count, duration_ms
+                    cmd_arc, success_count, duration_ms
                 ),
             )
         } else if success_count == 0 {
@@ -360,7 +359,7 @@ pub fn execute_command(
                 "error",
                 format!(
                     "Command [{}]: all failed ({} host(s), {}ms)",
-                    cmd_clone, fail_count, duration_ms
+                    cmd_arc, fail_count, duration_ms
                 ),
             )
         } else {
@@ -368,7 +367,7 @@ pub fn execute_command(
                 "warn",
                 format!(
                     "Command [{}]: {} succeeded, {} failed ({}ms)",
-                    cmd_clone, success_count, fail_count, duration_ms
+                    cmd_arc, success_count, fail_count, duration_ms
                 ),
             )
         };

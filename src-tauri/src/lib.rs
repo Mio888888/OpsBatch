@@ -105,6 +105,7 @@ pub fn run() {
             commands::app_log::ping_log,
             commands::app_update::check_app_update,
             commands::app_log::get_log_history,
+            commands::app_log::clear_log_history,
             commands::app_log::emit_frontend_log,
             commands::diagnostics::write_diagnostic_log,
             // Hosts

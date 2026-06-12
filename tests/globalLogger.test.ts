@@ -58,7 +58,9 @@ test('registers a backend command for persisted frontend logs', () => {
   const mainSource = readFileSync('src/main.tsx', 'utf8');
 
   assert.match(appLogSource, /pub fn emit_frontend_log/);
+  assert.match(appLogSource, /pub fn clear_log_history/);
   assert.match(libSource, /commands::app_log::emit_frontend_log/);
+  assert.match(libSource, /commands::app_log::clear_log_history/);
   assert.match(mainSource, /installGlobalLogHandler/);
   assert.doesNotMatch(mainSource, /console\.log =/);
 });

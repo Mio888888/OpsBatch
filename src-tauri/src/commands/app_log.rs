@@ -96,6 +96,19 @@ pub fn get_log_history(app: AppHandle, limit: Option<u32>) -> Result<Vec<AppLogE
     Ok(entries)
 }
 
+pub fn clear_app_logs(conn: &rusqlite::Connection) -> Result<(), String> {
+    conn.execute("DELETE FROM app_logs", [])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn clear_log_history(app: AppHandle) -> Result<(), String> {
+    let db = app.state::<Database>();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    clear_app_logs(&conn)
+}
+
 /// Frontend can call this to emit a test log entry (used by global-log window on load).
 #[tauri::command]
 pub fn ping_log(app: AppHandle, message: String) {
@@ -127,5 +140,28 @@ fn normalize_source(source: &str) -> String {
         "system".to_string()
     } else {
         trimmed.chars().take(64).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clear_app_logs_deletes_persisted_rows() {
+        let conn = rusqlite::Connection::open_in_memory().expect("open in-memory db");
+        init_app_logs_table(&conn).expect("init app log table");
+        conn.execute(
+            "INSERT INTO app_logs (timestamp, level, source, message, origin) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params!["10:00:00.000", "info", "system", "hello", "backend"],
+        )
+        .expect("insert app log");
+
+        clear_app_logs(&conn).expect("clear app logs");
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM app_logs", [], |row| row.get(0))
+            .expect("count app logs");
+        assert_eq!(0, count);
     }
 }

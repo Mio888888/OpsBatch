@@ -161,7 +161,9 @@ export default function GlobalLogPage() {
           <button
             type="button"
             className="global-log-action-btn"
-            onClick={clear}
+            onClick={() => {
+              void clear();
+            }}
           >
             {t('log.clear')}
           </button>

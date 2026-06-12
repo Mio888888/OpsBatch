@@ -18,7 +18,7 @@ interface LogState {
   logs: LogEntry[];
   loading: boolean;
   init: () => void;
-  clear: () => void;
+  clear: () => Promise<void>;
 }
 
 let _initPromise: Promise<void> | null = null;
@@ -75,7 +75,8 @@ export const useLogStore = create<LogState>((set) => ({
     })();
   },
 
-  clear: () => {
+  clear: async () => {
+    await invoke('clear_log_history');
     set({ logs: [] });
   },
 }));

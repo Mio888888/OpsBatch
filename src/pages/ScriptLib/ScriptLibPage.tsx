@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { Tag, Input, Space, Button, Select, Tooltip, message, Modal, Form } from '../../components/ui';
 import {
   SearchOutlined, PlusOutlined,
@@ -10,8 +10,9 @@ import { useTranslation } from '../../i18n';
 import type { TranslationKey } from '../../i18n';
 import type { ScriptEntry } from '../../types';
 import { invoke } from '@tauri-apps/api/core';
-import CodeEditor from '../../components/CodeEditor';
 import { logHandledError } from '../../utils/globalLogger';
+
+const LazyCodeEditor = lazy(() => import('../../components/CodeEditor'));
 
 const LANGUAGES = [
   { value: 'shell', label: 'Shell', icon: '🐚', color: 'blue' },
@@ -37,6 +38,10 @@ interface VersionRecord {
 }
 
 interface ScriptFormValues extends Omit<ScriptEntry, 'id' | 'parameters' | 'starred' | 'isBuiltin'> {}
+
+function CodeEditorFallback({ height = '280px' }: { height?: string }) {
+  return <div style={{ height, background: 'var(--color-bg-elevated)', borderRadius: 8 }} />;
+}
 
 export default function ScriptLibPage() {
   const { scripts, loadScripts, addScript, updateScript, deleteScript, addQuickAction } = useLibraryStore();
@@ -258,7 +263,9 @@ export default function ScriptLibPage() {
                 ))}
               </div>
             )}
-            <CodeEditor value={viewScript.content} language={viewScript.language} readOnly height="350px" />
+            <Suspense fallback={<CodeEditorFallback height="350px" />}>
+              <LazyCodeEditor value={viewScript.content} language={viewScript.language} readOnly height="350px" />
+            </Suspense>
           </div>
         )}
       </Modal>
@@ -308,13 +315,15 @@ export default function ScriptLibPage() {
                 options={RISK_OPTION_KEYS.map(r => ({ value: r.value, label: tText(r.labelKey) }))}
                 onChange={(v) => setEditScript({ ...editScript, risk: v as ScriptEntry['risk'] })} />
             </Space>
-            <CodeEditor
-              value={editScript.content}
-              language={editScript.language}
-              onChange={(value) => setEditScript({ ...editScript, content: value })}
-              height="400px"
-              placeholder={tText('scriptLib.scriptCode')}
-            />
+            <Suspense fallback={<CodeEditorFallback height="400px" />}>
+              <LazyCodeEditor
+                value={editScript.content}
+                language={editScript.language}
+                onChange={(value) => setEditScript({ ...editScript, content: value })}
+                height="400px"
+                placeholder={tText('scriptLib.scriptCode')}
+              />
+            </Suspense>
             <Input.TextArea value={editScript.description} placeholder={tText('scriptLib.scriptDescription')} rows={1}
               style={{ marginTop: 8 }} onChange={(e) => setEditScript({ ...editScript, description: e.target.value })} />
           </div>
@@ -373,13 +382,15 @@ export default function ScriptLibPage() {
               const lang = (getFieldValue('language') as ScriptEntry['language'] | undefined) || 'shell';
               return (
                 <div style={{ border: '1px solid var(--color-border)', borderRadius: 8, overflow: 'hidden' }}>
-                  <CodeEditor
+                  <Suspense fallback={<CodeEditorFallback height="280px" />}>
+                    <LazyCodeEditor
                     value={(getFieldValue('content') as string | undefined) || ''}
                     language={lang}
                     onChange={(value) => setFieldValue('content', value)}
                     height="280px"
                     placeholder={tText('scriptLib.codePlaceholder')}
-                  />
+                    />
+                  </Suspense>
                 </div>
               );
             }}

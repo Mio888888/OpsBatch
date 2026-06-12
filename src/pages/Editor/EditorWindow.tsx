@@ -1,11 +1,12 @@
-import { useEffect, useCallback } from 'react';
+import { lazy, Suspense, useCallback, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { ask } from '@tauri-apps/plugin-dialog';
 import { useEditorStore } from '../../stores/editor';
 import WindowControls from '../../components/WindowControls';
-import CodeEditor from '../../components/CodeEditor';
 import FileTree from './FileTree';
+
+const LazyCodeEditor = lazy(() => import('../../components/CodeEditor'));
 
 function guessLanguage(filename: string | null): string {
   if (!filename) return 'shell';
@@ -182,15 +183,17 @@ export default function EditorWindow() {
           ) : shellMode === 'dir' && !currentFilePath ? (
             <div className="editor-empty">从左侧选择文件开始编辑</div>
           ) : (
-            <CodeEditor
-              value={content}
-              onChange={handleChange}
-              language={guessLanguage(
-                shellMode === 'dir' ? currentFileName : fileName
-              )}
-              height="100%"
-              placeholder="文件内容"
-            />
+            <Suspense fallback={<EditorContentSkeleton label="编辑器加载中…" />}>
+              <LazyCodeEditor
+                value={content}
+                onChange={handleChange}
+                language={guessLanguage(
+                  shellMode === 'dir' ? currentFileName : fileName
+                )}
+                height="100%"
+                placeholder="文件内容"
+              />
+            </Suspense>
           )}
         </div>
       </div>

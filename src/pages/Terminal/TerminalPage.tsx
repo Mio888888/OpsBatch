@@ -258,7 +258,20 @@ const HostMonitorPanel = memo(function HostMonitorPanel({ hostId, hostIp, initia
     ? Math.max(1, (snapshot.timestamp - previousSnapshot.timestamp) / 1000)
     : 0;
   const { rx: rxRate, tx: txRate } = getNetworkRate(selectedNetwork, previousNetwork, elapsedSeconds);
-  const cpuPercent = formatPercent(snapshot?.cpuPercent);
+  const cpuPercent = (() => {
+    // 使用相邻两次 snapshot 的 /proc/stat 累积值计算 CPU 使用率
+    if (snapshot?.cpuPercent != null) return formatPercent(snapshot.cpuPercent);
+    const curUsed = snapshot?.cpuTimeUsed;
+    const curTotal = snapshot?.cpuTimeTotal;
+    const prevUsed = previousSnapshot?.cpuTimeUsed;
+    const prevTotal = previousSnapshot?.cpuTimeTotal;
+    if (curUsed != null && curTotal != null && prevUsed != null && prevTotal != null) {
+      const dUsed = curUsed - prevUsed;
+      const dTotal = curTotal - prevTotal;
+      if (dTotal > 0) return formatPercent((dUsed / dTotal) * 100);
+    }
+    return undefined;
+  })();
   const memoryPercent = snapshot?.memoryUsedMb && snapshot.memoryTotalMb
     ? formatPercent((snapshot.memoryUsedMb / snapshot.memoryTotalMb) * 100)
     : undefined;

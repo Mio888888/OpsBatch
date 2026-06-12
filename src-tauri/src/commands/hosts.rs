@@ -81,6 +81,8 @@ pub struct HostMonitorSnapshot {
     pub uptime: Option<String>,
     pub load_average: Option<String>,
     pub cpu_percent: Option<f64>,
+    pub cpu_time_used: Option<u64>,
+    pub cpu_time_total: Option<u64>,
     pub memory_used_mb: Option<u64>,
     pub memory_total_mb: Option<u64>,
     pub swap_used_mb: Option<u64>,
@@ -92,10 +94,6 @@ pub struct HostMonitorSnapshot {
     pub networks: Vec<HostMonitorNetwork>,
     pub ping_ms: Option<f64>,
     pub filesystems: Vec<HostMonitorFilesystem>,
-}
-
-fn parse_first_f64(value: &str) -> Option<f64> {
-    value.split_whitespace().next()?.parse::<f64>().ok()
 }
 
 struct HostConnectionInfo {
@@ -462,6 +460,8 @@ fn empty_monitor_snapshot(
         uptime: None,
         load_average: None,
         cpu_percent: None,
+        cpu_time_used: None,
+        cpu_time_total: None,
         memory_used_mb: None,
         memory_total_mb: None,
         swap_used_mb: None,
@@ -559,7 +559,7 @@ fn inner_get_host_monitor_snapshot(
     let command = r#"
 printf '__UPTIME__\n'; uptime -p 2>/dev/null || awk '{print int($1/86400) " 天"}' /proc/uptime 2>/dev/null
 printf '__LOAD__\n'; awk '{print $1", "$2", "$3}' /proc/loadavg 2>/dev/null
-printf '__CPU__\n'; (head -n1 /proc/stat; sleep 0.2; head -n1 /proc/stat) 2>/dev/null | awk 'NR==1 {u=$2+$4; t=$2+$4+$5} NR==2 {u2=$2+$4; t2=$2+$4+$5; if (t2>t) printf "%.1f\n", (u2-u)*100/(t2-t);}'
+printf '__CPU__\n'; head -n1 /proc/stat 2>/dev/null | awk '{u=$2+$4; t=0; for(i=2;i<=NF;i++) t+=$i; printf "%d %d\n", u, t}'
 printf '__MEMORY__\n'; free -m 2>/dev/null | awk '/^Mem:/ {print "mem_used "$3; print "mem_total "$2} /^Swap:/ {print "swap_used "$3; print "swap_total "$2}'
 printf '__OS__\n'; . /etc/os-release 2>/dev/null; printf '%s\n' "${PRETTY_NAME:-$(uname -s)}"
 printf '__KERNEL__\n'; uname -r 2>/dev/null
@@ -575,7 +575,15 @@ printf '__FILESYSTEMS__\n'; df -hP 2>/dev/null | awk 'NR>1 {print $6 "|" $3 "|" 
         timestamp,
         uptime: section_first(&output, "UPTIME"),
         load_average: section_first(&output, "LOAD"),
-        cpu_percent: section_first(&output, "CPU").and_then(|value| parse_first_f64(&value)),
+        cpu_percent: None,
+        cpu_time_used: section_first(&output, "CPU").and_then(|value| {
+            let mut parts = value.split_whitespace();
+            parts.next().and_then(|v| v.parse::<u64>().ok())
+        }),
+        cpu_time_total: section_first(&output, "CPU").and_then(|value| {
+            let mut parts = value.split_whitespace();
+            parts.nth(1).and_then(|v| v.parse::<u64>().ok())
+        }),
         memory_used_mb: parse_memory(&output, "mem_used"),
         memory_total_mb: parse_memory(&output, "mem_total"),
         swap_used_mb: parse_memory(&output, "swap_used"),

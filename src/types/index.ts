@@ -61,6 +61,8 @@ export interface HostMonitorSnapshot {
   uptime?: string;
   loadAverage?: string;
   cpuPercent?: number;
+  cpuTimeUsed?: number;
+  cpuTimeTotal?: number;
   memoryUsedMb?: number;
   memoryTotalMb?: number;
   swapUsedMb?: number;

@@ -35,6 +35,8 @@ interface BackendHostMonitorSnapshot {
   uptime: string | null;
   load_average: string | null;
   cpu_percent: number | null;
+  cpu_time_used: number | null;
+  cpu_time_total: number | null;
   memory_used_mb: number | null;
   memory_total_mb: number | null;
   swap_used_mb: number | null;
@@ -442,6 +444,8 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
         uptime: raw.uptime ?? undefined,
         loadAverage: raw.load_average ?? undefined,
         cpuPercent: raw.cpu_percent ?? undefined,
+        cpuTimeUsed: raw.cpu_time_used ?? undefined,
+        cpuTimeTotal: raw.cpu_time_total ?? undefined,
         memoryUsedMb: raw.memory_used_mb ?? undefined,
         memoryTotalMb: raw.memory_total_mb ?? undefined,
         swapUsedMb: raw.swap_used_mb ?? undefined,

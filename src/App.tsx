@@ -193,30 +193,40 @@ function App() {
   );
 }
 
-// Preload all lazy pages during idle time so navigation is instant.
-const prefetchPages = () => {
-  void import('./pages/Terminal/TerminalPage');
-  void import('./pages/Rdp/RdpPage');
-  void import('./pages/Vnc/VncPage');
-  void import('./pages/Editor/EditorWindow');
-  void import('./pages/Commands/BatchTerminalWindow');
-  void import('./pages/Transfer/BatchTransferWindow');
-  void import('./pages/Commands/CommandsPage');
-  void import('./pages/CommandLib/CommandLibPage');
-  void import('./pages/ScriptLib/ScriptLibPage');
-  void import('./pages/QuickActions/QuickActionsPage');
-  void import('./pages/Workflow/WorkflowPage');
-  void import('./pages/GitHub/GitHubPage');
-  void import('./pages/Settings/SettingsPage');
-  void import('./pages/Log/GlobalLogPage');
-};
+// 分批低优先级预加载：仅预加载主窗口内可能用到的页面，
+// 不预加载独立窗口页面（editor/rdp/vnc/batch-terminal/batch-transfer/settings/global-log），
+// 这些由 Tauri 独立窗口入口触发 lazy 加载。
+type PrefetchTask = () => Promise<unknown>;
+
+// 第一批：主窗口 tab 页（用户最可能切换到）
+const batch1: PrefetchTask[] = [
+  () => import('./pages/Workflow/WorkflowPage'),
+  () => import('./pages/GitHub/GitHubPage'),
+];
+
+// 第二批：主窗口内其他子页面
+const batch2: PrefetchTask[] = [
+  () => import('./pages/Commands/CommandsPage'),
+  () => import('./pages/CommandLib/CommandLibPage'),
+  () => import('./pages/ScriptLib/ScriptLibPage'),
+  () => import('./pages/QuickActions/QuickActionsPage'),
+];
+
+const prefetchBatches = [batch1, batch2];
+
+function runPrefetchBatch(batch: PrefetchTask[], delay: number) {
+  setTimeout(() => {
+    for (const task of batch) {
+      void task();
+    }
+  }, delay);
+}
 
 if (typeof window !== 'undefined') {
-  if (typeof window.requestIdleCallback === 'function') {
-    window.requestIdleCallback(prefetchPages);
-  } else {
-    setTimeout(prefetchPages, 1000);
-  }
+  // 每批间隔 2 秒，让首屏资源优先加载
+  prefetchBatches.forEach((batch, i) => {
+    runPrefetchBatch(batch, 3000 + i * 2000);
+  });
 }
 
 export default App;

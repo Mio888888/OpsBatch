@@ -13,6 +13,7 @@ import {
 } from '../../components/ui/icons';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
+import { compileDangerRules, checkDangerousCommand as checkDanger, type CompiledDangerRule } from '../../utils/dangerCommandCheck';
 import type { ColumnsType } from '../../components/ui';
 import { useLocation } from 'react-router-dom';
 import { useAssetsStore } from '../../stores/assets';
@@ -168,14 +169,14 @@ export default function CommandsPage() {
     }
   }, []);
 
-  const [dangerRules, setDangerRules] = useState<{ name: string; pattern: string }[]>([]);
+  const [compiledDangerRules, setCompiledDangerRules] = useState<CompiledDangerRule[]>([]);
 
   const loadDangerRules = async () => {
     try {
       const rules = await invoke<{ id: string; name: string; pattern: string; enabled: boolean; is_builtin: boolean }[]>('list_danger_rules');
-      setDangerRules(rules.filter((r) => r.enabled).map((r) => ({ name: r.name, pattern: r.pattern })));
+      setCompiledDangerRules(compileDangerRules(rules));
     } catch {
-      setDangerRules([]);
+      setCompiledDangerRules([]);
     }
   };
 
@@ -184,15 +185,7 @@ export default function CommandsPage() {
   }, []);
 
   const checkDangerousCommand = (cmd: string): string[] => {
-    const matched: string[] = [];
-    for (const rule of dangerRules) {
-      try {
-        if (new RegExp(rule.pattern).test(cmd)) {
-          matched.push(rule.name);
-        }
-      } catch { /* skip invalid regex */ }
-    }
-    return matched;
+    return checkDanger(compiledDangerRules, cmd);
   };
 
   const doExecute = async () => {

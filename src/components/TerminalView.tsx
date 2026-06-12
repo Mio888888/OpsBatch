@@ -11,6 +11,7 @@ import { createTerminalOutputPump, type TerminalOutputPump } from '../utils/term
 import { createTrackedCommand, createTrackedCommandOutputCleaner, stripTrackedCommandOutputArtifacts } from '../utils/terminalTracker';
 import { getCurrentTerminalAppearance, onThemeChange } from '../stores/theme';
 import { logHandledError } from '../utils/globalLogger';
+import { compileDangerRules, checkDangerousCommand, type CompiledDangerRule } from '../utils/dangerCommandCheck';
 
 export interface TerminalCommandExecutionOptions {
   timeoutMs?: number;
@@ -75,7 +76,7 @@ export default memo(function TerminalView({ sessionId, active = true, onTerminal
   const pendingExecutionsRef = useRef<Map<string, PendingTerminalExecution>>(new Map());
   const commandExecutionChainRef = useRef<Promise<void>>(Promise.resolve());
   const doneDetectorBufferRef = useRef('');
-  const dangerRulesRef = useRef<{ name: string; pattern: string }[]>([]);
+  const compiledDangerRulesRef = useRef<CompiledDangerRule[]>([]);
   const pendingDangerConfirmRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -330,14 +331,7 @@ export default memo(function TerminalView({ sessionId, active = true, onTerminal
 
         const cmd = writeQueueText || lineText;
         if (cmd) {
-          const matched: string[] = [];
-          for (const rule of dangerRulesRef.current) {
-            try {
-              if (new RegExp(rule.pattern).test(cmd)) {
-                matched.push(rule.name);
-              }
-            } catch { /* skip */ }
-          }
+          const matched = checkDangerousCommand(compiledDangerRulesRef.current, cmd);
           if (matched.length > 0) {
             pendingDangerConfirmRef.current = lineText;
             terminal.write(`\r\n\x1b[33m⚠ OpsBatch 危险命令拦截: ${matched.join(', ')}\x1b[0m\r\n\x1b[33m  再按一次 Enter 确认执行，或编辑命令取消\x1b[0m\r\n`);
@@ -414,7 +408,7 @@ export default memo(function TerminalView({ sessionId, active = true, onTerminal
 
     invoke<{ id: string; name: string; pattern: string; enabled: boolean; is_builtin: boolean }[]>('list_danger_rules')
       .then((rules) => {
-        dangerRulesRef.current = rules.filter((r) => r.enabled).map((r) => ({ name: r.name, pattern: r.pattern }));
+        compiledDangerRulesRef.current = compileDangerRules(rules);
       })
       .catch((error) => {
         void logHandledError('terminal.loadDangerRules', error, 'warn');

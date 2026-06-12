@@ -319,6 +319,13 @@ function isVncHost(host: Pick<Host, 'os' | 'rdpSettings'>) {
   return host.os === 'vnc' || isVncRemoteDesktopHost(host);
 }
 
+function getLinuxHostIds(selectedIds: string[], hosts: Host[]) {
+  const selectedIdSet = new Set(selectedIds);
+  return hosts
+    .filter((host) => selectedIdSet.has(host.id) && host.os === 'linux')
+    .map((host) => host.id);
+}
+
 function getGroupDropId(groupId: string) {
   return `${GROUP_DROP_ID_PREFIX}${groupId}`;
 }
@@ -1125,17 +1132,30 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     return [...keys];
   }, [autoExpandedKeys, assetExpandedKeys, userCollapsedKeys]);
 
+  const selectedLinuxHostIds = useMemo(
+    () => getLinuxHostIds(selectedHostIds, hosts),
+    [hosts, selectedHostIds],
+  );
+
   const openBatchTerminal = useCallback(async () => {
     if (selectedHostIds.length === 0) return;
+    if (selectedLinuxHostIds.length === 0) {
+      message.warning(tText('assets.selectLinuxHostsFirst'));
+      return;
+    }
     if (!(await requestKeychainNotice())) return;
-    await invoke('open_managed_window', { kind: 'batch-terminal', hostIds: selectedHostIds });
-  }, [requestKeychainNotice, selectedHostIds]);
+    await invoke('open_managed_window', { kind: 'batch-terminal', hostIds: selectedLinuxHostIds });
+  }, [requestKeychainNotice, selectedHostIds.length, selectedLinuxHostIds, tText]);
 
   const openBatchTransfer = useCallback(async () => {
     if (selectedHostIds.length === 0) return;
+    if (selectedLinuxHostIds.length === 0) {
+      message.warning(tText('assets.selectLinuxHostsFirst'));
+      return;
+    }
     if (!(await requestKeychainNotice())) return;
-    await invoke('open_managed_window', { kind: 'batch-transfer', hostIds: selectedHostIds });
-  }, [requestKeychainNotice, selectedHostIds]);
+    await invoke('open_managed_window', { kind: 'batch-transfer', hostIds: selectedLinuxHostIds });
+  }, [requestKeychainNotice, selectedHostIds.length, selectedLinuxHostIds, tText]);
 
   const openSettingsWindow = useCallback(async () => {
     await invoke('open_managed_window', { kind: 'settings' });

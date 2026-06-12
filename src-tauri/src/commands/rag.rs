@@ -1,9 +1,13 @@
 use crate::db::Database;
 use crate::security::clamp_rag_limit;
 use regex::Regex;
+use std::sync::LazyLock;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+
+static WORD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[a-zA-Z0-9]+").unwrap());
+static HEADING_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(#{1,6})\s+(.+)$").unwrap());
 
 // ---------------------------------------------------------------------------
 // CJK Bigram Tokenizer
@@ -18,10 +22,9 @@ fn tokenize(text: &str) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     let mut i = 0;
 
-    let word_re = Regex::new(r"[a-zA-Z0-9]+").unwrap();
 
     // Extract latin/digit words first
-    for mat in word_re.find_iter(text) {
+    for mat in WORD_RE.find_iter(text) {
         tokens.push(mat.as_str().to_lowercase());
     }
 
@@ -60,11 +63,10 @@ fn chunk_markdown(text: &str, collection_id: &str) -> Vec<DocumentChunk> {
     let mut current_content = String::new();
     let mut position = 0;
 
-    let heading_re = Regex::new(r"^(#{1,6})\s+(.+)$").unwrap();
     let chunk_size = 800;
 
     for line in text.lines() {
-        if let Some(caps) = heading_re.captures(line) {
+        if let Some(caps) = HEADING_RE.captures(line) {
             // Flush current chunk if large enough
             if current_content.len() >= chunk_size / 2 {
                 chunks.push(DocumentChunk {

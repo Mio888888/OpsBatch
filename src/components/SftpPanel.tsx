@@ -4,7 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { useSftpStore, type FileEntry } from '../stores/sftp';
 import PortForwardPanel from './PortForwardPanel';
 import { useTranslation } from '../i18n';
-import { FolderOpenOutlined } from './ui/icons';
+import { CloudServerOutlined, FolderOpenOutlined } from './ui/icons';
 import type { FC, ReactNode } from 'react';
 
 const SFTP_FILE_ROW_HEIGHT = 23;
@@ -805,21 +805,6 @@ export const SftpPanel: FC<SftpPanelProps> = ({ hostId, hideTabBar, forceTab }) 
     }
   }, [hostId, initSession, navigateRemote]);
 
-  useEffect(() => {
-    let cancelled = false;
-    setInitialized(false);
-    setInitError('');
-    initSession(hostId).then((home) => {
-      if (cancelled) return;
-      navigateRemote(hostId, home);
-      setInitialized(true);
-    }).catch((e: unknown) => {
-      if (cancelled) return;
-      setInitError(e instanceof Error ? e.message : String(e));
-    });
-    return () => { cancelled = true; };
-  }, [hostId, initSession, navigateRemote]);
-
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
     draggingSplit.current = true;
@@ -861,22 +846,87 @@ export const SftpPanel: FC<SftpPanelProps> = ({ hostId, hideTabBar, forceTab }) 
   ), [transfers]);
 
   if (!initialized) {
-    return <div className="sftp-panel sftp-panel-loading">
-      {initError ? (
-        <div className="sftp-error">
-          <div>{tText('sftp.initFailed', { error: initError })}</div>
-          <button className="sftp-btn" onClick={() => { void initializeSession(); }}>{tText('sftp.retry')}</button>
-        </div>
-      ) : (
-        <div className="sftp-skeleton">
-          <div className="sftp-skeleton-bar" style={{ width: '40%' }} />
-          <div className="sftp-skeleton-row">
-            <div className="sftp-skeleton-block" style={{ width: '48%', height: '120px' }} />
-            <div className="sftp-skeleton-block" style={{ width: '48%', height: '120px' }} />
+    return (
+      <div className="sftp-panel" ref={panelRef}>
+        {!hideTabBar && (
+          <div className="sftp-tab-bar">
+            <button
+              className={`sftp-tab-btn ${activeTab === 'sftp' ? 'sftp-tab-btn-active' : ''}`}
+              onClick={() => setActiveTab('sftp')}
+            >
+              SFTP
+            </button>
+            <button
+              className={`sftp-tab-btn ${activeTab === 'forward' ? 'sftp-tab-btn-active' : ''}`}
+              onClick={() => setActiveTab('forward')}
+            >
+              {tText('sftp.portForward')}
+            </button>
           </div>
-        </div>
-      )}
-    </div>;
+        )}
+        {activeTab === 'sftp' ? (
+          <div className="sftp-panes">
+            <div className="sftp-pane-local" style={{ width: '50%' }}>
+              <FilePane side="local" hostId={hostId} onContextMenu={handleContextMenu} />
+            </div>
+            <div className="sftp-splitter" />
+            <div className="sftp-pane-remote" style={{ width: '50%' }}>
+              <div className="sftp-pane">
+                <div className="sftp-pane-header">
+                  <span className="sftp-pane-label">{tText('sftp.remote')}</span>
+                  <div className="sftp-path-bar">
+                    <input
+                      className="sftp-path-input"
+                      value="/"
+                      readOnly
+                      disabled
+                      placeholder="/"
+                    />
+                    <button
+                      type="button"
+                      className="sftp-btn-icon sftp-local-dir-trigger"
+                      onClick={() => { void initializeSession(); }}
+                      title={tText('sftp.connectSftp')}
+                      aria-label={tText('sftp.connectSftp')}
+                    >
+                      <CloudServerOutlined />
+                    </button>
+                  </div>
+                </div>
+                <div className="sftp-file-list">
+                  {initError ? (
+                    <div className="sftp-empty">
+                      <div className="sftp-connect-error">{tText('sftp.initFailed', { error: initError })}</div>
+                      <button
+                        type="button"
+                        className="sftp-btn sftp-local-dir-empty-btn"
+                        onClick={() => { void initializeSession(); }}
+                      >
+                        <span className="sftp-local-dir-empty-icon"><CloudServerOutlined /></span>
+                        <span>{tText('sftp.retryConnect')}</span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="sftp-empty">
+                      <button
+                        type="button"
+                        className="sftp-btn sftp-local-dir-empty-btn"
+                        onClick={() => { void initializeSession(); }}
+                      >
+                        <span className="sftp-local-dir-empty-icon"><CloudServerOutlined /></span>
+                        <span>{tText('sftp.connectSftp')}</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <PortForwardPanel hostId={hostId} />
+        )}
+      </div>
+    );
   }
 
   return (

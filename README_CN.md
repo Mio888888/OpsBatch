@@ -2,7 +2,7 @@
 
 [简体中文](README_CN.md) | [English](README_EN.md)
 
-OpsBatch 是一个面向运维场景的本地桌面工作台，用于集中管理服务器资产、SSH 终端、RDP/VNC 远程桌面、批量命令、脚本库、文件传输、自动化工作流与运维知识同步。项目当前版本为 `0.1.2`，桌面端基于 Tauri v2、React 19、TypeScript/Vite 与 Rust 后端构建，核心数据持久化在本机 SQLite 数据库中。
+OpsBatch 是一个面向运维场景的本地桌面工作台，用于集中管理服务器资产、SSH 终端、RDP/VNC 远程桌面、批量命令、脚本库、文件传输、自动化工作流与运维知识同步。项目当前版本为 `0.1.3`，桌面端基于 Tauri v2、React 19、TypeScript/Vite 与 Rust 后端构建，核心数据持久化在本机 SQLite 数据库中。
 
 
 ## 产品定位

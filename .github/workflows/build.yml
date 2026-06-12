@@ -55,16 +55,30 @@ jobs:
       - name: Install frontend dependencies
         run: yarn install --frozen-lockfile
 
+      - name: Prepare updater config
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${TAURI_UPDATER_PUBKEY}"
+          sed -i.bak "s#__TAURI_UPDATER_PUBKEY__#${TAURI_UPDATER_PUBKEY}#g" src-tauri/tauri.updater.conf.json
+          rm src-tauri/tauri.updater.conf.json.bak
+        env:
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: v${{ needs.check-version.outputs.version }}
           releaseName: OpsBatch v${{ needs.check-version.outputs.version }}
           releaseBody: See the assets to download this version.
           releaseDraft: true
           prerelease: false
+          updaterJsonPreferNsis: true
+          args: --config src-tauri/tauri.updater.conf.json
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v5
@@ -93,6 +107,15 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Prepare updater config
+        run: |
+          set -euo pipefail
+          test -n "${TAURI_UPDATER_PUBKEY}"
+          sed -i.bak "s#__TAURI_UPDATER_PUBKEY__#${TAURI_UPDATER_PUBKEY}#g" src-tauri/tauri.updater.conf.json
+          rm src-tauri/tauri.updater.conf.json.bak
+        env:
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -105,6 +128,8 @@ jobs:
           releaseBody: See the assets to download this version.
           releaseDraft: true
           prerelease: false
+          updaterJsonPreferNsis: true
+          args: --config src-tauri/tauri.updater.conf.json
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v5
@@ -146,6 +171,15 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Prepare updater config
+        run: |
+          set -euo pipefail
+          test -n "${TAURI_UPDATER_PUBKEY}"
+          sed -i.bak "s#__TAURI_UPDATER_PUBKEY__#${TAURI_UPDATER_PUBKEY}#g" src-tauri/tauri.updater.conf.json
+          rm src-tauri/tauri.updater.conf.json.bak
+        env:
+          TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
@@ -158,6 +192,8 @@ jobs:
           releaseBody: See the assets to download this version.
           releaseDraft: true
           prerelease: false
+          updaterJsonPreferNsis: true
+          args: --config src-tauri/tauri.updater.conf.json
 
       - name: Upload Linux artifacts
         uses: actions/upload-artifact@v5

@@ -791,6 +791,7 @@
 }
 
 .tool-icon-button {
+  position: relative;
   width: 28px;
   height: 28px;
   display: inline-flex;
@@ -807,6 +808,218 @@
   background: var(--color-primary);
   border-color: var(--color-primary);
   box-shadow: 0 8px 18px color-mix(in srgb, var(--color-primary) 28%, transparent);
+}
+
+.update-icon-button-has-update {
+  color: #fff;
+  background: color-mix(in srgb, var(--color-primary) 92%, #1f2937);
+  border-color: var(--color-primary);
+  box-shadow: 0 8px 18px color-mix(in srgb, var(--color-primary) 28%, transparent);
+}
+
+.update-icon-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  background: #ff4d4f;
+  border: 1px solid var(--color-surface);
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #ff4d4f 18%, transparent);
+}
+
+.app-update-modal .ui-dialog-body {
+  padding-top: 4px;
+}
+
+.app-update-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.app-update-status {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  color: var(--color-text);
+  background: var(--color-settings-input-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.app-update-status-new {
+  background: color-mix(in srgb, var(--color-primary) 10%, var(--color-settings-input-bg));
+  border-color: color-mix(in srgb, var(--color-primary) 42%, var(--color-border));
+}
+
+.app-update-status-icon {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 22%, transparent);
+  border-radius: 8px;
+}
+
+.app-update-status-title {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-snug);
+}
+
+.app-update-status-desc {
+  margin-top: 3px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-snug);
+}
+
+.app-update-version-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.app-update-version-grid > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 11px 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.app-update-version-grid span,
+.app-update-notes-header {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+}
+
+.app-update-version-grid strong {
+  overflow: hidden;
+  color: var(--color-text);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-snug);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-update-download {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.app-update-download-ready {
+  background: color-mix(in srgb, var(--color-success) 10%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-success) 42%, var(--color-border));
+}
+
+.app-update-download-error {
+  background: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface));
+  border-color: color-mix(in srgb, var(--color-danger) 38%, var(--color-border));
+}
+
+.app-update-download-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-caption);
+  font-weight: var(--font-weight-semibold);
+  line-height: var(--line-height-tight);
+}
+
+.app-update-download-header strong {
+  color: var(--color-text);
+  font-size: var(--font-size-caption);
+  white-space: nowrap;
+}
+
+.app-update-progress {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--color-text) 10%, transparent);
+  border-radius: 999px;
+}
+
+.app-update-progress span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  min-width: 0;
+  background: linear-gradient(90deg, var(--color-primary), var(--color-success));
+  border-radius: inherit;
+  transition: width 0.18s ease;
+}
+
+.app-update-download-checking .app-update-progress span,
+.app-update-download-downloading .app-update-progress span,
+.app-update-download-installing .app-update-progress span {
+  min-width: 28px;
+}
+
+.app-update-download-error .app-update-progress span {
+  background: var(--color-danger);
+}
+
+.app-update-download-meta {
+  min-height: 18px;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-snug);
+  word-break: break-word;
+}
+
+.app-update-notes {
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+}
+
+.app-update-notes-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.app-update-notes-header small {
+  overflow: hidden;
+  font-size: var(--font-size-micro);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-update-notes pre {
+  max-height: 220px;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-relaxed);
+  white-space: pre-wrap;
 }
 
 .workbench-content {

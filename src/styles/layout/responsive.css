@@ -39,7 +39,7 @@
     padding: 0 12px;
   }
 
-  .tool-icon-button:nth-last-child(-n + 2) {
+  .workbench-tools .tool-icon-button {
     display: none;
   }
 

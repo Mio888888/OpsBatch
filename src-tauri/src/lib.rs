@@ -16,6 +16,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .on_page_load(|webview, payload| {
             let event = match payload.event() {
                 PageLoadEvent::Started => "started",
@@ -101,6 +103,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // App Log
             commands::app_log::ping_log,
+            commands::app_update::check_app_update,
             commands::app_log::get_log_history,
             commands::app_log::emit_frontend_log,
             commands::diagnostics::write_diagnostic_log,

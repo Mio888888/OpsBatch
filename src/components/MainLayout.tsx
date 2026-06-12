@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
+import { relaunch } from '@tauri-apps/plugin-process';
+import { check as checkTauriUpdate } from '@tauri-apps/plugin-updater';
+import type { DownloadEvent } from '@tauri-apps/plugin-updater';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import {
@@ -47,6 +50,7 @@ import {
   ReloadOutlined,
   SearchOutlined,
   SettingOutlined,
+  UpdateOutlined,
   UploadOutlined,
 } from './ui/icons';
 import type { Key, ReactNode } from 'react';
@@ -248,6 +252,38 @@ const GROUP_DROP_ID_PREFIX = 'asset-group:';
 const HOST_DRAG_ID_PREFIX = 'asset-host:';
 const SECRET_PLACEHOLDER = '***keychain***';
 
+interface AppUpdateInfo {
+  hasUpdate: boolean;
+  currentVersion: string;
+  latestVersion?: string | null;
+  releaseTitle?: string | null;
+  releaseNotes?: string | null;
+  publishedAt?: string | null;
+  releaseUrl: string;
+}
+
+type UpdateInstallPhase = 'idle' | 'checking' | 'downloading' | 'installing' | 'ready' | 'error';
+
+interface UpdateInstallState {
+  phase: UpdateInstallPhase;
+  downloaded: number;
+  total?: number;
+  error?: string;
+}
+
+function formatUpdateBytes(value?: number): string {
+  if (!value || value <= 0) return '-';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = value;
+  let unitIndex = 0;
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex += 1;
+  }
+  const precision = size >= 100 || unitIndex === 0 ? 0 : 1;
+  return `${size.toFixed(precision)} ${units[unitIndex]}`;
+}
+
 function editableSecret(value?: string): string | undefined {
   return value && value !== SECRET_PLACEHOLDER ? value : undefined;
 }
@@ -421,6 +457,8 @@ export default function MainLayout({ children }: { children: ReactNode }) {
   const assetPanelIntroPlayedRef = useRef(false);
   const previousActiveModeRef = useRef(getActiveMode(location.pathname));
   const previousPathnameRef = useRef(location.pathname);
+  const updateCheckInFlightRef = useRef(false);
+  const startupUpdateRequestedRef = useRef(false);
   const motionSettingsLoaded = useThemeStore((s) => s.loaded);
   const reduceMotionSetting = useThemeStore((s) => s.reduceMotion);
   const systemReduceMotion = useSystemReduceMotion();
@@ -443,6 +481,12 @@ export default function MainLayout({ children }: { children: ReactNode }) {
   const [hostModalTab, setHostModalTab] = useState('basic');
   const [editingHost, setEditingHost] = useState<Host | null>(null);
   const [cloudImportOpen, setCloudImportOpen] = useState(false);
+  const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
+  const [updateModalOpen, setUpdateModalOpen] = useState(false);
+  const [updateInstallState, setUpdateInstallState] = useState<UpdateInstallState>({
+    phase: 'idle',
+    downloaded: 0,
+  });
   const [hostForm] = Form.useForm<HostFormValues>();
 
   // Group context menu & modal
@@ -1101,6 +1145,127 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     await invoke('open_managed_window', { kind: 'global-log' });
   }, []);
 
+  const checkForUpdates = useCallback(async (silent = false) => {
+    if (updateCheckInFlightRef.current) return null;
+    updateCheckInFlightRef.current = true;
+    try {
+      const nextInfo = await invoke<AppUpdateInfo>('check_app_update');
+      setUpdateInfo(nextInfo);
+      if (!silent) {
+        if (nextInfo.hasUpdate) {
+          message.success(tText('appUpdate.available', { version: nextInfo.latestVersion ?? '' }));
+        } else {
+          message.success(tText('appUpdate.upToDate', { version: nextInfo.currentVersion }));
+        }
+      }
+      return nextInfo;
+    } catch (error) {
+      if (!silent) message.error(tText('appUpdate.checkFailed', { error: String(error) }));
+      return null;
+    } finally {
+      updateCheckInFlightRef.current = false;
+    }
+  }, [tText]);
+
+  useEffect(() => {
+    if (startupUpdateRequestedRef.current) return;
+    startupUpdateRequestedRef.current = true;
+    void checkForUpdates(true);
+  }, [checkForUpdates]);
+
+  const handleUpdateClick = useCallback(async () => {
+    setUpdateModalOpen(true);
+    if (!updateInfo) void checkForUpdates(false);
+  }, [checkForUpdates, updateInfo]);
+
+  const resetUpdateInstall = useCallback(() => {
+    setUpdateInstallState({ phase: 'idle', downloaded: 0 });
+  }, []);
+
+  const downloadAndInstallUpdate = useCallback(async () => {
+    setUpdateInstallState({ phase: 'checking', downloaded: 0 });
+    try {
+      const tauriUpdate = await checkTauriUpdate();
+      if (!tauriUpdate) {
+        setUpdateInstallState({ phase: 'idle', downloaded: 0 });
+        const latestInfo = await checkForUpdates(true);
+        message.info(tText('appUpdate.noInstallableUpdate', { version: latestInfo?.currentVersion ?? updateInfo?.currentVersion ?? '' }));
+        return;
+      }
+
+      let downloaded = 0;
+      await tauriUpdate.downloadAndInstall((event: DownloadEvent) => {
+        if (event.event === 'Started') {
+          downloaded = 0;
+          setUpdateInstallState({
+            phase: 'downloading',
+            downloaded: 0,
+            total: event.data.contentLength,
+          });
+          return;
+        }
+        if (event.event === 'Progress') {
+          downloaded += event.data.chunkLength;
+          setUpdateInstallState((current) => ({
+            ...current,
+            phase: 'downloading',
+            downloaded,
+          }));
+          return;
+        }
+        setUpdateInstallState((current) => ({
+          ...current,
+          phase: 'installing',
+          downloaded,
+        }));
+      });
+      setUpdateInstallState((current) => ({
+        ...current,
+        phase: 'ready',
+        downloaded: current.total ?? current.downloaded,
+      }));
+      message.success(tText('appUpdate.installReady'));
+    } catch (error) {
+      setUpdateInstallState((current) => ({
+        ...current,
+        phase: 'error',
+        error: String(error),
+      }));
+      message.error(tText('appUpdate.installFailed', { error: String(error) }));
+    }
+  }, [checkForUpdates, tText, updateInfo?.currentVersion]);
+
+  const restartForUpdate = useCallback(async () => {
+    try {
+      await relaunch();
+    } catch (error) {
+      message.error(tText('appUpdate.restartFailed', { error: String(error) }));
+    }
+  }, [tText]);
+
+  const updateBusy = updateInstallState.phase === 'checking'
+    || updateInstallState.phase === 'downloading'
+    || updateInstallState.phase === 'installing';
+  const updatePercent = updateInstallState.total
+    ? Math.min(100, Math.round((updateInstallState.downloaded / updateInstallState.total) * 100))
+    : 0;
+  const updateProgressLabel = updateInstallState.total
+    ? `${formatUpdateBytes(updateInstallState.downloaded)} / ${formatUpdateBytes(updateInstallState.total)}`
+    : formatUpdateBytes(updateInstallState.downloaded);
+  const updateActionLabel = updateInstallState.phase === 'ready'
+    ? t('appUpdate.restartNow')
+    : updateInstallState.phase === 'checking'
+      ? t('appUpdate.prepareDownload')
+      : updateInstallState.phase === 'installing'
+        ? t('appUpdate.installing')
+        : updateInstallState.phase === 'downloading'
+          ? t('appUpdate.downloading')
+          : updateInstallState.phase === 'error'
+            ? t('common.retry')
+            : t('appUpdate.downloadAndInstall');
+  const updateActionDisabled = updateBusy || !updateInfo?.hasUpdate;
+  const updateAction = updateInstallState.phase === 'ready' ? restartForUpdate : downloadAndInstallUpdate;
+
   useGSAP(() => {
     const root = layoutRef.current;
     if (!root) return;
@@ -1272,8 +1437,134 @@ export default function MainLayout({ children }: { children: ReactNode }) {
               <SettingOutlined />
             </button>
           </Tooltip>
+          <Tooltip
+            title={updateInfo?.hasUpdate
+              ? t('appUpdate.availableTooltip', { version: updateInfo.latestVersion ?? '' })
+              : t('appUpdate.check')}
+          >
+            <button
+              type="button"
+              className={`tool-icon-button update-icon-button${updateInfo?.hasUpdate ? ' update-icon-button-has-update' : ''}`}
+              onClick={handleUpdateClick}
+              aria-label={tText(updateInfo?.hasUpdate ? 'appUpdate.availableAria' : 'appUpdate.check')}
+            >
+              <UpdateOutlined />
+              {updateInfo?.hasUpdate && <span className="update-icon-dot" aria-hidden="true" />}
+            </button>
+          </Tooltip>
         </div>
       </header>
+
+      <Modal
+        className="app-update-modal"
+        title={t('appUpdate.modalTitle')}
+        open={updateModalOpen}
+        onCancel={() => {
+          if (!updateBusy) setUpdateModalOpen(false);
+        }}
+        width={560}
+        footer={
+          <>
+            <Button
+              onClick={() => setUpdateModalOpen(false)}
+              disabled={updateBusy}
+            >
+              {t('common.close')}
+            </Button>
+            {updateInstallState.phase === 'error' ? (
+              <Button onClick={resetUpdateInstall}>{t('common.cancel')}</Button>
+            ) : null}
+            <Button
+              type="primary"
+              loading={updateBusy}
+              disabled={updateActionDisabled}
+              onClick={() => {
+                void updateAction();
+              }}
+            >
+              {updateActionLabel}
+            </Button>
+          </>
+        }
+      >
+        <div className="app-update-panel">
+          <div className={`app-update-status${updateInfo?.hasUpdate ? ' app-update-status-new' : ''}`}>
+            <span className="app-update-status-icon"><UpdateOutlined /></span>
+            <div>
+              <div className="app-update-status-title">
+                {updateInfo
+                  ? updateInfo.hasUpdate
+                    ? t('appUpdate.available', { version: updateInfo.latestVersion ?? '' })
+                    : t('appUpdate.upToDate', { version: updateInfo.currentVersion })
+                  : t('appUpdate.checking')}
+              </div>
+              <div className="app-update-status-desc">
+                {updateInfo
+                  ? updateInfo.hasUpdate
+                    ? t('appUpdate.availableDesc')
+                    : t('appUpdate.upToDateDesc')
+                  : t('appUpdate.checkingDesc')}
+              </div>
+            </div>
+          </div>
+
+          <div className="app-update-version-grid">
+            <div>
+              <span>{t('appUpdate.currentVersion')}</span>
+              <strong>{updateInfo?.currentVersion ?? '-'}</strong>
+            </div>
+            <div>
+              <span>{t('appUpdate.latestVersion')}</span>
+              <strong>{updateInfo?.latestVersion ?? '-'}</strong>
+            </div>
+          </div>
+
+          {updateInfo?.hasUpdate ? (
+            <div className={`app-update-download app-update-download-${updateInstallState.phase}`}>
+              <div className="app-update-download-header">
+                <span>
+                  {updateInstallState.phase === 'ready'
+                    ? t('appUpdate.readyToRestart')
+                    : updateInstallState.phase === 'installing'
+                      ? t('appUpdate.installing')
+                      : updateInstallState.phase === 'checking'
+                        ? t('appUpdate.prepareDownload')
+                        : updateInstallState.phase === 'error'
+                          ? t('appUpdate.downloadError')
+                          : t('appUpdate.downloadProgress')}
+                </span>
+                <strong>{updateInstallState.total ? `${updatePercent}%` : updateProgressLabel}</strong>
+              </div>
+              <div
+                className="app-update-progress"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={updateInstallState.total ? updatePercent : undefined}
+              >
+                <span style={{ width: updateInstallState.total ? `${updatePercent}%` : updateBusy ? '42%' : updateInstallState.phase === 'ready' ? '100%' : '0%' }} />
+              </div>
+              <div className="app-update-download-meta">
+                {updateInstallState.phase === 'ready'
+                  ? t('appUpdate.readyDesc')
+                  : updateInstallState.phase === 'error'
+                    ? updateInstallState.error || t('appUpdate.downloadError')
+                    : updateInstallState.phase === 'idle'
+                      ? t('appUpdate.inAppInstallDesc')
+                      : updateProgressLabel}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="app-update-notes">
+            <div className="app-update-notes-header">
+              <span>{updateInfo?.releaseTitle || t('appUpdate.releaseNotes')}</span>
+              {updateInfo?.publishedAt && <small>{updateInfo.publishedAt}</small>}
+            </div>
+            <pre>{updateInfo?.releaseNotes?.trim() || tText('appUpdate.noReleaseNotes')}</pre>
+          </div>
+        </div>
+      </Modal>
 
       <div className="workbench-body">
         {assetPanelVisible && (

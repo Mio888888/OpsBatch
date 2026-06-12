@@ -8,6 +8,7 @@ import {
   Clock,
   Code,
   Copy,
+  CircleFadingArrowUp,
   Database,
   Download,
   Edit,
@@ -78,5 +79,6 @@ export const StopOutlined = icon(Minus);
 export const SyncOutlined = icon(RefreshCw);
 export const ThunderboltOutlined = icon(Zap);
 export const UploadOutlined = icon(Upload);
+export const UpdateOutlined = icon(CircleFadingArrowUp);
 export const WarningOutlined = icon(AlertTriangle);
 export const CloudServerFilled = icon(Server);

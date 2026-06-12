@@ -1,7 +1,9 @@
 use rusqlite::params;
 use serde::Deserialize;
 use std::collections::HashMap;
-use tauri::{AppHandle, Emitter};
+use std::fs;
+use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::Database;
 use crate::security::shell_quote;
@@ -18,14 +20,16 @@ pub struct TransferRequest {
 }
 
 fn resolve_firstdir(
+    pool: &ssh::SshConnectionRegistry,
+    host_id: &str,
     config: &ssh::SshConfig,
     parent_path: &str,
     timeout_secs: u64,
 ) -> Result<String, String> {
     let quoted_parent = shell_quote(parent_path)?;
     let cmd = format!("ls -1d {}/ 2>/dev/null | head -1", quoted_parent);
-    let result = ssh::execute_command(config, &cmd, timeout_secs)?;
-    let name = result.output.trim().trim_end_matches('/');
+    let output = pool.execute(host_id, config, &cmd, timeout_secs)?;
+    let name = output.trim().trim_end_matches('/');
     let name = name.split('/').last().unwrap_or("");
     if name.is_empty() {
         Err(format!("no directories found under {}", parent_path))
@@ -35,6 +39,8 @@ fn resolve_firstdir(
 }
 
 fn resolve_remote_path_template(
+    pool: &ssh::SshConnectionRegistry,
+    host_id: &str,
     path_template: &str,
     host_name: &str,
     config: &ssh::SshConfig,
@@ -50,13 +56,93 @@ fn resolve_remote_path_template(
     for cap in re.captures_iter(path_template) {
         let full_match = cap.get(0).unwrap().as_str();
         let parent = cap.get(1).unwrap().as_str();
-        match resolve_firstdir(config, parent, timeout_secs) {
+        match resolve_firstdir(pool, host_id, config, parent, timeout_secs) {
             Ok(dir_name) => result = result.replace(full_match, &dir_name),
             Err(e) => return Err(e),
         }
     }
 
     Ok(result)
+}
+
+fn upload_file_via_pool(
+    pool: &ssh::SshConnectionRegistry,
+    host_id: &str,
+    config: &ssh::SshConfig,
+    local_path: &str,
+    remote_path: &str,
+    timeout_secs: u64,
+) -> Result<ssh::TransferResult, String> {
+    let start = std::time::Instant::now();
+
+    let local = Path::new(local_path);
+    if !local.exists() {
+        return Err(format!("local file not found: {}", local_path));
+    }
+
+    let file_size = local.metadata().map(|m| m.len()).unwrap_or(0);
+    let data = fs::read(local).map_err(|e| format!("read local file failed: {}", e))?;
+
+    let sftp_session = pool.open_sftp_session(host_id, config, timeout_secs)?;
+    sftp_session.lease.block_on(async move {
+        sftp_session.sftp.write(remote_path, &data)
+            .await
+            .map_err(|e| format!("write failed: {}", e))?;
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+
+        Ok(ssh::TransferResult {
+            host: config.host.clone(),
+            success: true,
+            error: None,
+            file_size,
+            duration_ms,
+        })
+    })
+}
+
+fn download_file_via_pool(
+    pool: &ssh::SshConnectionRegistry,
+    host_id: &str,
+    config: &ssh::SshConfig,
+    remote_path: &str,
+    local_dir: &str,
+    timeout_secs: u64,
+) -> Result<ssh::TransferResult, String> {
+    let start = std::time::Instant::now();
+
+    let sftp_session = pool.open_sftp_session(host_id, config, timeout_secs)?;
+    sftp_session.lease.block_on(async {
+        let metadata = sftp_session.sftp
+            .metadata(remote_path)
+            .await
+            .map_err(|e| format!("stat remote file failed: {}", e))?;
+        let file_size = metadata.len();
+
+        let data = sftp_session.sftp
+            .read(remote_path)
+            .await
+            .map_err(|e| format!("read failed: {}", e))?;
+
+        let dir = PathBuf::from(local_dir);
+        fs::create_dir_all(&dir).ok();
+        let file_name = Path::new(remote_path)
+            .file_name()
+            .unwrap_or(std::ffi::OsStr::new("downloaded"));
+        let local_file_path = dir.join(file_name);
+        fs::write(&local_file_path, &data)
+            .map_err(|e| format!("write local file failed: {}", e))?;
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+
+        Ok(ssh::TransferResult {
+            host: config.host.clone(),
+            success: true,
+            error: None,
+            file_size,
+            duration_ms,
+        })
+    })
 }
 
 #[tauri::command]
@@ -105,11 +191,13 @@ pub fn file_transfer(
     let timeout = request.timeout.unwrap_or(60);
 
     std::thread::spawn(move || {
+        let pool = app.state::<ssh::SshConnectionRegistry>();
+
         for (hid, host_name, config) in configs {
             let resolved_remote = match remote_paths.as_ref().and_then(|m| m.get(&hid)) {
                 Some(p) => p.clone(),
                 None => {
-                    match resolve_remote_path_template(&remote_path, &host_name, &config, timeout) {
+                    match resolve_remote_path_template(&pool, &hid, &remote_path, &host_name, &config, timeout) {
                         Ok(p) => p,
                         Err(e) => {
                             let record = serde_json::json!({
@@ -129,10 +217,10 @@ pub fn file_transfer(
             };
 
             let result = if direction == "upload" {
-                ssh::upload_file(&config, &local_path, &resolved_remote, timeout)
+                upload_file_via_pool(&pool, &hid, &config, &local_path, &resolved_remote, timeout)
             } else {
                 let local_dir = format!("{}/{}", local_path, host_name);
-                ssh::download_file(&config, &resolved_remote, &local_dir, timeout)
+                download_file_via_pool(&pool, &hid, &config, &resolved_remote, &local_dir, timeout)
             };
 
             let (success, file_size, duration, error) = match result {

@@ -9,17 +9,16 @@ use russh::{
 };
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
-use std::fs;
 use std::future::Future;
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
-use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::Manager;
 use tokio::runtime::Runtime;
 
 use host_key::HostKeyVerifier;
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SshConfig {
@@ -365,36 +364,7 @@ impl client::Handler for ClientHandler {
     }
 }
 
-pub struct SshConnection {
-    handle: client::Handle<ClientHandler>,
-    pub(crate) runtime: Runtime,
-}
 
-impl SshConnection {
-    pub async fn open_channel_split_async(
-        &self,
-    ) -> Result<(ChannelReadHalf, ChannelWriteHalf<client::Msg>), String> {
-        let channel = self
-            .handle
-            .channel_open_session()
-            .await
-            .map_err(|e| format!("channel failed: {}", e))?;
-
-        Ok(channel.split())
-    }
-
-    pub async fn open_channel_async(&self) -> Result<Channel<client::Msg>, String> {
-        self.handle
-            .channel_open_session()
-            .await
-            .map_err(|e| format!("channel failed: {}", e))
-    }
-
-    #[allow(dead_code)]
-    pub fn into_shared(self) -> SharedSshConnection {
-        SharedSshConnection::from_connection(self)
-    }
-}
 
 struct SharedSshConnectionInner {
     runtime: Arc<Runtime>,
@@ -433,16 +403,6 @@ impl SharedSshConnection {
             inner: Arc::new(SharedSshConnectionInner {
                 runtime,
                 handle: tokio::sync::Mutex::new(handle),
-            }),
-        }
-    }
-
-    #[allow(dead_code)]
-    fn from_connection(conn: SshConnection) -> Self {
-        Self {
-            inner: Arc::new(SharedSshConnectionInner {
-                runtime: Arc::new(conn.runtime),
-                handle: tokio::sync::Mutex::new(conn.handle),
             }),
         }
     }
@@ -525,84 +485,6 @@ impl SharedSshConnection {
             .map_err(|e| format!("sftp init: {}", e))?;
         Ok(sftp)
     }
-}
-
-pub fn connect_internal(config: &SshConfig, timeout_secs: u64) -> Result<SshConnection, String> {
-    connect_internal_with_host_id(
-        &format!("{}:{}", config.host, config.port),
-        config,
-        timeout_secs,
-    )
-}
-
-fn connect_internal_with_host_id(
-    host_id: &str,
-    config: &SshConfig,
-    timeout_secs: u64,
-) -> Result<SshConnection, String> {
-    let runtime = Runtime::new().map_err(|e| format!("runtime init failed: {}", e))?;
-
-    let config_clone = config.clone();
-
-    let tcp = connect_tcp_for_ssh(&config_clone, timeout_secs)?;
-    tcp.set_nonblocking(true)
-        .map_err(|e| format!("设置非阻塞失败: {}", e))?;
-
-    let config_clone = config.clone();
-    let verifier_id = host_id.to_string();
-
-    let handle = runtime.block_on(async move {
-        let tcp = tokio::net::TcpStream::from_std(tcp)
-            .map_err(|e| format!("TcpStream转换失败: {}", e))?;
-
-        let ssh_config = build_ssh_client_config();
-
-        let handler = ClientHandler::new(verifier_id);
-
-        let mut handle = client::connect_stream(Arc::new(ssh_config), tcp, handler)
-            .await
-            .map_err(|e| format!("SSH握手失败: {}", e))?;
-
-        let auth_result = match config_clone.auth_type.as_str() {
-            "password" => handle
-                .authenticate_password(
-                    &config_clone.username,
-                    config_clone.password.as_deref().unwrap_or(""),
-                )
-                .await
-                .map_err(|e| format!("认证失败: {}", e))?,
-            "key" => {
-                let key_data = config_clone.private_key.as_deref().unwrap_or("");
-                if key_data.is_empty() {
-                    return Err("私钥内容为空".to_string());
-                }
-                let key_pair = russh::keys::decode_secret_key(key_data, None)
-                    .map_err(|e| format!("私钥解析失败: {}", e))?;
-                let hash_alg = handle
-                    .best_supported_rsa_hash()
-                    .await
-                    .map_err(|e| format!("hash alg error: {}", e))?;
-                let key_with_alg =
-                    russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key_pair), hash_alg.flatten());
-                handle
-                    .authenticate_publickey(&config_clone.username, key_with_alg)
-                    .await
-                    .map_err(|e| format!("密钥认证失败: {}", e))?
-            }
-            _ => return Err(format!("不支持的认证类型: {}", config_clone.auth_type)),
-        };
-
-        match auth_result {
-            russh::client::AuthResult::Success => {}
-            russh::client::AuthResult::Failure { .. } => {
-                return Err("认证被拒绝".to_string());
-            }
-        }
-
-        Ok(handle)
-    })?;
-
-    Ok(SshConnection { handle, runtime })
 }
 
 /// Connect and authenticate on a shared runtime, returning only the client handle.
@@ -755,101 +637,7 @@ fn connect_via_jump_handle_on_runtime(
     Ok(current_handle)
 }
 
-/// Connect to a target host through a chain of jump hosts using recursive direct-tcpip channels.
-///
-/// Connection flow: Client → Jump1 → Jump2 → … → Target
-/// Each jump opens a `direct-tcpip` channel on the previous host's SSH session,
-/// then converts it to a stream via `channel.into_stream()` for the next SSH handshake.
-#[allow(dead_code)]
-pub fn connect_via_jump_chain(
-    target_config: &SshConfig,
-    jump_configs: &[SshConfig],
-    timeout_secs: u64,
-) -> Result<SshConnection, String> {
-    if jump_configs.is_empty() {
-        return connect_internal(target_config, timeout_secs);
-    }
 
-    let runtime = Runtime::new().map_err(|e| format!("runtime init failed: {}", e))?;
-
-    // Step 1: Direct TCP connect to first jump host
-    let first_config = &jump_configs[0];
-    let tcp = connect_tcp_for_ssh(first_config, timeout_secs)
-        .map_err(|e| format!("跳板机 {} 连接失败: {}", first_config.host, e))?;
-    tcp.set_nonblocking(true)
-        .map_err(|e| format!("设置非阻塞失败: {}", e))?;
-
-    // Step 2: SSH handshake + auth on first jump
-    let first_config_clone = first_config.clone();
-    let mut current_handle = runtime.block_on(async move {
-        let tcp = tokio::net::TcpStream::from_std(tcp)
-            .map_err(|e| format!("TcpStream转换失败: {}", e))?;
-        let ssh_config = build_ssh_client_config();
-        let mut handle = client::connect_stream(
-            Arc::new(ssh_config),
-            tcp,
-            ClientHandler::new(format!(
-                "{}:{}",
-                first_config_clone.host, first_config_clone.port
-            )),
-        )
-        .await
-        .map_err(|e| format!("跳板机 {} SSH握手失败: {}", first_config_clone.host, e))?;
-        authenticate_handle(&mut handle, &first_config_clone).await?;
-        Ok::<_, String>(handle)
-    })?;
-
-    // Step 3: For each subsequent hop, open direct-tcpip channel → SSH handshake on that stream
-    let hops: Vec<&SshConfig> = jump_configs[1..]
-        .iter()
-        .chain(std::iter::once(target_config))
-        .collect();
-
-    for (i, hop_config) in hops.iter().enumerate() {
-        let is_target = i == hops.len() - 1;
-        let label = if is_target {
-            "目标主机"
-        } else {
-            "跳板机"
-        };
-        let hop = (*hop_config).clone();
-
-        current_handle = runtime.block_on(async move {
-            // Open a direct-tcpip channel to the next hop
-            let channel = current_handle
-                .channel_open_direct_tcpip(&hop.host, hop.port as u32, "127.0.0.1", 0)
-                .await
-                .map_err(|e| {
-                    format!(
-                        "{} {}:{} direct-tcpip 通道打开失败: {}",
-                        label, hop.host, hop.port, e
-                    )
-                })?;
-
-            // Convert channel to a stream (implements AsyncRead + AsyncWrite)
-            let stream = channel.into_stream();
-
-            // Perform SSH handshake on the tunneled stream
-            let ssh_config = build_ssh_client_config();
-            let mut handle = client::connect_stream(
-                Arc::new(ssh_config),
-                stream,
-                ClientHandler::new(format!("{}:{}", hop.host, hop.port)),
-            )
-            .await
-            .map_err(|e| format!("{} {}:{} SSH握手失败: {}", label, hop.host, hop.port, e))?;
-
-            authenticate_handle(&mut handle, &hop).await?;
-
-            Ok::<_, String>(handle)
-        })?;
-    }
-
-    Ok(SshConnection {
-        handle: current_handle,
-        runtime,
-    })
-}
 
 /// Authenticate an SSH handle using the given config.
 async fn authenticate_handle(
@@ -886,21 +674,6 @@ async fn authenticate_handle(
         russh::client::AuthResult::Success => Ok(()),
         russh::client::AuthResult::Failure { .. } => Err("认证被拒绝".to_string()),
     }
-}
-
-pub async fn execute_command_on_connection(
-    conn: &SshConnection,
-    command: &str,
-    start: std::time::Instant,
-) -> Result<ExecResult, String> {
-    let (mut read_half, write_half) = conn.open_channel_split_async().await?;
-
-    write_half
-        .exec(true, command)
-        .await
-        .map_err(|e| format!("exec failed: {}", e))?;
-
-    read_command_output(&mut read_half, &write_half, start).await
 }
 
 pub async fn execute_command_on_shared_connection(
@@ -957,115 +730,7 @@ async fn read_command_output(
     })
 }
 
-pub fn execute_command(
-    config: &SshConfig,
-    command: &str,
-    timeout_secs: u64,
-) -> Result<ExecResult, String> {
-    let start = std::time::Instant::now();
-    let conn = connect_internal(config, timeout_secs)?;
 
-    conn.runtime
-        .block_on(execute_command_on_connection(&conn, command, start))
-}
-
-pub fn upload_file(
-    config: &SshConfig,
-    local_path: &str,
-    remote_path: &str,
-    timeout_secs: u64,
-) -> Result<TransferResult, String> {
-    let start = std::time::Instant::now();
-
-    let local = Path::new(local_path);
-    if !local.exists() {
-        return Err(format!("local file not found: {}", local_path));
-    }
-
-    let file_size = local.metadata().map(|m| m.len()).unwrap_or(0);
-    let data = fs::read(local).map_err(|e| format!("read local file failed: {}", e))?;
-
-    let conn = connect_internal(config, timeout_secs)?;
-
-    conn.runtime.block_on(async {
-        let channel = conn.open_channel_async().await?;
-        channel
-            .request_subsystem(false, "sftp")
-            .await
-            .map_err(|e| format!("SFTP subsystem request failed: {}", e))?;
-
-        let sftp = russh_sftp::client::SftpSession::new(channel.into_stream())
-            .await
-            .map_err(|e| format!("SFTP session init failed: {}", e))?;
-
-        sftp.write(remote_path, &data)
-            .await
-            .map_err(|e| format!("write failed: {}", e))?;
-
-        let duration_ms = start.elapsed().as_millis() as u64;
-
-        Ok(TransferResult {
-            host: config.host.clone(),
-            success: true,
-            error: None,
-            file_size,
-            duration_ms,
-        })
-    })
-}
-
-pub fn download_file(
-    config: &SshConfig,
-    remote_path: &str,
-    local_dir: &str,
-    timeout_secs: u64,
-) -> Result<TransferResult, String> {
-    let start = std::time::Instant::now();
-
-    let conn = connect_internal(config, timeout_secs)?;
-
-    conn.runtime.block_on(async {
-        let channel = conn.open_channel_async().await?;
-        channel
-            .request_subsystem(false, "sftp")
-            .await
-            .map_err(|e| format!("SFTP subsystem request failed: {}", e))?;
-
-        let sftp = russh_sftp::client::SftpSession::new(channel.into_stream())
-            .await
-            .map_err(|e| format!("SFTP session init failed: {}", e))?;
-
-        let metadata = sftp
-            .metadata(remote_path)
-            .await
-            .map_err(|e| format!("stat remote file failed: {}", e))?;
-        let file_size = metadata.len();
-
-        let data = sftp
-            .read(remote_path)
-            .await
-            .map_err(|e| format!("read failed: {}", e))?;
-
-        let dir = PathBuf::from(local_dir);
-        fs::create_dir_all(&dir).ok();
-        let file_name = Path::new(remote_path)
-            .file_name()
-            .unwrap_or(std::ffi::OsStr::new("downloaded"));
-        let local_file_path = dir.join(file_name);
-        fs::write(&local_file_path, &data)
-            .map_err(|e| format!("write local file failed: {}", e))?;
-
-        let duration_ms = start.elapsed().as_millis() as u64;
-
-        Ok(TransferResult {
-            host: config.host.clone(),
-            success: true,
-            error: None,
-            file_size,
-            duration_ms,
-        })
-    })
-}
 
 pub struct PooledSftpSession {
     pub sftp: russh_sftp::client::SftpSession,

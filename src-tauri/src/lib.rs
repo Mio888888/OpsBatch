@@ -59,7 +59,7 @@ pub fn run() {
             app.manage(commands::forward::ForwardManager::new());
             app.manage(commands::rdp::RdpManager::new());
             app.manage(commands::rdp::RdpWebRtcManager::new());
-            app.manage(commands::vnc::VncManager::default());
+            app.manage(commands::vnc::VncSessionManager::new());
             app.manage(Arc::new(commands::mcp::McpManager::new()));
             let registry = ssh::SshConnectionRegistry::new();
             app.manage(registry);
@@ -242,6 +242,13 @@ pub fn run() {
             commands::vnc::vnc_connect,
             commands::vnc::vnc_send_input,
             commands::vnc::vnc_disconnect,
+            commands::vnc::start_vnc_session,
+            commands::vnc::send_vnc_pointer_event,
+            commands::vnc::send_vnc_key_event,
+            commands::vnc::refresh_vnc_session,
+            commands::vnc::close_vnc_session,
+            commands::vnc::get_vnc_session_status,
+            commands::vnc::send_vnc_ctrl_alt_delete,
             // Terminal
             commands::terminal::terminal_connect,
             commands::terminal::terminal_connect_local,

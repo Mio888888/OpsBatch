@@ -8,6 +8,7 @@ export interface RdpSettings {
   mapDisk?: boolean;
   diskPath?: string;
   vncPort?: number;
+  vncUsername?: string;
   vncPassword?: string;
   vncViewOnly?: boolean;
   vncShared?: boolean;

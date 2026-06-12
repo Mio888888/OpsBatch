@@ -229,6 +229,7 @@ interface HostFormValues {
   rdpMapDisk?: boolean;
   rdpDiskPath?: string;
   vncPort?: number;
+  vncUsername?: string;
   vncPassword?: string;
   vncViewOnly?: boolean;
   vncShared?: boolean;
@@ -662,6 +663,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       rdpMapDisk: false,
       rdpDiskPath: '',
       vncPort: DEFAULT_VNC_PORT,
+      vncUsername: '',
       vncPassword: '',
       vncViewOnly: false,
       vncShared: true,
@@ -706,6 +708,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       rdpMapDisk: host.rdpSettings?.mapDisk ?? false,
       rdpDiskPath: host.rdpSettings?.diskPath ?? '',
       vncPort: host.rdpSettings?.vncPort ?? DEFAULT_VNC_PORT,
+      vncUsername: host.rdpSettings?.vncUsername ?? '',
       vncPassword: host.rdpSettings?.vncPassword ?? '',
       vncViewOnly: host.rdpSettings?.vncViewOnly ?? false,
       vncShared: host.rdpSettings?.vncShared ?? true,
@@ -1633,6 +1636,9 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                           <div className="asset-host-form-grid asset-host-form-grid-rdp">
                             <Form.Item name="vncPort" label={t('assets.vncPort')}>
                               <InputNumber min={1} max={65535} />
+                            </Form.Item>
+                            <Form.Item name="vncUsername" label={t('assets.vncUsername')}>
+                              <Input placeholder={tText('assets.vncUsernamePlaceholder')} />
                             </Form.Item>
                             <Form.Item name="vncPassword" label={t('assets.vncPassword')}>
                               <Input.Password placeholder={tText('assets.vncPasswordPlaceholder')} />

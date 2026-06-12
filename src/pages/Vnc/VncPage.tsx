@@ -1,54 +1,276 @@
+/* @refresh reset */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import RFB from '@novnc/novnc';
 import { Button, Empty } from '../../components/ui';
 import { CloseOutlined, ReloadOutlined } from '../../components/ui/icons';
 import WindowControls from '../../components/WindowControls';
 import { useAssetsStore } from '../../stores/assets';
 import { useTranslation } from '../../i18n';
+import {
+  createVncSessionId,
+  type VncConnectionState,
+  type VncSessionStatus,
+  vncDefaultResolution,
+  vncPresentationSize,
+  vncResolutionLimit,
+} from './vncProtocol';
 
-interface VncStatusPayload {
-  session_id: string;
-  state: 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error' | string;
-  message: string;
+interface VncConnectResponse {
+  sessionId: string;
+  hostId: string;
+  websocketUrl: string;
+  username?: string | null;
+  password?: string | null;
+  shared: boolean;
+  viewOnly: boolean;
 }
 
-type VncFramePayload =
-  | { type: 'Resize'; session_id: string; width: number; height: number }
-  | { type: 'Raw'; session_id: string; x: number; y: number; width: number; height: number; data: number[] | Uint8Array }
-  | { type: 'Copy'; session_id: string; dst_x: number; dst_y: number; src_x: number; src_y: number; width: number; height: number };
+type RfbEvent<TDetail = unknown> = Event & { detail?: TDetail };
 
-function createVncSessionId(hostId: string) {
-  return `vnc-${hostId}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
+const VNC_INTERACTIVE_QUALITY_LEVEL = 2;
+const VNC_INTERACTIVE_COMPRESSION_LEVEL = 0;
 
-function getKeyboardKeycode(event: ReactKeyboardEvent<HTMLDivElement>) {
-  if (event.key.length === 1) return event.key.charCodeAt(0);
-  const special: Record<string, number> = {
-    Backspace: 0xff08,
-    Tab: 0xff09,
-    Enter: 0xff0d,
-    Escape: 0xff1b,
-    Delete: 0xffff,
-    ArrowLeft: 0xff51,
-    ArrowUp: 0xff52,
-    ArrowRight: 0xff53,
-    ArrowDown: 0xff54,
+type RfbDebugState = {
+  _display?: {
+    pending?: () => boolean;
   };
-  return special[event.key] ?? 0;
+  _fbHeight?: number;
+  _fbWidth?: number;
+  _FBU?: {
+    encoding?: number | null;
+  };
+  _framebufferUpdate?: (...args: unknown[]) => boolean;
+  _handleRect?: (...args: unknown[]) => boolean;
+  _sendMouse?: (x: number, y: number, mask: number) => void;
+  _rfbAuthScheme?: number;
+  _rfbVersion?: number;
+  _enabledContinuousUpdates?: boolean;
+  _supportsSetDesktopSize?: boolean;
+};
+
+function writeVncDiagnosticLog(message: string) {
+  const context = `href=${window.location.href} search=${window.location.search} hash=${window.location.hash}`;
+  void invoke('write_diagnostic_log', {
+    source: 'vnc-frontend',
+    message: `${message} ${context}`.slice(0, 4000),
+  }).catch(() => undefined);
 }
 
-function getMouseMask(event: ReactMouseEvent<HTMLDivElement>, down: boolean) {
-  if (event.type === 'mousemove') return event.buttons;
-  if (!down) return event.buttons;
-  if (event.buttons > 0) return event.buttons;
-  if (event.button === 0) return 1;
-  if (event.button === 1) return 2;
-  if (event.button === 2) return 4;
-  return 0;
+function isVncDebugEnabled(locationSearch: string) {
+  const params = new URLSearchParams(locationSearch);
+  if (params.get('vncDebug') === '1') return true;
+  try {
+    return window.localStorage.getItem('opsbatch.vncDebug') === '1';
+  } catch {
+    return false;
+  }
+}
+
+function clearElement(element: HTMLElement | null) {
+  if (!element) return;
+  element.replaceChildren();
+}
+
+function hasRequiredVncCredentials(credentials: Record<string, string>, types: string[]) {
+  return types.length > 0 && types.every((type) => Boolean(credentials[type]));
+}
+
+function missingVncCredentials(credentials: Record<string, string>, types: string[]) {
+  return types.filter((type) => !credentials[type]);
+}
+
+function describeRfbAuthScheme(rfb: RFB) {
+  const debugState = rfb as unknown as RfbDebugState;
+  return `rfbVersion=${debugState._rfbVersion ?? 'unknown'} authScheme=${debugState._rfbAuthScheme ?? 'unknown'}`;
+}
+
+function describeRfbRuntime(rfb: RFB) {
+  const debugState = rfb as unknown as RfbDebugState;
+  return [
+    `rfbVersion=${debugState._rfbVersion ?? 'unknown'}`,
+    `authScheme=${debugState._rfbAuthScheme ?? 'unknown'}`,
+    `framebuffer=${debugState._fbWidth ?? 'unknown'}x${debugState._fbHeight ?? 'unknown'}`,
+    `setDesktopSize=${debugState._supportsSetDesktopSize === true}`,
+    `continuousUpdates=${debugState._enabledContinuousUpdates === true}`,
+  ].join(' ');
+}
+
+function vncEncodingName(encoding: number | null | undefined) {
+  const names: Record<number, string> = {
+    0: 'raw',
+    1: 'copyRect',
+    2: 'rre',
+    5: 'hextile',
+    6: 'zlib',
+    7: 'tight',
+    16: 'zrle',
+    21: 'jpeg',
+    50: 'h264',
+    [-223]: 'desktopSize',
+    [-239]: 'cursor',
+    [-308]: 'extendedDesktopSize',
+  };
+  return names[encoding ?? Number.NaN] ?? String(encoding ?? 'unknown');
+}
+
+function installVncPerformanceDiagnostics(
+  rfb: RFB,
+  hostId: string,
+  sessionId: string,
+) {
+  const debugState = rfb as unknown as RfbDebugState;
+  const originalFramebufferUpdate = debugState._framebufferUpdate;
+  const originalHandleRect = debugState._handleRect;
+  const stats = {
+    framebufferUpdates: 0,
+    rects: 0,
+    totalFramebufferMs: 0,
+    maxFramebufferMs: 0,
+    encodings: new Map<string, number>(),
+  };
+
+  if (originalFramebufferUpdate) {
+    debugState._framebufferUpdate = function patchedFramebufferUpdate(...args: unknown[]) {
+      const startedAt = performance.now();
+      const result = originalFramebufferUpdate.apply(this, args);
+      const elapsed = performance.now() - startedAt;
+      stats.framebufferUpdates += 1;
+      stats.totalFramebufferMs += elapsed;
+      stats.maxFramebufferMs = Math.max(stats.maxFramebufferMs, elapsed);
+      return result;
+    };
+  }
+
+  if (originalHandleRect) {
+    debugState._handleRect = function patchedHandleRect(...args: unknown[]) {
+      const encoding = vncEncodingName((rfb as unknown as RfbDebugState)._FBU?.encoding);
+      stats.rects += 1;
+      stats.encodings.set(encoding, (stats.encodings.get(encoding) ?? 0) + 1);
+      return originalHandleRect.apply(this, args);
+    };
+  }
+
+  const interval = window.setInterval(() => {
+    if (stats.framebufferUpdates === 0 && stats.rects === 0) return;
+    const avgFramebufferMs = stats.framebufferUpdates > 0
+      ? stats.totalFramebufferMs / stats.framebufferUpdates
+      : 0;
+    const encodingSummary = Array.from(stats.encodings.entries())
+      .map(([encoding, count]) => `${encoding}:${count}`)
+      .join(',');
+    const pending = debugState._display?.pending?.() === true;
+    writeVncDiagnosticLog(
+      `novnc perf hostId=${hostId} sessionId=${sessionId} fbu=${stats.framebufferUpdates} rects=${stats.rects} avgFbuMs=${avgFramebufferMs.toFixed(2)} maxFbuMs=${stats.maxFramebufferMs.toFixed(2)} encodings=${encodingSummary || 'none'} pending=${pending} ${describeRfbRuntime(rfb)}`,
+    );
+    stats.framebufferUpdates = 0;
+    stats.rects = 0;
+    stats.totalFramebufferMs = 0;
+    stats.maxFramebufferMs = 0;
+    stats.encodings.clear();
+  }, 2000);
+
+  return () => {
+    window.clearInterval(interval);
+    if (debugState._framebufferUpdate !== originalFramebufferUpdate) {
+      debugState._framebufferUpdate = originalFramebufferUpdate;
+    }
+    if (debugState._handleRect !== originalHandleRect) {
+      debugState._handleRect = originalHandleRect;
+    }
+  };
+}
+
+function installVncInputDiagnostics(
+  rfb: RFB,
+  target: HTMLElement,
+  hostId: string,
+  sessionId: string,
+) {
+  const debugState = rfb as unknown as RfbDebugState;
+  const originalSendMouse = debugState._sendMouse;
+  const originalSendKey = rfb.sendKey;
+  const stats = {
+    domMouse: 0,
+    domKey: 0,
+    sentMouse: 0,
+    sentKey: 0,
+    lastMouseMask: 0,
+    lastKey: '',
+  };
+
+  if (originalSendMouse) {
+    debugState._sendMouse = function patchedSendMouse(x: number, y: number, mask: number) {
+      stats.sentMouse += 1;
+      stats.lastMouseMask = mask;
+      return originalSendMouse.call(this, x, y, mask);
+    };
+  }
+
+  if (originalSendKey) {
+    rfb.sendKey = function patchedSendKey(keysym: number, code: string, down?: boolean) {
+      stats.sentKey += 1;
+      stats.lastKey = `${code}:${down === false ? 'up' : 'down'}`;
+      return originalSendKey.call(this, keysym, code, down);
+    };
+  }
+
+  const focusRfb = () => {
+    rfb.focus({ preventScroll: true });
+  };
+  const recordMouse = (event: MouseEvent) => {
+    stats.domMouse += 1;
+    if (event.type === 'mousedown' || event.type === 'mouseup') {
+      focusRfb();
+      writeVncDiagnosticLog(
+        `novnc input domMouse hostId=${hostId} sessionId=${sessionId} type=${event.type} button=${event.button} buttons=${event.buttons} viewOnly=${rfb.viewOnly} target=${(event.target as HTMLElement | null)?.tagName ?? 'unknown'}`,
+      );
+    }
+  };
+  const recordKey = (event: KeyboardEvent) => {
+    stats.domKey += 1;
+    if (event.type === 'keydown') {
+      writeVncDiagnosticLog(
+        `novnc input domKey hostId=${hostId} sessionId=${sessionId} key=${event.key} code=${event.code} viewOnly=${rfb.viewOnly} target=${(event.target as HTMLElement | null)?.tagName ?? 'unknown'}`,
+      );
+    }
+  };
+
+  target.addEventListener('mousedown', recordMouse, true);
+  target.addEventListener('mouseup', recordMouse, true);
+  target.addEventListener('mousemove', recordMouse, true);
+  target.addEventListener('keydown', recordKey, true);
+  target.addEventListener('keyup', recordKey, true);
+
+  const interval = window.setInterval(() => {
+    if (stats.domMouse === 0 && stats.domKey === 0 && stats.sentMouse === 0 && stats.sentKey === 0) return;
+    writeVncDiagnosticLog(
+      `novnc input summary hostId=${hostId} sessionId=${sessionId} domMouse=${stats.domMouse} sentMouse=${stats.sentMouse} lastMouseMask=${stats.lastMouseMask} domKey=${stats.domKey} sentKey=${stats.sentKey} lastKey=${stats.lastKey || 'none'} viewOnly=${rfb.viewOnly} ${describeRfbRuntime(rfb)}`,
+    );
+    stats.domMouse = 0;
+    stats.domKey = 0;
+    stats.sentMouse = 0;
+    stats.sentKey = 0;
+    stats.lastMouseMask = 0;
+    stats.lastKey = '';
+  }, 2000);
+
+  return () => {
+    window.clearInterval(interval);
+    target.removeEventListener('mousedown', recordMouse, true);
+    target.removeEventListener('mouseup', recordMouse, true);
+    target.removeEventListener('mousemove', recordMouse, true);
+    target.removeEventListener('keydown', recordKey, true);
+    target.removeEventListener('keyup', recordKey, true);
+    if (debugState._sendMouse !== originalSendMouse) {
+      debugState._sendMouse = originalSendMouse;
+    }
+    if (rfb.sendKey !== originalSendKey) {
+      rfb.sendKey = originalSendKey;
+    }
+  };
 }
 
 export default function VncPage() {
@@ -59,99 +281,210 @@ export default function VncPage() {
   const hostsLoading = useAssetsStore((s) => s.loading);
   const loadHosts = useAssetsStore((s) => s.loadHosts);
   const queryHostId = useMemo(() => new URLSearchParams(location.search).get('hostId')?.trim() ?? '', [location.search]);
+  const vncDebugEnabled = useMemo(() => isVncDebugEnabled(location.search), [location.search]);
   const host = hosts.find((item) => item.id === queryHostId);
+  const activeHostId = host?.id ?? '';
   const [sessionId, setSessionId] = useState('');
-  const [status, setStatus] = useState<VncStatusPayload['state']>('idle');
+  const [status, setStatus] = useState<VncConnectionState>('idle');
   const [statusMessage, setStatusMessage] = useState('');
   const [connectNonce, setConnectNonce] = useState(0);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const viewOnly = host?.rdpSettings?.vncViewOnly === true;
+  const screenRef = useRef<HTMLDivElement>(null);
+  const rfbRef = useRef<RFB | null>(null);
+  const sessionIdRef = useRef('');
+  const statusRef = useRef<VncConnectionState>('idle');
+  const tTextRef = useRef(tText);
+  tTextRef.current = tText;
+
+  const updateStatus = useCallback((nextStatus: VncConnectionState) => {
+    statusRef.current = nextStatus;
+    setStatus(nextStatus);
+  }, []);
+
+  const updateSessionId = useCallback((nextSessionId: string) => {
+    sessionIdRef.current = nextSessionId;
+    setSessionId(nextSessionId);
+  }, []);
+
+  const closeVncSession = useCallback((targetSessionId: string, markUi = true) => {
+    if (!targetSessionId) return;
+    if (targetSessionId === sessionIdRef.current) {
+      rfbRef.current?.disconnect();
+      rfbRef.current = null;
+      clearElement(screenRef.current);
+    }
+    if (markUi && targetSessionId === sessionIdRef.current && statusRef.current !== 'idle') {
+      updateStatus('disconnected');
+      setStatusMessage(tTextRef.current('vnc.state.disconnected'));
+    }
+    void invoke('close_vnc_session', {
+      request: { sessionId: targetSessionId },
+    }).catch((error: unknown) => {
+      if (targetSessionId === sessionIdRef.current) setStatusMessage(String(error));
+    });
+  }, [updateStatus]);
+
+  const reconnectVncSession = useCallback(() => {
+    writeVncDiagnosticLog(`manual reconnect requested hostId=${activeHostId} sessionId=${sessionIdRef.current}`);
+    rfbRef.current?.disconnect();
+    rfbRef.current = null;
+    clearElement(screenRef.current);
+    updateStatus('connecting');
+    setStatusMessage(tTextRef.current('vnc.state.connecting'));
+    setConnectNonce((value) => value + 1);
+  }, [activeHostId, updateStatus]);
 
   useEffect(() => {
     if (queryHostId && hosts.length === 0) void loadHosts();
   }, [hosts.length, loadHosts, queryHostId]);
 
   useEffect(() => {
-    if (!host) return;
-    const nextSessionId = createVncSessionId(host.id);
+    if (!activeHostId) {
+      writeVncDiagnosticLog(`effect skipped missing hostId activeHostId=${activeHostId}`);
+      return undefined;
+    }
+    const target = screenRef.current;
+    if (!target) {
+      writeVncDiagnosticLog(`effect skipped missing screen hostId=${activeHostId}`);
+      return undefined;
+    }
+
+    const nextSessionId = createVncSessionId(activeHostId);
     let disposed = false;
-    let unlistenFns: UnlistenFn[] = [];
-    setSessionId(nextSessionId);
-    setStatus('connecting');
-    setStatusMessage(tText('vnc.state.connecting'));
-
-    const drawFrame = (payload: VncFramePayload) => {
-      const canvas = canvasRef.current;
-      const context = canvas?.getContext('2d');
-      if (!canvas || !context) return;
-
-      if (payload.type === 'Resize') {
-        canvas.width = payload.width;
-        canvas.height = payload.height;
-        return;
-      }
-
-      if (payload.type === 'Raw') {
-        const image = new ImageData(
-          new Uint8ClampedArray(payload.data),
-          payload.width,
-          payload.height,
-        );
-        context.putImageData(image, payload.x, payload.y);
-        return;
-      }
-
-      const copy = context.getImageData(payload.src_x, payload.src_y, payload.width, payload.height);
-      context.putImageData(copy, payload.dst_x, payload.dst_y);
-    };
+    let disposePerformanceDiagnostics: (() => void) | undefined;
+    let disposeInputDiagnostics: (() => void) | undefined;
+    writeVncDiagnosticLog(
+      `effect start hostId=${activeHostId} sessionId=${nextSessionId} connectNonce=${connectNonce}`,
+    );
+    updateSessionId(nextSessionId);
+    updateStatus('connecting');
+    setStatusMessage(tTextRef.current('vnc.state.connecting'));
+    rfbRef.current?.disconnect();
+    rfbRef.current = null;
+    clearElement(target);
 
     const start = async () => {
-      const statusUnlisten = await listen<VncStatusPayload>(`vnc-status-${nextSessionId}`, (event) => {
-        if (disposed) return;
-        setStatus(event.payload.state);
-        setStatusMessage(event.payload.message);
+      writeVncDiagnosticLog(`invoke vnc_connect start hostId=${activeHostId} sessionId=${nextSessionId}`);
+      const response = await invoke<VncConnectResponse>('vnc_connect', {
+        hostId: activeHostId,
+        sessionId: nextSessionId,
       });
-      const frameUnlisten = await listen<VncFramePayload>(`vnc-frame-${nextSessionId}`, (event) => {
-        if (!disposed) drawFrame(event.payload);
+      writeVncDiagnosticLog(
+        `invoke vnc_connect completed hostId=${activeHostId} sessionId=${nextSessionId} websocketUrl=${response.websocketUrl} usernameSet=${Boolean(response.username)} passwordSet=${Boolean(response.password)} shared=${response.shared} viewOnly=${response.viewOnly}`,
+      );
+      if (disposed) {
+        closeVncSession(nextSessionId, false);
+        return;
+      }
+
+      const credentials: Record<string, string> = {};
+      if (response.username) credentials.username = response.username;
+      if (response.password) credentials.password = response.password;
+      const rfb = new RFB(target, response.websocketUrl, {
+        credentials,
+        shared: response.shared,
       });
-      unlistenFns = [statusUnlisten, frameUnlisten];
-      await invoke('vnc_connect', { hostId: host.id, sessionId: nextSessionId });
+      rfbRef.current = rfb;
+      rfb.viewOnly = response.viewOnly;
+      rfb.scaleViewport = true;
+      rfb.resizeSession = true;
+      rfb.focusOnClick = true;
+      rfb.qualityLevel = VNC_INTERACTIVE_QUALITY_LEVEL;
+      rfb.compressionLevel = VNC_INTERACTIVE_COMPRESSION_LEVEL;
+      rfb.background = '#101417';
+      if (vncDebugEnabled) {
+        disposePerformanceDiagnostics = installVncPerformanceDiagnostics(rfb, activeHostId, nextSessionId);
+        disposeInputDiagnostics = installVncInputDiagnostics(rfb, target, activeHostId, nextSessionId);
+      }
+
+      rfb.addEventListener('connect', () => {
+        if (disposed || sessionIdRef.current !== nextSessionId) return;
+        writeVncDiagnosticLog(`novnc connect hostId=${activeHostId} sessionId=${nextSessionId} viewOnly=${rfb.viewOnly} focusOnClick=${rfb.focusOnClick} ${describeRfbRuntime(rfb)}`);
+        updateStatus('connected');
+        setStatusMessage(tTextRef.current('vnc.state.connected'));
+        rfb.focus({ preventScroll: true });
+      });
+      rfb.addEventListener('disconnect', (event: Event) => {
+        const clean = (event as RfbEvent<{ clean?: boolean }>).detail?.clean;
+        writeVncDiagnosticLog(
+          `novnc disconnect hostId=${activeHostId} sessionId=${nextSessionId} clean=${clean}`,
+        );
+        if (disposed || sessionIdRef.current !== nextSessionId) return;
+        updateStatus(clean ? 'disconnected' : 'error');
+        setStatusMessage(clean ? tTextRef.current('vnc.state.disconnected') : 'VNC connection closed unexpectedly');
+      });
+      rfb.addEventListener('credentialsrequired', (event: Event) => {
+        const types = (event as RfbEvent<{ types?: string[] }>).detail?.types ?? [];
+        const missing = missingVncCredentials(credentials, types);
+        writeVncDiagnosticLog(
+          `novnc credentialsrequired hostId=${activeHostId} sessionId=${nextSessionId} types=${types.join(',')} missing=${missing.join(',')} ${describeRfbAuthScheme(rfb)}`,
+        );
+        if (hasRequiredVncCredentials(credentials, types)) {
+          rfb.sendCredentials(credentials);
+          return;
+        }
+        updateStatus('error');
+        setStatusMessage(`VNC server requires credentials: ${missing.join(', ') || types.join(', ') || 'unknown'}`);
+      });
+      rfb.addEventListener('securityfailure', (event: Event) => {
+        const detail = (event as RfbEvent<{ status?: number; reason?: string }>).detail;
+        const reason = detail?.reason || `security status ${detail?.status ?? 'unknown'}`;
+        writeVncDiagnosticLog(
+          `novnc securityfailure hostId=${activeHostId} sessionId=${nextSessionId} reason=${reason} ${describeRfbAuthScheme(rfb)}`,
+        );
+        updateStatus('error');
+        setStatusMessage(reason);
+      });
+      rfb.addEventListener('desktopname', (event: Event) => {
+        const name = (event as RfbEvent<{ name?: string }>).detail?.name ?? '';
+        writeVncDiagnosticLog(`novnc desktopname hostId=${activeHostId} sessionId=${nextSessionId} name=${name} ${describeRfbRuntime(rfb)}`);
+        if (name) setStatusMessage(name);
+      });
+      rfb.addEventListener('clipboard', (event: Event) => {
+        const text = (event as RfbEvent<{ text?: string }>).detail?.text ?? '';
+        writeVncDiagnosticLog(
+          `novnc clipboard hostId=${activeHostId} sessionId=${nextSessionId} chars=${text.length}`,
+        );
+      });
     };
 
     void start().catch((error: unknown) => {
       if (!disposed) {
-        setStatus('error');
+        writeVncDiagnosticLog(`invoke vnc_connect failed hostId=${activeHostId} sessionId=${nextSessionId} error=${String(error)}`);
+        updateStatus('error');
         setStatusMessage(String(error));
       }
     });
 
+    const statusInterval = window.setInterval(() => {
+      void invoke<VncSessionStatus>('get_vnc_session_status', {
+        request: { sessionId: nextSessionId },
+      }).then((payload) => {
+        if (
+          !disposed
+          && payload.sessionId === nextSessionId
+          && !payload.connected
+          && statusRef.current === 'connected'
+        ) {
+          writeVncDiagnosticLog(`status poll disconnected hostId=${activeHostId} sessionId=${nextSessionId}`);
+          updateStatus('disconnected');
+        }
+      }).catch(() => undefined);
+    }, 1000);
+
     return () => {
+      writeVncDiagnosticLog(`effect cleanup hostId=${activeHostId} sessionId=${nextSessionId} status=${statusRef.current}`);
       disposed = true;
-      unlistenFns.forEach((unlisten) => unlisten());
-      void invoke('vnc_disconnect', { sessionId: nextSessionId });
+      disposePerformanceDiagnostics?.();
+      disposeInputDiagnostics?.();
+      window.clearInterval(statusInterval);
+      if (sessionIdRef.current === nextSessionId) {
+        rfbRef.current?.disconnect();
+        rfbRef.current = null;
+        clearElement(screenRef.current);
+      }
+      closeVncSession(nextSessionId, false);
     };
-  }, [connectNonce, host, tText]);
-
-  const sendMouse = useCallback((event: ReactMouseEvent<HTMLDivElement>, down: boolean) => {
-    if (!sessionId || viewOnly) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return;
-    const x = Math.max(0, Math.min(canvas.width - 1, Math.floor((event.clientX - rect.left) * (canvas.width / rect.width))));
-    const y = Math.max(0, Math.min(canvas.height - 1, Math.floor((event.clientY - rect.top) * (canvas.height / rect.height))));
-    void invoke('vnc_send_input', {
-      sessionId,
-      event: { type: 'mouse', x, y, buttons: getMouseMask(event, down) },
-    });
-  }, [sessionId, viewOnly]);
-
-  const sendKey = useCallback((event: ReactKeyboardEvent<HTMLDivElement>, down: boolean) => {
-    const keycode = getKeyboardKeycode(event);
-    if (!sessionId || viewOnly || keycode === 0) return;
-    event.preventDefault();
-    void invoke('vnc_send_input', { sessionId, event: { type: 'key', keycode, down } });
-  }, [sessionId, viewOnly]);
+  }, [activeHostId, connectNonce, closeVncSession, updateSessionId, updateStatus, vncDebugEnabled]);
 
   if (!host) {
     return (
@@ -185,6 +518,9 @@ export default function VncPage() {
 
   const statusLabel = t(`vnc.state.${status}` as Parameters<typeof t>[0]);
   const showOverlay = status !== 'connected';
+  const defaultResolution = vncDefaultResolution();
+  const presentation = vncPresentationSize(defaultResolution.width, defaultResolution.height);
+  const limit = vncResolutionLimit(presentation.width, presentation.height);
 
   return (
     <section className="rdp-page">
@@ -202,8 +538,15 @@ export default function VncPage() {
         </div>
         <span className={`rdp-status-pill rdp-status-pill-${status === 'error' ? 'error' : status}`}>{statusLabel}</span>
         <div className="rdp-toolbar-actions">
-          <Button size="small" icon={<ReloadOutlined />} onClick={() => setConnectNonce((value) => value + 1)}>{t('vnc.reconnect')}</Button>
-          <Button size="small" icon={<CloseOutlined />} onClick={() => void invoke('vnc_disconnect', { sessionId })}>{t('vnc.disconnect')}</Button>
+          <Button size="small" icon={<ReloadOutlined />} onClick={reconnectVncSession}>{t('vnc.reconnect')}</Button>
+          <Button
+            size="small"
+            onClick={() => rfbRef.current?.sendCtrlAltDel()}
+            disabled={!sessionId || status !== 'connected' || host.rdpSettings?.vncViewOnly === true}
+          >
+            Ctrl Alt Del
+          </Button>
+          <Button size="small" icon={<CloseOutlined />} onClick={() => closeVncSession(sessionId)}>{t('vnc.disconnect')}</Button>
         </div>
       </header>
       <div
@@ -211,14 +554,16 @@ export default function VncPage() {
         tabIndex={0}
         role="application"
         aria-label={tText('vnc.canvasAria', { name: host.name })}
-        onMouseDown={(event) => sendMouse(event, true)}
-        onMouseUp={(event) => sendMouse(event, false)}
-        onMouseMove={(event) => sendMouse(event, true)}
-        onKeyDown={(event) => sendKey(event, true)}
-        onKeyUp={(event) => sendKey(event, false)}
         onContextMenu={(event) => event.preventDefault()}
       >
-        <canvas ref={canvasRef} className="rdp-canvas" />
+        <div
+          ref={screenRef}
+          className="rdp-canvas rdp-vnc-screen"
+          style={{
+            width: `${limit.width}px`,
+            height: `${limit.height}px`,
+          }}
+        />
         {showOverlay ? (
           <div className="rdp-overlay">
             <div className="rdp-overlay-card">

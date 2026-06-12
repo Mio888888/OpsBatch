@@ -107,6 +107,9 @@ function parseRdpSettings(value?: string | null): RdpSettings | undefined {
     if (typeof parsed.vncPort === 'number' && Number.isFinite(parsed.vncPort)) {
       settings.vncPort = parsed.vncPort;
     }
+    if (typeof parsed.vncUsername === 'string' && parsed.vncUsername.trim()) {
+      settings.vncUsername = parsed.vncUsername.trim();
+    }
     if (typeof parsed.vncPassword === 'string' && parsed.vncPassword.trim()) {
       settings.vncPassword = parsed.vncPassword.trim();
     }
@@ -148,6 +151,9 @@ function serializeRdpSettings(settings?: RdpSettings): string {
   }
   if (typeof settings?.vncPort === 'number' && Number.isFinite(settings.vncPort)) {
     normalized.vncPort = settings.vncPort;
+  }
+  if (settings?.vncUsername?.trim()) {
+    normalized.vncUsername = settings.vncUsername.trim();
   }
   if (settings?.vncPassword?.trim()) {
     normalized.vncPassword = settings.vncPassword.trim();

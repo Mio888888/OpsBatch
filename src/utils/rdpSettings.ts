@@ -15,6 +15,7 @@ export interface HostRdpSettingsFormValues {
   rdpMapDisk?: boolean;
   rdpDiskPath?: string;
   vncPort?: number;
+  vncUsername?: string;
   vncPassword?: string;
   vncViewOnly?: boolean;
   vncShared?: boolean;
@@ -34,6 +35,9 @@ export function buildRdpSettings(
       protocol: 'vnc',
       vncPort: normalizeVncPort(values.vncPort),
     };
+    if (values.vncUsername?.trim()) {
+      settings.vncUsername = values.vncUsername.trim();
+    }
     if (values.vncPassword?.trim()) {
       settings.vncPassword = values.vncPassword.trim();
     }

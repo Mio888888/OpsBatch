@@ -1,6 +1,6 @@
 # OpsBatch Website
 
-这是 OpsBatch 的独立静态官网，不接入现有 Tauri/React 应用入口，也不改变桌面端架构。页面面向产品介绍与软件下载，会根据访问者系统自动推荐 macOS、Windows 或 Linux 版本。
+这是 OpsBatch 的独立静态官网，不接入现有 Tauri/React 应用入口，也不改变桌面端架构。页面面向产品介绍与软件下载，按当前代码中的主机资产、SSH/SFTP、RDP/VNC、批量执行、工作流、AI、日志和本地数据能力编写，会根据访问者系统自动推荐 macOS、Windows 或 Linux 版本。
 
 ## 本地预览
 
@@ -43,3 +43,5 @@ https://github.com/Mio888888/OpsBatch/releases/latest
 ```
 
 如果后续更换仓库或发布地址，请同步修改 `index.html` 中的下载链接。静态页不会硬编码具体安装包文件名，避免 Release 产物命名变化导致链接失效。
+
+页面中的产品版本、功能范围和合规说明应随 `README.md`、`README_CN.md` 与 `README_EN.md` 一起维护，避免官网与实际桌面端能力脱节。

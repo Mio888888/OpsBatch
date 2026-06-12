@@ -7,11 +7,11 @@
     <meta name="author" content="Mio" />
     <meta
       name="keywords"
-      content="OpsBatch, 运维工具, SSH 终端, SFTP, 批量命令, 自动化工作流, SRE, DevOps, 本地桌面应用, Tauri"
+      content="OpsBatch, 运维工具, SSH 终端, SFTP, RDP, VNC, 远程桌面, 批量命令, 自动化工作流, SRE, DevOps, 本地桌面应用, Tauri"
     />
     <meta
       name="description"
-      content="OpsBatch 是面向运维工程师、SRE 与平台团队的本地优先运维工作区，把 SSH 终端、SFTP、批量命令、文件分发、工作流和 AI 辅助收进一个桌面应用。"
+      content="OpsBatch 是面向运维工程师、SRE 与平台团队的本地优先运维工作区，把 SSH 终端、SFTP、RDP/VNC 远程桌面、批量命令、文件分发、工作流和 AI 辅助收进一个桌面应用。"
     />
     <meta name="theme-color" content="#fff1e8" />
     <meta name="application-name" content="OpsBatch" />
@@ -24,7 +24,7 @@
     <meta property="og:title" content="OpsBatch - 本地优先运维工作区" />
     <meta
       property="og:description"
-      content="在一个桌面端工作区里管理 SSH、SFTP、批量命令、工作流与 AI 运维辅助，数据优先留在本机。"
+      content="在一个桌面端工作区里管理 SSH、SFTP、RDP/VNC、批量命令、工作流与 AI 运维辅助，数据优先留在本机。"
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://mio888888.github.io/OpsBatch/" />
@@ -36,10 +36,10 @@
     <meta name="twitter:title" content="OpsBatch - 本地优先运维工作区" />
     <meta
       name="twitter:description"
-      content="本地管理 SSH 终端、SFTP、批量命令、工作流和 AI 运维辅助。"
+      content="本地管理 SSH 终端、SFTP、RDP/VNC、批量命令、工作流和 AI 运维辅助。"
     />
     <meta name="twitter:image" content="https://mio888888.github.io/OpsBatch/assets/app-icon.png" />
-    <title>OpsBatch - 本地 SSH / SFTP / 批量运维工作区</title>
+    <title>OpsBatch - 本地 SSH / SFTP / RDP / VNC 运维工作区</title>
     <link rel="icon" href="./assets/app-icon.png" />
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./sections.css" />
@@ -51,8 +51,8 @@
         "name": "OpsBatch",
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "macOS, Windows, Linux",
-        "softwareVersion": "0.1.0",
-        "description": "OpsBatch 是面向运维工程师、SRE 与平台团队的本地桌面工作区，用于集中管理 SSH 终端、批量命令、SFTP 文件传输、自动化工作流与 AI 运维辅助。",
+        "softwareVersion": "0.1.2",
+        "description": "OpsBatch 是面向运维工程师、SRE 与平台团队的本地桌面工作区，用于集中管理 SSH 终端、SFTP 文件传输、RDP/VNC 远程桌面、批量命令、自动化工作流与 AI 运维辅助。",
         "url": "https://mio888888.github.io/OpsBatch/",
         "downloadUrl": "https://github.com/Mio888888/OpsBatch/releases/latest",
         "image": "https://mio888888.github.io/OpsBatch/assets/app-icon.png",
@@ -98,14 +98,14 @@
       <main id="main-content">
         <section id="hero" class="hero-section" aria-labelledby="hero-title">
           <div class="hero-copy">
-            <p class="eyebrow">Local-first SSH / SFTP / Workflow / AI</p>
+            <p class="eyebrow">Local-first SSH / SFTP / RDP / VNC / Workflow / AI</p>
             <h1 id="hero-title" class="hero-title">
               <span>把远程运维</span>
               <span>放进一个 <em>本地</em></span>
               <span class="title-chip">工作区</span>
             </h1>
             <p class="hero-subtitle">
-              OpsBatch 把主机资产、SSH 终端、SFTP、批量命令、文件分发、可视化工作流和 AI 辅助集中在一个桌面应用里。无需先搭中心服务，日常操作也能沉淀成可复用资产。
+              OpsBatch 把主机资产、SSH 终端、SFTP、RDP/VNC 远程桌面、批量命令、文件分发、可视化工作流和 AI 辅助集中在一个桌面应用里。无需先搭中心服务，日常操作也能沉淀成可复用资产。
             </p>
             <div class="hero-actions" aria-label="主要操作">
               <a class="clay-button clay-button-primary" href="#download">立即下载</a>
@@ -114,8 +114,8 @@
             <div class="trust-strip" aria-label="产品特点">
               <span>Tauri 2 桌面端</span>
               <span>SQLite 本地数据</span>
+              <span>RDP / VNC 独立窗口</span>
               <span>最多 16 台广播终端</span>
-              <span>执行可追踪</span>
             </div>
             <a class="release-link" href="https://github.com/Mio888888/OpsBatch/releases/latest" target="_blank" rel="noreferrer">
               查看最新 Release
@@ -131,7 +131,7 @@
                 <div class="mode-pill">
                   <span class="pill-active">终端</span>
                   <span>SFTP</span>
-                  <span>工作流</span>
+                  <span>桌面</span>
                 </div>
               </div>
               <div class="product-grid">
@@ -198,11 +198,11 @@ $ _</code></pre>
             <article class="compare-row">
               <div class="compare-pain">
                 <span>痛点</span>
-                <strong>SSH、SFTP、脚本和记录散在不同工具里</strong>
+                <strong>SSH、SFTP、远程桌面、脚本和记录散在不同工具里</strong>
               </div>
               <div class="compare-solution">
                 <span>OpsBatch</span>
-                <strong>一个主机入口连接终端、文件、监控、命令库和工作流</strong>
+                <strong>一个主机入口连接终端、文件、远程桌面、监控、命令库和工作流</strong>
               </div>
             </article>
             <article class="compare-row">
@@ -300,7 +300,17 @@ $ _</code></pre>
               </ul>
             </article>
             <article class="feature-card clay-card">
-              <div class="feature-meta"><span class="feature-icon">RUN</span><small>03</small></div>
+              <div class="feature-meta"><span class="feature-icon">RDP</span><small>03</small></div>
+              <h3>RDP / VNC 远程桌面</h3>
+              <p>Windows 主机走 RDP 独立窗口，VNC 主机走 noVNC + 本地 WebSocket bridge。</p>
+              <ul class="feature-list">
+                <li>RDP 支持分辨率、剪贴板、音频和磁盘映射配置</li>
+                <li>VNC 默认 1280x720，显示限制在 1920x1080 内</li>
+                <li>连接、帧率和传输日志便于排查问题</li>
+              </ul>
+            </article>
+            <article class="feature-card clay-card">
+              <div class="feature-meta"><span class="feature-icon">RUN</span><small>04</small></div>
               <h3>批量执行</h3>
               <p>对选中主机并发运行命令，保留结果、失败重试和终端回放。</p>
               <ul class="feature-list">
@@ -310,7 +320,7 @@ $ _</code></pre>
               </ul>
             </article>
             <article class="feature-card clay-card">
-              <div class="feature-meta"><span class="feature-icon">FLOW</span><small>04</small></div>
+              <div class="feature-meta"><span class="feature-icon">FLOW</span><small>05</small></div>
               <h3>工作流编排</h3>
               <p>命令、脚本、条件、人工确认和结果变量通过可视化流程串起来。</p>
               <ul class="feature-list">
@@ -320,7 +330,7 @@ $ _</code></pre>
               </ul>
             </article>
             <article class="feature-card clay-card">
-              <div class="feature-meta"><span class="feature-icon">AI</span><small>05</small></div>
+              <div class="feature-meta"><span class="feature-icon">AI</span><small>06</small></div>
               <h3>AI 辅助判断</h3>
               <p>从终端上下文发起对话、生成脚本、解释输出、诊断错误和评估风险。</p>
               <ul class="feature-list">
@@ -330,13 +340,13 @@ $ _</code></pre>
               </ul>
             </article>
             <article class="feature-card clay-card">
-              <div class="feature-meta"><span class="feature-icon">LIB</span><small>06</small></div>
+              <div class="feature-meta"><span class="feature-icon">LIB</span><small>07</small></div>
               <h3>资产沉淀</h3>
               <p>常用命令、脚本、快捷动作、危险规则、备份和日志都能回到同一套本地设置里。</p>
               <ul class="feature-list">
                 <li>命令库、脚本库和快捷动作</li>
-                <li>危险命令规则可配置</li>
-                <li>全局日志与数据备份入口</li>
+                <li>Git 仓库同步和云主机导入</li>
+                <li>全局日志、危险规则与数据备份入口</li>
               </ul>
             </article>
           </div>
@@ -347,7 +357,7 @@ $ _</code></pre>
             <div class="section-kicker">
               <p class="eyebrow">Under the hood</p>
               <h2 id="architecture-title">桌面端外壳，本地 Rust 能力内核。</h2>
-              <p class="section-note">OpsBatch 不把官网讲成云平台。它的核心是本地桌面应用：前端负责工作区体验，Tauri 命令把终端、SSH、SFTP、SQLite 和系统能力接起来。</p>
+              <p class="section-note">OpsBatch 不把官网讲成云平台。它的核心是本地桌面应用：前端负责工作区体验，Tauri 命令把终端、SSH、SFTP、RDP、VNC、SQLite 和系统能力接起来。</p>
             </div>
           </div>
           <div class="architecture-map clay-window" aria-label="OpsBatch 架构示意">
@@ -355,7 +365,7 @@ $ _</code></pre>
             <div class="map-rail" aria-hidden="true"></div>
             <div class="map-layer map-ipc">Tauri IPC Commands</div>
             <div class="map-rail" aria-hidden="true"></div>
-            <div class="map-layer map-core">Rust backend: SQLite / SSH / SFTP / local PTY / Git / HTTP</div>
+            <div class="map-layer map-core">Rust backend: SQLite / SSH / SFTP / RDP / VNC / local PTY / Git / HTTP</div>
           </div>
           <div class="architecture-grid">
             <article class="architecture-card clay-card">
@@ -377,6 +387,11 @@ $ _</code></pre>
               <span>04</span>
               <h3>可视化流程画布</h3>
               <p>工作流基于 React Flow，适合把一次排障动作整理成可重复执行的步骤。</p>
+            </article>
+            <article class="architecture-card clay-card">
+              <span>05</span>
+              <h3>远程桌面通道</h3>
+              <p>RDP 使用 ironrdp 相关后端能力，VNC 通过 noVNC 客户端和本地 WebSocket bridge 建立会话。</p>
             </article>
           </div>
         </section>
@@ -466,7 +481,7 @@ $ _</code></pre>
                   <td>通常需要服务端</td>
                 </tr>
                 <tr>
-                  <th>SSH / SFTP / 编辑</th>
+                  <th>SSH / SFTP / 远程桌面</th>
                   <td>同一主机上下文</td>
                   <td>多个窗口来回切换</td>
                   <td>取决于平台集成</td>
@@ -521,8 +536,12 @@ $ _</code></pre>
               <p>不是。SSH、SFTP、批量命令和工作流可以独立使用；AI 是可选辅助能力，可配置 OpenAI、Ollama 或兼容端点。</p>
             </details>
             <details class="faq-item clay-card">
+              <summary>RDP 和 VNC 都支持吗？</summary>
+              <p>支持。Windows 主机可配置 RDP，VNC 主机可配置端口、用户名、密码、共享连接和只读模式；VNC 默认 1280x720，显示限制在 1920x1080 内。</p>
+            </details>
+            <details class="faq-item clay-card">
               <summary>数据存储在哪里？</summary>
-              <p>主机、分组、执行历史、命令库、工作流和日志等核心数据保存在本机 SQLite 数据库中。敏感凭据以应用设置和系统能力为准。</p>
+              <p>主机、分组、执行历史、命令库、工作流、AI 会话和日志等核心数据保存在本机 SQLite 数据库或本地配置中。部分凭据会优先写入系统 keychain，但不要把它理解为所有敏感信息都已完整加密。</p>
             </details>
             <details class="faq-item clay-card">
               <summary>可以批量操作多台主机吗？</summary>
@@ -544,7 +563,7 @@ $ _</code></pre>
               <p class="eyebrow">Compliance & Legal</p>
               <h2 id="compliance-title">合规与法律声明</h2>
               <p class="section-note">
-                OpsBatch 面向授权运维场景。它提供 SSH、SFTP、批量命令、工作流和 AI 辅助能力，但不会替用户取得授权，也不会替代组织内部审批、审计和变更管理制度。
+                OpsBatch 面向授权运维场景。它提供 SSH、SFTP、RDP/VNC 远程桌面、批量命令、工作流和 AI 辅助能力，但不会替用户取得授权，也不会替代组织内部审批、审计和变更管理制度。
               </p>
             </div>
           </div>
@@ -553,7 +572,7 @@ $ _</code></pre>
               <span>01</span>
               <h3>网络合规与授权访问</h3>
               <p>
-                用户应仅在自己拥有、管理或获得明确授权的服务器、账号、网络与云资源上使用 OpsBatch。批量命令、文件分发、端口转发、脚本和工作流可能造成配置变更、数据移动或服务中断，执行前应确认目标范围、权限边界、审批要求和回滚方案。
+                用户应仅在自己拥有、管理或获得明确授权的服务器、账号、网络与云资源上使用 OpsBatch。批量命令、文件分发、端口转发、远程桌面操作、脚本和工作流可能造成配置变更、数据移动或服务中断，执行前应确认目标范围、权限边界、审批要求和回滚方案。
               </p>
             </article>
             <article class="compliance-card clay-card">

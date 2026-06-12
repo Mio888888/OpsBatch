@@ -2,7 +2,7 @@
 
 [简体中文](README_CN.md) | [English](README_EN.md)
 
-OpsBatch is a local desktop workbench for operations workflows. It centralizes server assets, SSH terminals, batch commands, script libraries, file transfer, automation workflows, and operations knowledge synchronization. The current project version is `0.1.1`. The desktop app is built with Tauri v2, React 19, TypeScript/Vite, and a Rust backend, with core data persisted in a local SQLite database.
+OpsBatch is a local desktop workbench for operations workflows. It centralizes server assets, SSH terminals, RDP/VNC remote desktop, batch commands, script libraries, file transfer, automation workflows, and operations knowledge synchronization. The current project version is `0.1.2`. The desktop app is built with Tauri v2, React 19, TypeScript/Vite, and a Rust backend, with core data persisted in a local SQLite database.
 
 
 ## Product Positioning
@@ -20,6 +20,7 @@ Target users include:
 Core goals:
 
 - Manage host assets, groups, SSH connections, and jump-host chains locally in one place.
+- Keep SSH, SFTP, RDP, VNC, port forwarding, and local terminals under the same host context.
 - Turn common commands, scripts, quick actions, and workflows into reusable assets.
 - Support multi-host batch execution, file distribution, interactive broadcast terminals, and execution history tracking.
 - Store configuration and operation data in a local database, reducing dependency on centralized services.
@@ -41,6 +42,13 @@ Core goals:
 - SFTP file panel: supports local/remote two-pane browsing, upload, download, preview, rename, delete, mkdir, bookmarks, archive extraction, and transfer queues.
 - Remote editor: files/directories can be opened from the SFTP panel, edited with CodeMirror, and saved back through SFTP.
 - Port forwarding: the terminal bottom panel includes an entry for port forwarding.
+
+### Remote Desktop
+
+- RDP connections: Windows hosts can be opened in a standalone RDP window. Host settings include domain, desktop resolution, clipboard, audio, and disk mapping options; the frontend supports both H.264 direct presentation and bitmap presentation paths.
+- VNC connections: VNC hosts can be opened through the noVNC client and a local WebSocket bridge. Host settings include port, username, password, shared connections, and view-only mode.
+- Resolution boundaries: VNC requests `1280x720` by default and limits presentation size to `1920x1080`; RDP desktop settings are clamped between `640x480` and `3840x2160`.
+- Diagnostics: RDP/VNC pages emit connection, FPS, transport, and diagnostic logs to help investigate connection failures, authentication failures, and refresh performance.
 
 ### Batch Execution and File Distribution
 
@@ -82,7 +90,7 @@ React/Vite UI
   -> Zustand stores
   -> Tauri invoke() commands and Tauri events
   -> Rust command modules
-  -> SQLite / SSH / SFTP / local PTY / Git / HTTP / OS keychain
+  -> SQLite / SSH / SFTP / RDP / VNC / local PTY / Git / HTTP / OS keychain
 ```
 
 ### Tech Stack
@@ -100,7 +108,7 @@ React/Vite UI
 | Workflow canvas | React Flow / `@xyflow/react` |
 | Drag-and-drop / animation | dnd-kit, GSAP |
 | Backend language | Rust |
-| Backend capabilities | Tauri commands, SQLite (`rusqlite`), SSH/SFTP (`russh`, `russh-sftp`), local PTY, Git (`git2`), HTTP (`reqwest`) |
+| Backend capabilities | Tauri commands, SQLite (`rusqlite`), SSH/SFTP (`russh`, `russh-sftp`), RDP (`ironrdp`), VNC WebSocket bridge, WebRTC/H.264 remote-desktop path, local PTY, Git (`git2`), HTTP (`reqwest`) |
 | Local data | SQLite database `opsbatch.db` under the Tauri app data directory |
 
 ## Repository Structure
@@ -120,7 +128,7 @@ React/Vite UI
 │   ├── types/                # Frontend domain types
 │   └── i18n/                 # zh-CN / en-US dictionaries and language resolution
 ├── src-tauri/                # Tauri v2 Rust backend
-│   ├── src/commands/         # hosts, terminal, execution, sftp, workflow, ai, etc.
+│   ├── src/commands/         # hosts, terminal, execution, sftp, rdp, vnc, workflow, ai, etc.
 │   ├── src/db/               # SQLite schema and migrations
 │   ├── Cargo.toml            # Rust dependencies
 │   ├── tauri.conf.json       # Tauri app and bundle configuration
@@ -231,12 +239,12 @@ Please note the current security status and avoid over-assumptions:
 
 ## Compliance and Legal Notice
 
-OpsBatch is intended for authorized operations workflows. It provides SSH, SFTP, batch commands, file distribution, workflows, and optional AI assistance. The tool does not grant authorization on behalf of users and does not replace internal approval, audit, change-management, or security processes.
+OpsBatch is intended for authorized operations workflows. It provides SSH, SFTP, RDP/VNC remote desktop, batch commands, file distribution, workflows, and optional AI assistance. The tool does not grant authorization on behalf of users and does not replace internal approval, audit, change-management, or security processes.
 
 ### Network Compliance and Authorized Access
 
 - Use OpsBatch only on servers, accounts, networks, cloud resources, and data scopes that you own, manage, or are explicitly authorized to access.
-- Batch commands, scripts, file distribution, port forwarding, and workflows can change configuration, move data, alter permissions, or interrupt services. Confirm the target scope, command impact, approval requirements, and rollback plan before execution.
+- Batch commands, scripts, file distribution, port forwarding, remote desktop operations, and workflows can change configuration, move data, alter permissions, or interrupt services. Confirm the target scope, command impact, approval requirements, and rollback plan before execution.
 - Users must comply with organizational policies, provider terms, account-permission boundaries, and applicable laws and regulations. Do not use OpsBatch for unauthorized access, bypassing security controls, service disruption, or handling data you are not permitted to process.
 
 ### Generative AI Service Notice
@@ -267,6 +275,7 @@ The README, website, application UI, risk prompts, and AI outputs do not constit
 - Workflow scheduling: scheduled tasks mainly use simple `every:N` interval parsing and are not yet a full Cron expression scheduler.
 - RAG/MCP: backend commands and tables exist for RAG collection/import/search and MCP server/tool operations, but the desktop route map does not currently include standalone top-level RAG or MCP pages.
 - Monitoring: host monitoring commands are mainly Linux/procfs oriented; metric completeness may differ on other systems.
+- Remote desktop: RDP/VNC have standalone windows and backend session management. VNC performance still depends on the target server encoding, network quality, noVNC rendering, and the remote host's frame-update strategy, so it should not be described as equivalent to a native VNC client in all cases.
 - Batch terminal: the broadcast terminal window currently limits selected hosts to 16.
 - Batch transfer: the current UI primarily presents batch upload; the transfer concurrency input is not fully passed through to the backend request yet.
 - Git repository sync: the current implementation expects language-specific metadata/file conventions, such as `library_cn.json`, `library_en.json`, and corresponding suffixes. Prepare repository content according to the current implementation.

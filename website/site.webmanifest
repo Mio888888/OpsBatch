@@ -1,7 +1,7 @@
 {
   "name": "OpsBatch",
   "short_name": "OpsBatch",
-  "description": "本地 SSH、SFTP、批量命令与自动化工作流运维工作台。",
+  "description": "本地 SSH、SFTP、RDP/VNC、批量命令与自动化工作流运维工作台。",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

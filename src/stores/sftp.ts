@@ -386,23 +386,12 @@ export const useSftpStore = create<SftpState>((set, get) => ({
     if (entry.is_dir) return;
     set({ previewLoading: true, previewFile: { side: 'remote', entry, data: null } });
     try {
-      const data = await invoke<Array<number>>('sftp_read_file', {
+      const base64 = await invoke<string>('sftp_read_file', {
         hostId,
         path: entry.path,
         maxSize: 2 * 1024 * 1024,
       });
-      const bytes = new Uint8Array(data);
-      const blob = new Blob([bytes]);
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        const base64 = result.split(',')[1];
-        set({ previewFile: { side: 'remote', entry, data: base64 }, previewLoading: false });
-      };
-      reader.onerror = () => {
-        set({ previewLoading: false, previewFile: null });
-      };
-      reader.readAsDataURL(blob);
+      set({ previewFile: { side: 'remote', entry, data: base64 }, previewLoading: false });
     } catch (e: unknown) {
       set({ previewLoading: false, previewFile: null });
     }
@@ -412,22 +401,11 @@ export const useSftpStore = create<SftpState>((set, get) => ({
     if (entry.is_dir) return;
     set({ previewLoading: true, previewFile: { side: 'local', entry, data: null } });
     try {
-      const data = await invoke<Array<number>>('local_read_file', {
+      const base64 = await invoke<string>('local_read_file', {
         path: entry.path,
         maxSize: 2 * 1024 * 1024,
       });
-      const bytes = new Uint8Array(data);
-      const blob = new Blob([bytes]);
-      const reader = new FileReader();
-      reader.onload = () => {
-        const result = reader.result as string;
-        const base64 = result.split(',')[1];
-        set({ previewFile: { side: 'local', entry, data: base64 }, previewLoading: false });
-      };
-      reader.onerror = () => {
-        set({ previewLoading: false, previewFile: null });
-      };
-      reader.readAsDataURL(blob);
+      set({ previewFile: { side: 'local', entry, data: base64 }, previewLoading: false });
     } catch (e: unknown) {
       set({ previewLoading: false, previewFile: null });
     }

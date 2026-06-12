@@ -1,4 +1,5 @@
 use std::fs;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use std::path::{Path, PathBuf};
 
 use dashmap::DashMap;
@@ -169,7 +170,7 @@ pub async fn local_read_file(
     manager: tauri::State<'_, LocalFsManager>,
     path: String,
     max_size: Option<u64>,
-) -> Result<Vec<u8>, String> {
+) -> Result<String, String> {
     manager.ensure_authorized(&path)?;
     let file = Path::new(&path);
     if !file.exists() {
@@ -185,7 +186,7 @@ pub async fn local_read_file(
         ));
     }
 
-    fs::read(file).map_err(|e| format!("read failed: {}", e))
+    fs::read(file).map(|bytes| BASE64.encode(&bytes)).map_err(|e| format!("read failed: {}", e))
 }
 
 #[tauri::command]

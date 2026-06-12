@@ -68,12 +68,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       currentFileName: null,
     });
     try {
-      const data = await invoke<Array<number>>('sftp_read_file', {
+      const data = await invoke<string>('sftp_read_file', {
         hostId,
         path: filePath,
         maxSize: 10 * 1024 * 1024,
       });
-      const bytes = new Uint8Array(data);
+      const binary = atob(data);
+      const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
       const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
       set({
         content: text,
@@ -125,12 +126,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ loading: true, error: null });
     const name = filePath.split('/').pop() || filePath;
     try {
-      const data = await invoke<Array<number>>('sftp_read_file', {
+      const data = await invoke<string>('sftp_read_file', {
         hostId,
         path: filePath,
         maxSize: 10 * 1024 * 1024,
       });
-      const bytes = new Uint8Array(data);
+      const binary = atob(data);
+      const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
       const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
       set({
         content: text,

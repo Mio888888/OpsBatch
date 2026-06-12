@@ -1,4 +1,5 @@
 use std::fs;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -401,7 +402,7 @@ pub async fn sftp_read_file(
     host_id: String,
     path: String,
     max_size: Option<u64>,
-) -> Result<Vec<u8>, String> {
+) -> Result<String, String> {
     run_on_blocking_thread("sftp read file", move || {
         let db = app.state::<Database>();
         let manager = app.state::<SftpManager>();
@@ -430,6 +431,7 @@ pub async fn sftp_read_file(
         entry
             .lease
             .block_on(sftp.read(&path))
+            .map(|bytes| BASE64.encode(&bytes))
             .map_err(|e| format!("read failed: {}", e))
     })
     .await

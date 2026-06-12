@@ -412,10 +412,56 @@ impl SharedSshConnection {
     }
 
     pub fn is_closed(&self) -> bool {
+       match self.inner.handle.try_lock() {
+           Ok(handle) => handle.is_closed(),
+           Err(_) => false,
+       }
+   }
+
+    /// 检查连接是否已死（含锁超时场景）。
+    /// 当 try_lock 拿不到锁时说明另一个操作正在长时间占用 handle，
+    /// 如果持续拿不到锁则怀疑连接已卡死。
+    pub fn is_dead(&self) -> bool {
         match self.inner.handle.try_lock() {
             Ok(handle) => handle.is_closed(),
-            Err(_) => false,
+            Err(_) => {
+                // 拿不到锁，尝试短暂等待后重试一次
+                std::thread::sleep(Duration::from_millis(50));
+                match self.inner.handle.try_lock() {
+                    Ok(handle) => handle.is_closed(),
+                    Err(_) => {
+                        eprintln!("[SSH] is_dead: handle lock contention, treating as potentially dead");
+                        false
+                    }
+                }
+            }
         }
+    }
+
+    /// 通过尝试打开并立即关闭一个临时 channel 来探测连接是否真正可用。
+    /// 比 is_closed/is_dead 更可靠——能检测出 TCP 已断但 russh 尚未感知的场景。
+    pub fn health_probe(&self) -> bool {
+        let conn = self.clone();
+        let result = self.block_on(async {
+            // 用 tokio::time::timeout 防止 probe 卡在死连接上
+            match tokio::time::timeout(Duration::from_secs(5), conn.open_channel_async()).await {
+                Ok(Ok(channel)) => {
+                    // 成功打开 channel，立即关闭——连接是活的
+                    drop(channel);
+                    true
+                }
+                Ok(Err(_)) => {
+                    // channel 打开失败——连接已不可用
+                    false
+                }
+                Err(_) => {
+                    // timeout——连接卡死
+                    eprintln!("[SSH] health_probe: channel open timed out, connection likely dead");
+                    false
+                }
+            }
+        });
+        result
     }
 
     pub fn block_on<F: Future>(&self, future: F) -> F::Output {
@@ -891,31 +937,86 @@ impl SshConnectionRegistry {
 
     pub fn start_idle_reaper(app_handle: tauri::AppHandle) {
         std::thread::spawn(move || loop {
-            std::thread::sleep(Duration::from_secs(60));
+            std::thread::sleep(Duration::from_secs(30));
             let registry = app_handle.state::<SshConnectionRegistry>();
-            registry.reap_idle();
+            registry.reap_and_health_check();
         });
     }
 
-    fn reap_idle(&self) {
+    /// 合并 idle 回收与健康检查：
+    /// 1. 检查 is_dead() → 标记 LinkDown + 移除（静默断连回收）
+    /// 2. 对非 idle 超时连接做 health_probe → 检测 TCP 层已断但 russh 未感知的场景
+    /// 3. idle 超时 → 正常回收
+    fn reap_and_health_check(&self) {
         let now = Instant::now();
         let keys: Vec<String> = self.connections.iter().map(|r| r.key().clone()).collect();
         for key in keys {
             if let Some(entry) = self.connections.get(&key) {
+                // 第一关：is_dead() 检查——快速发现 russh 已标记 closed 的连接
+                if entry.connection.is_dead() {
+                    let state = *entry.state.lock().unwrap_or_else(|e| e.into_inner());
+                    drop(entry);
+                    eprintln!(
+                        "[SSH Registry] Dead connection detected for {}, state={:?}",
+                        key, state
+                    );
+                    self.connections.remove(&key);
+                    self.emit_connection_status(&key, ConnectionState::LinkDown);
+                    continue;
+                }
+
                 let last = *entry
                     .last_activity
                     .lock()
                     .unwrap_or_else(|e| e.into_inner());
-                if now.duration_since(last) > self.idle_timeout {
-                    let should_remove = {
-                        let s = entry.state.lock().unwrap_or_else(|e| e.into_inner());
-                        *s == ConnectionState::Active
+                let idle_duration = now.duration_since(last);
+
+                let is_active = {
+                    let s = entry.state.lock().unwrap_or_else(|e| e.into_inner());
+                    *s == ConnectionState::Active
+                };
+                drop(entry);
+
+                if !is_active {
+                    // 非 Active 状态（Connecting/LinkDown/Reconnecting）不做 idle 回收
+                    continue;
+                }
+
+                // 第二关：idle 超时回收
+                if idle_duration > self.idle_timeout {
+                    self.connections.remove(&key);
+                    eprintln!(
+                        "[SSH Registry] Idle timeout for {} (idle {:.0}s)",
+                        key,
+                        idle_duration.as_secs_f64()
+                    );
+                    self.emit_connection_status(&key, ConnectionState::Idle);
+                    continue;
+                }
+
+                // 第三关：对空闲超过 60 秒但未达 idle_timeout 的连接做主动 probe
+                // 这能捕获 TCP 已断但 russh keepalive 尚未感知的"半死"连接
+                if idle_duration > Duration::from_secs(60) {
+                    let probe_key = key.clone();
+                    let probe_ok = {
+                        if let Some(e) = self.connections.get(&probe_key) {
+                            e.connection.health_probe()
+                        } else {
+                            continue;
+                        }
                     };
-                    drop(entry);
-                    if should_remove {
+                    if !probe_ok {
+                        eprintln!(
+                            "[SSH Registry] Health probe failed for {} (idle {:.0}s), marking dead",
+                            key,
+                            idle_duration.as_secs_f64()
+                        );
+                        if let Some(e) = self.connections.get(&key) {
+                            *e.state.lock().unwrap_or_else(|e| e.into_inner()) =
+                                ConnectionState::LinkDown;
+                        }
                         self.connections.remove(&key);
-                        eprintln!("[SSH Registry] Idle timeout for {}", key);
-                        self.emit_connection_status(&key, ConnectionState::Idle);
+                        self.emit_connection_status(&key, ConnectionState::LinkDown);
                     }
                 }
             }
@@ -1073,18 +1174,40 @@ impl SshConnectionRegistry {
 
     fn get_existing(&self, host_id: &str) -> Option<SharedSshConnection> {
         let entry = self.connections.get(host_id)?;
-        if entry.connection.is_closed() {
+        // 使用 is_dead() 替代 is_closed()，能覆盖锁竞争场景
+        if entry.connection.is_dead() {
             drop(entry);
             self.connections
-                .remove_if(host_id, |_, e| e.connection.is_closed());
+                .remove_if(host_id, |_, e| e.connection.is_dead());
             eprintln!(
-                "[SSH Registry] Dropping closed shared connection for {}",
+                "[SSH Registry] Dropping dead shared connection for {}",
                 host_id
             );
             return None;
         }
-        entry.touch();
-        Some(entry.connection.clone())
+        // 对空闲超过 30 秒的连接做轻量 probe，确保不在取用时拿到半死连接
+        let last = *entry
+            .last_activity
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if last.elapsed() > Duration::from_secs(30) && !entry.connection.health_probe() {
+            drop(entry);
+            self.connections.remove(host_id);
+            eprintln!(
+                "[SSH Registry] Health probe failed on get_existing for {}, removing",
+                host_id
+            );
+            self.emit_connection_status(host_id, ConnectionState::LinkDown);
+            return None;
+        }
+        drop(entry);
+        // 重新获取 entry 来 touch（前面可能已经 drop）
+        if let Some(e) = self.connections.get(host_id) {
+            e.touch();
+            Some(e.connection.clone())
+        } else {
+            None
+        }
     }
 
     fn reconnect_and_store(

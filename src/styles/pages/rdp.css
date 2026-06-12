@@ -219,6 +219,16 @@
   text-align: center;
 }
 
+.rdp-terminal-state-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(245, 247, 246, 0.82);
+}
+
+.rdp-terminal-state-overlay .terminal-page-state-shell {
+  height: 100%;
+}
+
 [data-theme-tone="dark"] .rdp-page {
   background: #181b1d;
 }
@@ -236,6 +246,10 @@
 }
 
 [data-theme-tone="dark"] .rdp-overlay {
+  background: rgba(17, 20, 22, 0.84);
+}
+
+[data-theme-tone="dark"] .rdp-terminal-state-overlay {
   background: rgba(17, 20, 22, 0.84);
 }
 

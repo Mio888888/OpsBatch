@@ -4,7 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import RFB from '@novnc/novnc';
-import { Button, Empty } from '../../components/ui';
+import { Button, Empty, Spin } from '../../components/ui';
 import { CloseOutlined, ReloadOutlined } from '../../components/ui/icons';
 import WindowControls from '../../components/WindowControls';
 import { useAssetsStore } from '../../stores/assets';
@@ -32,6 +32,7 @@ type RfbEvent<TDetail = unknown> = Event & { detail?: TDetail };
 
 const VNC_INTERACTIVE_QUALITY_LEVEL = 2;
 const VNC_INTERACTIVE_COMPRESSION_LEVEL = 0;
+const VNC_CONNECT_WATCHDOG_MS = 15000;
 
 type RfbDebugState = {
   _display?: {
@@ -352,6 +353,14 @@ export default function VncPage() {
     let disposed = false;
     let disposePerformanceDiagnostics: (() => void) | undefined;
     let disposeInputDiagnostics: (() => void) | undefined;
+    const connectWatchdog = window.setTimeout(() => {
+      if (disposed || sessionIdRef.current !== nextSessionId || statusRef.current !== 'connecting') return;
+      disposed = true;
+      writeVncDiagnosticLog(`novnc connect timeout hostId=${activeHostId} sessionId=${nextSessionId}`);
+      closeVncSession(nextSessionId, false);
+      updateStatus('error');
+      setStatusMessage(tTextRef.current('vnc.connectTimeout'));
+    }, VNC_CONNECT_WATCHDOG_MS);
     writeVncDiagnosticLog(
       `effect start hostId=${activeHostId} sessionId=${nextSessionId} connectNonce=${connectNonce}`,
     );
@@ -398,6 +407,7 @@ export default function VncPage() {
 
       rfb.addEventListener('connect', () => {
         if (disposed || sessionIdRef.current !== nextSessionId) return;
+        window.clearTimeout(connectWatchdog);
         writeVncDiagnosticLog(`novnc connect hostId=${activeHostId} sessionId=${nextSessionId} viewOnly=${rfb.viewOnly} focusOnClick=${rfb.focusOnClick} ${describeRfbRuntime(rfb)}`);
         updateStatus('connected');
         setStatusMessage(tTextRef.current('vnc.state.connected'));
@@ -409,6 +419,7 @@ export default function VncPage() {
           `novnc disconnect hostId=${activeHostId} sessionId=${nextSessionId} clean=${clean}`,
         );
         if (disposed || sessionIdRef.current !== nextSessionId) return;
+        window.clearTimeout(connectWatchdog);
         updateStatus(clean ? 'disconnected' : 'error');
         setStatusMessage(clean ? tTextRef.current('vnc.state.disconnected') : 'VNC connection closed unexpectedly');
       });
@@ -422,6 +433,7 @@ export default function VncPage() {
           rfb.sendCredentials(credentials);
           return;
         }
+        window.clearTimeout(connectWatchdog);
         updateStatus('error');
         setStatusMessage(`VNC server requires credentials: ${missing.join(', ') || types.join(', ') || 'unknown'}`);
       });
@@ -431,6 +443,7 @@ export default function VncPage() {
         writeVncDiagnosticLog(
           `novnc securityfailure hostId=${activeHostId} sessionId=${nextSessionId} reason=${reason} ${describeRfbAuthScheme(rfb)}`,
         );
+        window.clearTimeout(connectWatchdog);
         updateStatus('error');
         setStatusMessage(reason);
       });
@@ -449,6 +462,7 @@ export default function VncPage() {
 
     void start().catch((error: unknown) => {
       if (!disposed) {
+        window.clearTimeout(connectWatchdog);
         writeVncDiagnosticLog(`invoke vnc_connect failed hostId=${activeHostId} sessionId=${nextSessionId} error=${String(error)}`);
         updateStatus('error');
         setStatusMessage(String(error));
@@ -476,6 +490,7 @@ export default function VncPage() {
       disposed = true;
       disposePerformanceDiagnostics?.();
       disposeInputDiagnostics?.();
+      window.clearTimeout(connectWatchdog);
       window.clearInterval(statusInterval);
       if (sessionIdRef.current === nextSessionId) {
         rfbRef.current?.disconnect();
@@ -517,10 +532,12 @@ export default function VncPage() {
   }
 
   const statusLabel = t(`vnc.state.${status}` as Parameters<typeof t>[0]);
-  const showOverlay = status !== 'connected';
+  const showConnecting = status === 'connecting';
+  const showError = status === 'error';
   const defaultResolution = vncDefaultResolution();
   const presentation = vncPresentationSize(defaultResolution.width, defaultResolution.height);
   const limit = vncResolutionLimit(presentation.width, presentation.height);
+  const targetLabel = host.ip || host.name;
 
   return (
     <section className="rdp-page">
@@ -564,11 +581,44 @@ export default function VncPage() {
             height: `${limit.height}px`,
           }}
         />
-        {showOverlay ? (
-          <div className="rdp-overlay">
-            <div className="rdp-overlay-card">
-              <strong>{statusLabel}</strong>
-              <span>{statusMessage}</span>
+        {showConnecting ? (
+          <div className="rdp-terminal-state-overlay">
+            <div className="terminal-page-state-shell">
+              <section className="terminal-state-card" aria-live="polite">
+                <div className="terminal-state-card-header">
+                  <span className="terminal-status-light terminal-status-light-connecting" aria-hidden="true" />
+                  <span>{t('vnc.connectingTitle')}</span>
+                </div>
+                <div className="terminal-state-card-body">
+                  <Spin size="small" />
+                  <div>
+                    <div className="terminal-state-title">{t('vnc.connectTo', { target: targetLabel })}</div>
+                    <div className="terminal-state-subtitle">{t('vnc.connectingSubtitle')}</div>
+                  </div>
+                </div>
+                <div className="terminal-state-command" aria-hidden="true">
+                  <span>$</span>
+                  <span className="terminal-state-command-text">opsbatch vnc connect --target {targetLabel}</span>
+                </div>
+              </section>
+            </div>
+          </div>
+        ) : null}
+        {showError ? (
+          <div className="rdp-terminal-state-overlay">
+            <div className="terminal-page-state-shell">
+              <section className="terminal-state-card terminal-state-card-error" role="alert">
+                <div className="terminal-state-card-header">
+                  <span className="terminal-status-light terminal-status-light-error" aria-hidden="true" />
+                  <span>{t('vnc.connectFailed')}</span>
+                </div>
+                <div className="terminal-state-title">{t('vnc.sessionStartFailed')}</div>
+                <p className="terminal-state-subtitle">{statusMessage || t('vnc.errorFallback')}</p>
+                <div className="terminal-state-actions">
+                  <Button type="primary" onClick={reconnectVncSession}>{t('vnc.reconnect')}</Button>
+                  <Button onClick={() => navigate('/terminal?assets=1')}>{t('vnc.openAssets')}</Button>
+                </div>
+              </section>
             </div>
           </div>
         ) : null}

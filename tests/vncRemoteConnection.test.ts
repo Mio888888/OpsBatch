@@ -211,6 +211,35 @@ test('frontend closes stale noVNC sessions after asynchronous effect cleanup', (
   assert.doesNotMatch(source, /\}, \[activeHostId,\s*connectNonce,[^\]]*queryHostId/);
 });
 
+test('frontend fails stuck VNC handshakes instead of showing an endless blank connection', () => {
+  const source = readVncFrontendSource();
+
+  assert.match(source, /VNC_CONNECT_WATCHDOG_MS/);
+  assert.match(source, /window\.setTimeout/);
+  assert.match(source, /window\.clearTimeout\(connectWatchdog\)/);
+  assert.match(source, /vnc\.connectTimeout/);
+  assert.match(source, /novnc connect timeout/);
+  assert.match(source, /closeVncSession\(nextSessionId, false\)/);
+});
+
+test('frontend renders VNC connecting and error states with the SSH state UI', () => {
+  const vncSource = readVncFrontendSource();
+  const terminalSource = readFileSync('src/pages/Terminal/TerminalPage.tsx', 'utf8');
+
+  assert.match(terminalSource, /terminal-page-state-shell/);
+  assert.match(terminalSource, /terminal-state-card/);
+  assert.match(vncSource, /terminal-page-state-shell/);
+  assert.match(vncSource, /terminal-state-card/);
+  assert.match(vncSource, /terminal-status-light-connecting/);
+  assert.match(vncSource, /terminal-state-card-error/);
+  assert.match(vncSource, /role="alert"/);
+  assert.match(vncSource, /vnc\.connectingTitle/);
+  assert.match(vncSource, /vnc\.connectTo/);
+  assert.match(vncSource, /vnc\.sessionStartFailed/);
+  assert.match(vncSource, /vnc\.errorFallback/);
+  assert.doesNotMatch(vncSource, /rdp-overlay-card/);
+});
+
 test('VNC connection path writes diagnostics for frontend and backend handoff points', () => {
   const frontendSource = readVncFrontendSource();
   const backendSource = readVncBackendSource();

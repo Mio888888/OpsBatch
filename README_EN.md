@@ -52,8 +52,8 @@ Core goals:
 
 ### Batch Execution and File Distribution
 
-- Batch command execution: executes commands on selected hosts, with concurrency, timeout, real-time results, failed-host retry, and history.
-- Dangerous command protection: built-in and custom dangerous-command rules trigger confirmation before high-risk commands; AI can also be used to explain risks.
+- Batch command execution: executes commands on selected hosts, with concurrency, timeout, real-time results, failed-host retry, and history. Connection semaphores limit per-batch concurrency to 4, preventing connection saturation.
+- Dangerous command protection: built-in and custom dangerous-command rules trigger confirmation before high-risk commands; AI can also be used to explain risks. Regex rules are pre-compiled to eliminate repeated compilation overhead on every keystroke.
 - Execution replay: the backend persists history and supports asciinema-style terminal replay data.
 - Broadcast terminal: opens a separate batch terminal window and broadcasts input to multiple connected hosts. The current window caps selected hosts at 16.
 - Batch file transfer: supports selecting a local file or directory and uploading it to multiple hosts. Remote paths support `{host}` and `{firstdir:path}` variables. The current UI is primarily focused on batch upload.
@@ -109,7 +109,7 @@ React/Vite UI
 | Drag-and-drop / animation | dnd-kit, GSAP |
 | Backend language | Rust |
 | Backend capabilities | Tauri commands, SQLite (`rusqlite`), SSH/SFTP (`russh`, `russh-sftp`), RDP (`ironrdp`), VNC WebSocket bridge, WebRTC/H.264 remote-desktop path, local PTY, Git (`git2`), HTTP (`reqwest`) |
-| Local data | SQLite database `opsbatch.db` under the Tauri app data directory |
+| Local data | SQLite database `opsbatch.db` under the Tauri app data directory (r2d2 connection pool) |
 
 ## Repository Structure
 
@@ -268,6 +268,17 @@ OpsBatch is intended for authorized operations workflows. It provides SSH, SFTP,
 ### Not Legal or Professional Advice
 
 The README, website, application UI, risk prompts, and AI outputs do not constitute legal, compliance, security-audit, or professional operations advice. Requirements vary across organizations, industries, and jurisdictions. For production changes, personal information, sensitive data, regulated industries, or cross-border processing, consult qualified professionals and follow your organization's formal processes.
+
+## Performance Optimizations (0.1.3)
+
+- Database connection pool: replaced single-connection Mutex with r2d2 connection pool, reducing lock contention under high concurrency.
+- SSH connection pool: eliminated per-connection tokio Runtime, unified to a shared Runtime via connection pool, reducing resource usage for batch operations.
+- Batch execution memory: replaced repeated String clones with `Arc<str>`, reducing memory allocations during batch runs.
+- Regex pre-compilation: dangerous-command and RAG tokenize/chunk regex patterns elevated to global static constants, avoiding repeated compilation at runtime.
+- File preview memory: eliminated `Array<number>` intermediate representation in SFTP file previews, reducing memory usage by approximately 5x.
+- First-screen loading: lazy-loaded CodeEditor component, optimized prefetchPages for batch preloading, fixed broken lazy loading.
+- SSH idle reaping: fixed silent disconnection when idle reaper failed to reclaim, added proactive health checks.
+- Host monitoring: removed sleep wait in SSH monitoring snapshots, switched to frontend cumulative delta calculation for CPU usage.
 
 ## Current Status and Known Limitations
 

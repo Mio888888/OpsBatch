@@ -37,6 +37,12 @@ const setActiveLink = () => {
     const isActive = link.getAttribute('href') === `#${active.id}`;
     link.toggleAttribute('aria-current', isActive);
   });
+
+  const mobileLinks = document.querySelectorAll('.mobile-nav-links a');
+  mobileLinks.forEach((link) => {
+    const isActive = link.getAttribute('href') === `#${active.id}`;
+    link.toggleAttribute('aria-current', isActive);
+  });
 };
 
 document.addEventListener('scroll', setActiveLink, { passive: true });
@@ -46,6 +52,44 @@ document.querySelectorAll('.clay-button').forEach((button) => {
   button.addEventListener('pointerdown', () => button.classList.add('is-pressed'));
   button.addEventListener('pointerup', () => button.classList.remove('is-pressed'));
   button.addEventListener('pointerleave', () => button.classList.remove('is-pressed'));
+});
+
+// Mobile nav toggle
+const menuToggle = document.querySelector('.menu-toggle');
+const mobileNav = document.querySelector('.mobile-nav');
+const mobileOverlay = document.querySelector('.mobile-overlay');
+const mobileNavClose = document.querySelector('.mobile-nav-close');
+
+const openMobileNav = () => {
+  mobileNav.classList.add('is-open');
+  mobileOverlay.classList.add('is-visible');
+  mobileNav.removeAttribute('aria-hidden');
+  mobileOverlay.removeAttribute('aria-hidden');
+  if (menuToggle) menuToggle.setAttribute('aria-expanded', 'true');
+  document.body.style.overflow = 'hidden';
+};
+
+const closeMobileNav = () => {
+  mobileNav.classList.remove('is-open');
+  mobileOverlay.classList.remove('is-visible');
+  if (menuToggle) menuToggle.setAttribute('aria-expanded', 'false');
+  document.body.style.overflow = '';
+};
+
+if (menuToggle) menuToggle.addEventListener('click', openMobileNav);
+if (mobileNavClose) mobileNavClose.addEventListener('click', closeMobileNav);
+if (mobileOverlay) mobileOverlay.addEventListener('click', closeMobileNav);
+
+document.querySelectorAll('.mobile-nav-links a, .mobile-nav-cta').forEach((link) => {
+  link.addEventListener('click', () => {
+    closeMobileNav();
+  });
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && mobileNav.classList.contains('is-open')) {
+    closeMobileNav();
+  }
 });
 
 const currentOS = detectOS();

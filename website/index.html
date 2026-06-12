@@ -93,7 +93,33 @@
         </nav>
 
         <a class="nav-cta clay-button" href="#download">软件下载</a>
+
+        <button class="menu-toggle" type="button" aria-label="打开导航菜单" aria-expanded="false">
+          <svg viewBox="0 0 24 24"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+        </button>
       </header>
+
+      <div class="mobile-overlay" aria-hidden="true"></div>
+      <aside class="mobile-nav" aria-label="移动端导航">
+        <div class="mobile-nav-header">
+          <a class="brand" href="#hero" aria-label="OpsBatch 首页">
+            <span class="brand-mark" aria-hidden="true"><img src="./assets/app-icon.png" alt="" /></span>
+            <span class="brand-copy"><strong>OpsBatch</strong><small>local-first ops</small></span>
+          </a>
+          <button class="mobile-nav-close" type="button" aria-label="关闭导航菜单">
+            <svg viewBox="0 0 24 24"><line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg>
+          </button>
+        </div>
+        <nav class="mobile-nav-links">
+          <a href="#why">为什么</a>
+          <a href="#features">能力</a>
+          <a href="#architecture">架构</a>
+          <a href="#security">安全</a>
+          <a href="#compliance">合规</a>
+          <a href="#download">下载</a>
+        </nav>
+        <a class="mobile-nav-cta" href="#download">软件下载</a>
+      </aside>
 
       <main id="main-content">
         <section id="hero" class="hero-section" aria-labelledby="hero-title">
@@ -113,9 +139,10 @@
             </div>
             <div class="trust-strip" aria-label="产品特点">
               <span>Tauri 2 桌面端</span>
-              <span>SQLite 本地数据</span>
+              <span>SQLite 连接池</span>
               <span>RDP / VNC 独立窗口</span>
-              <span>最多 16 台广播终端</span>
+              <span>16 台广播终端</span>
+              <span>SSH 连接池复用</span>
             </div>
             <a class="release-link" href="https://github.com/Mio888888/OpsBatch/releases/latest" target="_blank" rel="noreferrer">
               查看最新 Release
@@ -314,9 +341,10 @@ $ _</code></pre>
               <h3>批量执行</h3>
               <p>对选中主机并发运行命令，保留结果、失败重试和终端回放。</p>
               <ul class="feature-list">
-                <li>并发数、超时和失败主机重试</li>
+                <li>并发信号量控制、超时和失败主机重试</li>
                 <li>广播终端最多处理 16 台主机</li>
                 <li>执行历史支持回放与复盘</li>
+                <li>SSH 连接池共享 Runtime，降低并发资源占用</li>
               </ul>
             </article>
             <article class="feature-card clay-card">
@@ -376,7 +404,7 @@ $ _</code></pre>
             <article class="architecture-card clay-card">
               <span>02</span>
               <h3>本地 SQLite 数据</h3>
-              <p>主机、分组、标签、执行历史、命令库、工作流和日志优先保存在本机。</p>
+              <p>主机、分组、标签、执行历史、命令库、工作流和日志优先保存在本机，使用 r2d2 连接池优化高并发读写。</p>
             </article>
             <article class="architecture-card clay-card">
               <span>03</span>

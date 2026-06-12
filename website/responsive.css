@@ -96,6 +96,43 @@
   .demo-section {
     gap: 36px;
   }
+
+  .security-shell {
+    padding: 28px;
+  }
+
+  .download-section {
+    gap: 36px;
+    padding: 36px;
+  }
+}
+
+@media (max-width: 768px) {
+  .feature-grid-large,
+  .architecture-grid,
+  .security-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .compare-row {
+    grid-template-columns: 1fr;
+  }
+
+  .architecture-map {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .map-rail {
+    width: 10px;
+    height: 28px;
+    margin: 0 auto;
+    background: linear-gradient(180deg, rgba(132, 168, 255, 0.52), rgba(149, 224, 189, 0.52));
+  }
 }
 
 @media (max-width: 640px) {

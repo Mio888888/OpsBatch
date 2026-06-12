@@ -4,13 +4,16 @@ use rusqlite::Connection;
 
 use crate::security::SECRET_PLACEHOLDER;
 
+const SCHEMA_MIGRATION_ID: &str = "opsbatch_schema";
+const CURRENT_SCHEMA_VERSION: i64 = 1;
+
 pub struct Database {
     pub pool: Pool<SqliteConnectionManager>,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Database;
+    use super::{Database, CURRENT_SCHEMA_VERSION};
 
     fn temp_db_path(name: &str) -> std::path::PathBuf {
         let unique = format!(
@@ -82,6 +85,107 @@ mod tests {
         drop(conn);
         let _ = std::fs::remove_file(db_path);
     }
+
+    #[test]
+    fn init_tables_records_current_schema_version() {
+        let db_path = temp_db_path("schema-version");
+        let database = Database::new(&db_path).expect("open db");
+
+        database.init_tables().expect("init tables");
+
+        let conn = database.pool.get().expect("get db conn");
+        let version: i64 = conn
+            .query_row(
+                "SELECT version FROM schema_migrations WHERE id='opsbatch_schema'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("schema version");
+
+        assert_eq!(CURRENT_SCHEMA_VERSION, version);
+
+        drop(conn);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn init_tables_skips_legacy_migrations_after_current_version_is_recorded() {
+        let db_path = temp_db_path("schema-version-fast-path");
+        {
+            let conn = rusqlite::Connection::open(&db_path).expect("open fixture db");
+            conn.execute_batch(
+                "
+                CREATE TABLE schema_migrations (
+                    id TEXT PRIMARY KEY,
+                    version INTEGER NOT NULL,
+                    applied_at TEXT DEFAULT (datetime('now', 'localtime'))
+                );
+                CREATE TABLE github_repos (
+                    id TEXT PRIMARY KEY,
+                    url TEXT NOT NULL,
+                    branch TEXT DEFAULT 'main',
+                    token TEXT,
+                    pull_strategy TEXT DEFAULT 'manual',
+                    last_pulled_at TEXT,
+                    enabled INTEGER DEFAULT 1
+                );
+                INSERT INTO github_repos (id, url, pull_strategy) VALUES
+                    ('daily-repo', 'https://example.com/daily.git', 'daily');
+                ",
+            )
+            .expect("seed fixture db");
+            conn.execute(
+                "INSERT INTO schema_migrations (id, version) VALUES ('opsbatch_schema', ?1)",
+                rusqlite::params![CURRENT_SCHEMA_VERSION],
+            )
+            .expect("seed current schema version");
+        }
+
+        let database = Database::new(&db_path).expect("open db");
+        database.init_tables().expect("init tables");
+
+        let conn = database.pool.get().expect("get db conn");
+        let version: i64 = conn
+            .query_row(
+                "SELECT version FROM schema_migrations WHERE id='opsbatch_schema'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("schema version");
+        assert_eq!(CURRENT_SCHEMA_VERSION, version);
+
+        let has_update_on_startup: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('github_repos') WHERE name='update_on_startup'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("column check");
+        assert_eq!(0, has_update_on_startup);
+
+        drop(conn);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn init_tables_fast_path_stays_lightweight_after_schema_is_current() {
+        let db_path = temp_db_path("schema-version-timing");
+        let database = Database::new(&db_path).expect("open db");
+
+        database.init_tables().expect("first init");
+
+        let started_at = std::time::Instant::now();
+        database.init_tables().expect("second init");
+        let elapsed = started_at.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_millis(50),
+            "current schema init should only check migration version, elapsed: {:?}",
+            elapsed
+        );
+
+        let _ = std::fs::remove_file(db_path);
+    }
 }
 
 #[derive(Debug)]
@@ -108,6 +212,11 @@ impl Database {
 
     pub fn init_tables(&self) -> Result<(), String> {
         let conn = self.pool.get().map_err(|e| e.to_string())?;
+        Self::ensure_schema_migrations_table(&conn)?;
+        if Self::applied_schema_version(&conn)? >= CURRENT_SCHEMA_VERSION {
+            return Ok(());
+        }
+
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS hosts (
@@ -710,7 +819,49 @@ impl Database {
         // App logs table
         crate::commands::app_log::init_app_logs_table(&conn)?;
 
+        Self::record_schema_version(&conn)?;
+
         Ok(())
+    }
+
+    fn ensure_schema_migrations_table(conn: &Connection) -> Result<(), String> {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                id TEXT PRIMARY KEY,
+                version INTEGER NOT NULL,
+                applied_at TEXT DEFAULT (datetime('now', 'localtime'))
+            );
+            ",
+        )
+        .map_err(|e| e.to_string())
+    }
+
+    fn applied_schema_version(conn: &Connection) -> Result<i64, String> {
+        match conn.query_row(
+            "SELECT version FROM schema_migrations WHERE id=?1",
+            rusqlite::params![SCHEMA_MIGRATION_ID],
+            |row| row.get(0),
+        ) {
+            Ok(version) => Ok(version),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(0),
+            Err(err) => Err(err.to_string()),
+        }
+    }
+
+    fn record_schema_version(conn: &Connection) -> Result<(), String> {
+        conn.execute(
+            "
+            INSERT INTO schema_migrations (id, version, applied_at)
+            VALUES (?1, ?2, datetime('now', 'localtime'))
+            ON CONFLICT(id) DO UPDATE SET
+                version=excluded.version,
+                applied_at=excluded.applied_at
+            ",
+            rusqlite::params![SCHEMA_MIGRATION_ID, CURRENT_SCHEMA_VERSION],
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
     }
 
     fn migrate_host_secrets_to_keychain(&self, conn: &Connection) -> Result<(), String> {

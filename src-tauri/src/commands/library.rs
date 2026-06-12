@@ -22,7 +22,7 @@ pub struct CustomCommand {
 
 #[tauri::command]
 pub async fn list_commands(db: tauri::State<'_, Database>) -> Result<Vec<CustomCommand>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
         "SELECT id, name, command, category, tags, risk, description, platform, parameters, url, starred, is_builtin FROM commands ORDER BY is_builtin DESC, name"
     ).map_err(|e| e.to_string())?;
@@ -70,7 +70,7 @@ pub async fn add_command(
     command: NewCommand,
 ) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO commands (id, name, command, category, tags, risk, description, platform, parameters, url, starred, is_builtin) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, 0)",
         params![
@@ -94,7 +94,7 @@ pub async fn update_command(
     db: tauri::State<'_, Database>,
     command: CustomCommand,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE commands SET name=?1, command=?2, category=?3, tags=?4, risk=?5, description=?6, platform=?7, parameters=?8, url=?9, starred=?10 WHERE id=?11",
         params![
@@ -108,7 +108,7 @@ pub async fn update_command(
 
 #[tauri::command]
 pub async fn delete_command(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "DELETE FROM commands WHERE id=?1 AND is_builtin=0",
         params![id],
@@ -119,7 +119,7 @@ pub async fn delete_command(db: tauri::State<'_, Database>, id: String) -> Resul
 
 #[tauri::command]
 pub async fn toggle_star_command(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE commands SET starred = CASE WHEN starred=1 THEN 0 ELSE 1 END WHERE id=?1",
         params![id],
@@ -149,7 +149,7 @@ pub struct CustomScript {
 
 #[tauri::command]
 pub async fn list_scripts(db: tauri::State<'_, Database>) -> Result<Vec<CustomScript>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
         "SELECT id, name, language, category, tags, risk, description, content, parameters, url, platform, starred, is_builtin FROM scripts ORDER BY is_builtin DESC, name"
     ).map_err(|e| e.to_string())?;
@@ -197,7 +197,7 @@ pub async fn add_script(
     script: NewScript,
 ) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO scripts (id, name, language, category, tags, risk, description, content, parameters, url, platform, starred, is_builtin) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 0, 0)",
         params![
@@ -222,7 +222,7 @@ pub async fn update_script(
     db: tauri::State<'_, Database>,
     script: CustomScript,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE scripts SET name=?1, language=?2, category=?3, tags=?4, risk=?5, description=?6, content=?7, parameters=?8, url=?9, platform=?10, starred=?11 WHERE id=?12",
         params![
@@ -236,7 +236,7 @@ pub async fn update_script(
 
 #[tauri::command]
 pub async fn delete_script(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "DELETE FROM scripts WHERE id=?1 AND is_builtin=0",
         params![id],
@@ -247,7 +247,7 @@ pub async fn delete_script(db: tauri::State<'_, Database>, id: String) -> Result
 
 #[tauri::command]
 pub async fn toggle_star_script(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE scripts SET starred = CASE WHEN starred=1 THEN 0 ELSE 1 END WHERE id=?1",
         params![id],
@@ -272,7 +272,7 @@ pub async fn list_script_versions(
     db: tauri::State<'_, Database>,
     script_id: String,
 ) -> Result<Vec<ScriptVersion>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
         "SELECT id, script_id, content, label, created_at FROM script_versions WHERE script_id=?1 ORDER BY created_at DESC"
     ).map_err(|e| e.to_string())?;
@@ -300,7 +300,7 @@ pub async fn save_script_version(
     label: String,
 ) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO script_versions (id, script_id, content, label) VALUES (?1, ?2, ?3, ?4)",
         params![id, script_id, content, label],

@@ -55,7 +55,7 @@ pub fn emit_log(app: &AppHandle, level: &str, source: &str, message: &str, origi
         let source = source.to_string();
         let message = message.to_string();
         let origin = origin.to_string();
-        if let Ok(conn) = db.conn.lock() {
+        if let Ok(conn) = db.pool.get() {
             let _ = conn.execute(
                 "INSERT INTO app_logs (timestamp, level, source, message, origin) VALUES (?1, ?2, ?3, ?4, ?5)",
                 rusqlite::params![timestamp, level, source, message, origin],
@@ -72,7 +72,7 @@ pub fn emit_log(app: &AppHandle, level: &str, source: &str, message: &str, origi
 pub fn get_log_history(app: AppHandle, limit: Option<u32>) -> Result<Vec<AppLogEntry>, String> {
     let limit = limit.unwrap_or(500);
     let db = app.state::<Database>();
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
             "SELECT timestamp, level, source, message, origin FROM app_logs ORDER BY id DESC LIMIT ?1",
@@ -105,7 +105,7 @@ pub fn clear_app_logs(conn: &rusqlite::Connection) -> Result<(), String> {
 #[tauri::command]
 pub fn clear_log_history(app: AppHandle) -> Result<(), String> {
     let db = app.state::<Database>();
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     clear_app_logs(&conn)
 }
 

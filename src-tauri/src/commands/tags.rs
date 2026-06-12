@@ -11,9 +11,9 @@ pub struct Tag {
 
 #[tauri::command]
 pub async fn list_tags(db: tauri::State<'_, Database>) -> Result<Vec<Tag>, String> {
-    let conn = db.conn.clone();
+    let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().map_err(|e| e.to_string())?;
+        let conn = conn.get().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare("SELECT id, name, color FROM tags ORDER BY name")
             .map_err(|e| e.to_string())?;
@@ -40,10 +40,10 @@ pub async fn add_tag(
     name: String,
     color: String,
 ) -> Result<String, String> {
-    let conn = db.conn.clone();
+    let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let id = uuid::Uuid::new_v4().to_string();
-        let conn = conn.lock().map_err(|e| e.to_string())?;
+        let conn = conn.get().map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT INTO tags (id, name, color) VALUES (?1, ?2, ?3)",
             params![id, name, color],
@@ -57,9 +57,9 @@ pub async fn add_tag(
 
 #[tauri::command]
 pub async fn update_tag(db: tauri::State<'_, Database>, tag: Tag) -> Result<(), String> {
-    let conn = db.conn.clone();
+    let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().map_err(|e| e.to_string())?;
+        let conn = conn.get().map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE tags SET name=?1, color=?2 WHERE id=?3",
             params![tag.name, tag.color, tag.id],
@@ -73,9 +73,9 @@ pub async fn update_tag(db: tauri::State<'_, Database>, tag: Tag) -> Result<(), 
 
 #[tauri::command]
 pub async fn delete_tag(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
-    let conn = db.conn.clone();
+    let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().map_err(|e| e.to_string())?;
+        let conn = conn.get().map_err(|e| e.to_string())?;
         conn.execute("DELETE FROM tags WHERE id=?1", params![id])
             .map_err(|e| e.to_string())?;
         Ok(())

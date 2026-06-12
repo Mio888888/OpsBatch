@@ -107,7 +107,7 @@ fn build_chat_body(
 }
 
 fn load_ai_config_raw(db: &Database) -> Result<AiConfig, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let config = conn.query_row(
         "SELECT value FROM settings WHERE key='ai_config'",
         [],
@@ -186,7 +186,7 @@ pub async fn save_ai_config(
         api_key: real_key,
         ..config
     };
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let json = serde_json::to_string(&safe_config).map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT OR REPLACE INTO settings (key, value) VALUES ('ai_config', ?1)",
@@ -600,7 +600,7 @@ fn regex_matches(pattern: &str, command: &str) -> bool {
 }
 
 fn load_enabled_danger_patterns(db: &Database) -> Result<Vec<String>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT pattern FROM danger_rules WHERE enabled = 1")
         .map_err(|e| e.to_string())?;
@@ -630,7 +630,7 @@ pub fn ai_record_action_event(
     event: AiActionAuditEvent,
 ) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO ai_action_audit (
             id, conversation_id, session_id, action_id, event, command,
@@ -834,7 +834,7 @@ pub async fn ai_chat_stream(
 
     // Save user messages to DB
     {
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let conn = db.pool.get().map_err(|e| e.to_string())?;
         let title = request
             .messages
             .last()
@@ -939,7 +939,7 @@ pub async fn ai_chat_stream(
 
     // Save assistant message to DB
     {
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let conn = db.pool.get().map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT INTO ai_messages (id, conversation_id, role, content, model) VALUES (?1, ?2, 'assistant', ?3, ?4)",
             params![message_id, conversation_id, full_content, resp_model],
@@ -992,7 +992,7 @@ pub async fn ai_list_conversations(
     scope: Option<String>,
     scope_id: Option<String>,
 ) -> Result<Vec<Conversation>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut sql =
         "SELECT id, title, scope, scope_id, model, created_at, updated_at FROM ai_conversations"
             .to_string();
@@ -1043,7 +1043,7 @@ pub async fn ai_get_conversation(
     db: tauri::State<'_, Database>,
     conversation_id: String,
 ) -> Result<(Conversation, Vec<ConversationMessage>), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
 
     let conv = conn.query_row(
         "SELECT id, title, scope, scope_id, model, created_at, updated_at FROM ai_conversations WHERE id = ?1",
@@ -1090,7 +1090,7 @@ pub async fn ai_delete_conversation(
     db: tauri::State<'_, Database>,
     conversation_id: String,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "DELETE FROM ai_messages WHERE conversation_id = ?1",
         params![conversation_id],

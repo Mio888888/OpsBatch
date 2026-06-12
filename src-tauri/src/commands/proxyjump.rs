@@ -160,7 +160,7 @@ fn build_topology(
     db: &Database,
 ) -> Result<(Vec<JumpTopologyNode>, HashMap<String, Vec<String>>), String> {
     let rows = {
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let conn = db.pool.get().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare("SELECT id, name, ip, jump_chain FROM hosts")
             .map_err(|e| e.to_string())?;
@@ -245,7 +245,7 @@ pub fn resolve_jump_chain(
     host_id: String,
 ) -> Result<Vec<String>, String> {
     // First check if the host already has an explicit jump_chain
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let existing_chain: Option<String> = conn
         .query_row(
             "SELECT jump_chain FROM hosts WHERE id=?1",
@@ -267,7 +267,7 @@ pub fn resolve_jump_chain(
 
     // BFS from all directly reachable hosts (hosts with empty jump_chain, meaning client can reach them directly)
     let client_reachable = {
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let conn = db.pool.get().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare("SELECT id FROM hosts WHERE jump_chain = '[]' OR jump_chain IS NULL")
             .map_err(|e| e.to_string())?;
@@ -323,7 +323,7 @@ pub fn cascade_disconnect(
     jump_host_id: String,
 ) -> Result<Vec<String>, String> {
     let downstream = {
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let conn = db.pool.get().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare("SELECT id, jump_chain FROM hosts")
             .map_err(|e| e.to_string())?;
@@ -380,7 +380,7 @@ pub fn import_ssh_config_hosts(
     db: tauri::State<'_, Database>,
     request: ImportSshConfigRequest,
 ) -> Result<Vec<String>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut imported_ids = Vec::new();
 
     for entry in &request.entries {

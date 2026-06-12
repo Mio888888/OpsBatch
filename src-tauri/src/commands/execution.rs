@@ -32,7 +32,7 @@ pub struct HistoryDetail {
 
 fn is_cancelled(app: &AppHandle, task_id: &str) -> bool {
     let db = app.state::<Database>();
-    let Ok(conn) = db.conn.lock() else {
+    let Ok(conn) = db.pool.get() else {
         return false;
     };
     conn.query_row(
@@ -47,7 +47,7 @@ fn is_cancelled(app: &AppHandle, task_id: &str) -> bool {
 pub async fn list_execution_history(
     db: tauri::State<'_, Database>,
 ) -> Result<Vec<ExecutionHistory>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
         "SELECT id, command, host_ids, host_count, success_count, fail_count, started_at, completed_at, duration FROM execution_history ORDER BY started_at DESC LIMIT 100"
     ).map_err(|e| e.to_string())?;
@@ -76,7 +76,7 @@ pub async fn get_execution_detail(
     db: tauri::State<'_, Database>,
     history_id: String,
 ) -> Result<Vec<HistoryDetail>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
         "SELECT host_id, host_name, status, output, exit_code, duration FROM execution_details WHERE history_id=?1 ORDER BY host_name"
     ).map_err(|e| e.to_string())?;
@@ -108,7 +108,7 @@ pub fn execute_command(
     timeout: u64,
     quick_action_id: Option<String>,
 ) -> Result<String, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
 
     let mut configs: Vec<(String, String, ssh::SshConfig)> = Vec::new();
     for hid in &host_ids {
@@ -148,7 +148,7 @@ pub fn execute_command(
 
     // Save execution history (with optional quick_action_id)
     {
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let conn = db.pool.get().map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT INTO execution_history (id, command, host_ids, host_count, success_count, fail_count, started_at, duration, quick_action_id) VALUES (?1, ?2, ?3, ?4, 0, 0, datetime('now','localtime'), 0, ?5)",
             params![task_id, command, host_ids_str, host_count, qa_id_for_thread],
@@ -294,7 +294,7 @@ pub fn execute_command(
         // Single DB lock acquisition for all detail inserts
         {
             let db = app.state::<Database>();
-            if let Ok(conn) = db.conn.lock() {
+            if let Ok(conn) = db.pool.get() {
                 for (task_id, host_id, hn, result_flag, output, exit_code, dur) in pending_db_writes
                 {
                     if let Err(e) = conn.execute(
@@ -312,7 +312,7 @@ pub fn execute_command(
         // Update history record
         {
             let db = app.state::<Database>();
-            if let Ok(conn) = db.conn.lock() {
+            if let Ok(conn) = db.pool.get() {
                 conn.execute(
                     "UPDATE execution_history SET success_count=?1, fail_count=?2, completed_at=datetime('now','localtime'), duration=?3 WHERE id=?4",
                     rusqlite::params![success_count, fail_count, duration_ms, task_id_clone],
@@ -330,7 +330,7 @@ pub fn execute_command(
                 "partial"
             };
             let db = app.state::<Database>();
-            if let Ok(conn) = db.conn.lock() {
+            if let Ok(conn) = db.pool.get() {
                 conn.execute(
                     "UPDATE quick_actions SET last_run_at=datetime('now','localtime'), last_status=?1 WHERE id=?2",
                     rusqlite::params![qa_status, qa_id],
@@ -388,7 +388,7 @@ pub async fn cancel_execution(
     db: tauri::State<'_, Database>,
     task_id: String,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO execution_cancellations (task_id) VALUES (?1) ON CONFLICT(task_id) DO UPDATE SET cancelled_at=datetime('now','localtime')",
         params![task_id],

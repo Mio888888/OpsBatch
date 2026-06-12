@@ -23,7 +23,7 @@ pub fn vnc_port_from_settings(value: &str, _fallback: i32) -> u16 {
 }
 
 pub fn load_vnc_host_config(db: &Database, host_id: &str) -> Result<VncHostConfig, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let (host, port, rdp_settings, proxy_settings): (String, i32, String, Option<String>) = conn
         .query_row(
             "SELECT ip, port, COALESCE(rdp_settings, '{}'), COALESCE(proxy_settings, '{}') FROM hosts WHERE id=?1",

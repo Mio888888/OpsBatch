@@ -96,7 +96,7 @@ pub fn init_mcp_tables(conn: &rusqlite::Connection) -> Result<(), String> {
 
 #[tauri::command]
 pub fn mcp_list_servers(db: tauri::State<'_, Database>) -> Result<Vec<McpServerConfig>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT id, name, transport, command, args, env, url, enabled FROM mcp_servers ORDER BY name")
         .map_err(|e| e.to_string())?;
@@ -130,7 +130,7 @@ pub fn mcp_add_server(
     db: tauri::State<'_, Database>,
     config: McpServerConfig,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let args_json = serde_json::to_string(&config.args).map_err(|e| e.to_string())?;
     let env_json = serde_json::to_string(&config.env).map_err(|e| e.to_string())?;
     conn.execute(
@@ -143,7 +143,7 @@ pub fn mcp_add_server(
 
 #[tauri::command]
 pub fn mcp_remove_server(db: tauri::State<'_, Database>, server_id: String) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM mcp_servers WHERE id = ?1", params![server_id])
         .map_err(|e| e.to_string())?;
     Ok(())

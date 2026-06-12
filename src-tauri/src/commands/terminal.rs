@@ -495,7 +495,7 @@ pub async fn terminal_connect(
         Option<String>,
     ) = {
         let db = app.state::<Database>();
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let conn = db.pool.get().map_err(|e| e.to_string())?;
         conn.query_row(
             "SELECT ip, port, auth_type, username, password, private_key, COALESCE(jump_chain, '[]'), COALESCE(proxy_settings, '{}') FROM hosts WHERE id=?1",
             rusqlite::params![host_id],
@@ -566,7 +566,7 @@ pub async fn terminal_connect(
         vec![]
     } else {
         let db = app.state::<Database>();
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let conn = db.pool.get().map_err(|e| e.to_string())?;
         let mut configs = Vec::with_capacity(jump_chain.len());
         for jump_id in &jump_chain {
             let (jip, jport, jauth, juname, jpass, jkey, jproxy): (

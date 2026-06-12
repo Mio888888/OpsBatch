@@ -24,7 +24,7 @@ pub struct FontFamilyInfo {
 
 #[tauri::command]
 pub async fn list_danger_rules(db: tauri::State<'_, Database>) -> Result<Vec<DangerRule>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
         "SELECT id, name, pattern, enabled, is_builtin FROM danger_rules ORDER BY is_builtin DESC, name"
     ).map_err(|e| e.to_string())?;
@@ -111,7 +111,7 @@ pub async fn add_danger_rule(
     pattern: String,
 ) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     // Validate regex
     regex::Regex::new(&pattern).map_err(|e| format!("无效的正则表达式: {}", e))?;
     conn.execute(
@@ -123,7 +123,7 @@ pub async fn add_danger_rule(
 
 #[tauri::command]
 pub async fn delete_danger_rule(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "DELETE FROM danger_rules WHERE id=?1 AND is_builtin=0",
         params![id],
@@ -138,7 +138,7 @@ pub async fn toggle_danger_rule(
     id: String,
     enabled: bool,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE danger_rules SET enabled=?1 WHERE id=?2",
         params![enabled as i32, id],
@@ -153,7 +153,7 @@ pub async fn toggle_danger_rule(
 pub async fn get_general_settings(
     db: tauri::State<'_, Database>,
 ) -> Result<HashMap<String, String>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT key, value FROM general_settings")
         .map_err(|e| e.to_string())?;
@@ -172,7 +172,7 @@ pub async fn save_general_settings(
     db: tauri::State<'_, Database>,
     settings: HashMap<String, String>,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     for (key, value) in &settings {
         conn.execute(
             "INSERT INTO general_settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value=?2",

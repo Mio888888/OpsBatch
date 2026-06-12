@@ -15,7 +15,7 @@ pub fn import_hosts_csv(
     csv_content: String,
     mode: String,
 ) -> Result<ImportResult, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
 
     if mode == "overwrite" {
         conn.execute("DELETE FROM hosts", [])
@@ -109,7 +109,7 @@ pub fn import_hosts_csv(
 
 #[tauri::command]
 pub fn export_hosts_csv(db: tauri::State<'_, Database>) -> Result<String, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare(
             "SELECT name, ip, port, auth_type, os, tags, group_id, remark FROM hosts ORDER BY name",

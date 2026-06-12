@@ -139,7 +139,7 @@ fn repo_sync_library_language(conn: &rusqlite::Connection) -> LibraryLanguage {
 
 #[tauri::command]
 pub async fn list_repos(db: tauri::State<'_, Database>) -> Result<Vec<RepoInfo>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
         "SELECT id, url, branch, token, last_pulled_at, update_on_startup, enabled FROM github_repos ORDER BY url"
     ).map_err(|e| e.to_string())?;
@@ -184,7 +184,7 @@ pub async fn add_repo(
         }
         None => None,
     };
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO github_repos (id, url, branch, token, update_on_startup, enabled) VALUES (?1, ?2, ?3, ?4, ?5, 1)",
         params![id, url, branch, stored_token, update_on_startup as i32],
@@ -195,7 +195,7 @@ pub async fn add_repo(
 #[tauri::command]
 pub async fn delete_repo(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
     // Also remove all synced items from this repo
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM commands WHERE source_repo_id=?1", params![id])
         .map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM scripts WHERE source_repo_id=?1", params![id])
@@ -217,7 +217,7 @@ pub async fn toggle_repo(
     id: String,
     enabled: bool,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE github_repos SET enabled=?1 WHERE id=?2",
         params![enabled as i32, id],
@@ -232,7 +232,7 @@ pub async fn set_repo_update_on_startup(
     id: String,
     update_on_startup: bool,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE github_repos SET update_on_startup=?1 WHERE id=?2",
         params![update_on_startup as i32, id],
@@ -264,7 +264,7 @@ pub fn pull_repo(
     repo_id: String,
     language: Option<String>,
 ) -> Result<PullResult, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let (url, branch, token): (String, String, Option<String>) = conn
         .query_row(
             "SELECT url, branch, token FROM github_repos WHERE id=?1",
@@ -388,7 +388,7 @@ pub fn pull_repo(
 
     // Sync commands and scripts from the cloned repo + update last_pulled_at
     {
-        let conn2 = db.conn.lock().map_err(|e| e.to_string())?;
+        let conn2 = db.pool.get().map_err(|e| e.to_string())?;
         sync_library_from_repo(&conn2, &repo_id, &local_path, sync_language, &mut result);
         conn2
             .execute(
@@ -1508,7 +1508,7 @@ pub fn update_startup_repos(
     db: tauri::State<'_, Database>,
 ) -> Result<Vec<StartupUpdateResult>, String> {
     let repos: Vec<(String, String)> = {
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let conn = db.pool.get().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare("SELECT id, url FROM github_repos WHERE enabled=1 AND update_on_startup=1")
             .map_err(|e| e.to_string())?;
@@ -1523,7 +1523,7 @@ pub fn update_startup_repos(
 
     let mut results = Vec::new();
     let language = {
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let conn = db.pool.get().map_err(|e| e.to_string())?;
         repo_sync_library_language(&conn)
     };
 

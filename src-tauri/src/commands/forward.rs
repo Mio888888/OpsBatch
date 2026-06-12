@@ -104,7 +104,7 @@ impl Drop for ForwardManager {
 // ---------------------------------------------------------------------------
 
 fn load_host_config(db: &Database, host_id: &str) -> Result<ssh::SshConfig, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let (ip, port, auth_type, username, password, private_key, proxy_settings): (
         String,
         i32,

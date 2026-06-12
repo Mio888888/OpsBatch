@@ -12,9 +12,9 @@ pub struct HostGroup {
 
 #[tauri::command]
 pub async fn list_groups(db: tauri::State<'_, Database>) -> Result<Vec<HostGroup>, String> {
-    let conn = db.conn.clone();
+    let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().map_err(|e| e.to_string())?;
+        let conn = conn.get().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, parent_id, sort_order FROM host_groups ORDER BY sort_order, name",
@@ -44,10 +44,10 @@ pub async fn add_group(
     name: String,
     parent_id: Option<String>,
 ) -> Result<String, String> {
-    let conn = db.conn.clone();
+    let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let id = uuid::Uuid::new_v4().to_string();
-        let conn = conn.lock().map_err(|e| e.to_string())?;
+        let conn = conn.get().map_err(|e| e.to_string())?;
         let max_order: i32 = conn
             .query_row(
                 "SELECT COALESCE(MAX(sort_order), 0) FROM host_groups",
@@ -68,9 +68,9 @@ pub async fn add_group(
 
 #[tauri::command]
 pub async fn update_group(db: tauri::State<'_, Database>, group: HostGroup) -> Result<(), String> {
-    let conn = db.conn.clone();
+    let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().map_err(|e| e.to_string())?;
+        let conn = conn.get().map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE host_groups SET name=?1, parent_id=?2, sort_order=?3 WHERE id=?4",
             params![group.name, group.parent_id, group.sort_order, group.id],
@@ -84,9 +84,9 @@ pub async fn update_group(db: tauri::State<'_, Database>, group: HostGroup) -> R
 
 #[tauri::command]
 pub async fn delete_group(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
-    let conn = db.conn.clone();
+    let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().map_err(|e| e.to_string())?;
+        let conn = conn.get().map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE hosts SET group_id=NULL WHERE group_id=?1",
             params![id],

@@ -22,7 +22,7 @@ pub struct QuickAction {
 pub async fn list_quick_actions(
     db: tauri::State<'_, Database>,
 ) -> Result<Vec<QuickAction>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
         "SELECT id, name, command, category, parameters, sort_order, starred, description, tags, language, last_run_at, last_status FROM quick_actions ORDER BY sort_order, id"
     ).map_err(|e| e.to_string())?;
@@ -67,7 +67,7 @@ pub async fn add_quick_action(
     action: NewQuickAction,
 ) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO quick_actions (id, name, command, category, parameters, sort_order, starred, description, tags, language, last_run_at, last_status) VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7, ?8, ?9, '', '')",
         params![
@@ -90,7 +90,7 @@ pub async fn update_quick_action(
     db: tauri::State<'_, Database>,
     action: QuickAction,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE quick_actions SET name=?1, command=?2, category=?3, parameters=?4, sort_order=?5, description=?6, tags=?7, language=?8 WHERE id=?9",
         params![action.name, action.command, action.category, action.parameters, action.sort_order, action.description, action.tags, action.language, action.id],
@@ -100,7 +100,7 @@ pub async fn update_quick_action(
 
 #[tauri::command]
 pub async fn delete_quick_action(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM quick_actions WHERE id=?1", params![id])
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -111,7 +111,7 @@ pub async fn reorder_quick_actions(
     db: tauri::State<'_, Database>,
     ids: Vec<String>,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     for (i, id) in ids.iter().enumerate() {
         conn.execute(
             "UPDATE quick_actions SET sort_order=?1 WHERE id=?2",
@@ -127,7 +127,7 @@ pub async fn toggle_star_quick_action(
     db: tauri::State<'_, Database>,
     id: String,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE quick_actions SET starred = CASE WHEN starred=1 THEN 0 ELSE 1 END WHERE id=?1",
         params![id],

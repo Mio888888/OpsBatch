@@ -217,7 +217,7 @@ pub async fn rdp_disconnect(
 
 fn load_host_rdp_fields(app: &tauri::AppHandle, host_id: &str) -> Result<HostRdpFields, String> {
     let db = app.state::<Database>();
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.query_row(
         "SELECT ip, port, auth_type, username, password, os, COALESCE(rdp_settings, '{}'), COALESCE(proxy_settings, '{}') FROM hosts WHERE id=?1",
         params![host_id],

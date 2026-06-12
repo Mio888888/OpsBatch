@@ -279,7 +279,7 @@ pub fn rag_create_collection(
     let scope_id = scope_id.unwrap_or_default();
 
     {
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let conn = db.pool.get().map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT INTO rag_collections (id, name, scope, scope_id) VALUES (?1, ?2, ?3, ?4)",
             params![id, name, scope, scope_id],
@@ -303,7 +303,7 @@ pub fn rag_list_collections(
     scope: Option<String>,
     scope_id: Option<String>,
 ) -> Result<Vec<KnowledgeCollection>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut sql =
         "SELECT id, name, scope, scope_id, document_count, created_at FROM rag_collections"
             .to_string();
@@ -357,7 +357,7 @@ pub fn rag_import_document(
     let chunks = chunk_markdown(&content, &collection_id);
     let chunk_count = chunks.len() as i64;
 
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
 
     let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     for chunk in &chunks {
@@ -385,7 +385,7 @@ pub fn rag_delete_collection(
     db: tauri::State<'_, Database>,
     collection_id: String,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "DELETE FROM rag_chunks WHERE collection_id = ?1",
         params![collection_id],
@@ -413,7 +413,7 @@ pub fn rag_search(
     let limit = clamp_rag_limit(limit);
     let query_tokens = tokenize(&query);
 
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
 
     let mut sql = "SELECT id, collection_id, content, heading, tokens FROM rag_chunks".to_string();
     let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();

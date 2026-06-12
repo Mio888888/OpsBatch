@@ -1,11 +1,11 @@
+use r2d2::Pool;
+use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::Connection;
-
-use std::sync::{Arc, Mutex};
 
 use crate::security::SECRET_PLACEHOLDER;
 
 pub struct Database {
-    pub conn: Arc<Mutex<Connection>>,
+    pub pool: Pool<SqliteConnectionManager>,
 }
 
 #[cfg(test)]
@@ -52,7 +52,7 @@ mod tests {
         let database = Database::new(&db_path).expect("open db");
         database.init_tables().expect("init tables");
 
-        let conn = database.conn.lock().expect("lock db");
+        let conn = database.pool.get().expect("get db conn");
         let manual: i32 = conn
             .query_row(
                 "SELECT update_on_startup FROM github_repos WHERE id='manual-repo'",
@@ -84,20 +84,30 @@ mod tests {
     }
 }
 
-impl Database {
-    pub fn new(db_path: &std::path::PathBuf) -> Result<Self, String> {
-        let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
+#[derive(Debug)]
+struct DbConnectionCustomizer;
+
+impl r2d2::CustomizeConnection<Connection, rusqlite::Error> for DbConnectionCustomizer {
+    fn on_acquire(&self, conn: &mut Connection) -> Result<(), rusqlite::Error> {
         conn.execute_batch(
             "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
         )
-        .map_err(|e| e.to_string())?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-        })
+    }
+}
+
+impl Database {
+    pub fn new(db_path: &std::path::PathBuf) -> Result<Self, String> {
+        let manager = SqliteConnectionManager::file(db_path);
+        let pool = Pool::builder()
+            .max_size(8)
+            .connection_customizer(Box::new(DbConnectionCustomizer))
+            .build(manager)
+            .map_err(|e| e.to_string())?;
+        Ok(Self { pool })
     }
 
     pub fn init_tables(&self) -> Result<(), String> {
-        let conn = self.conn.lock().map_err(|e| e.to_string())?;
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
         conn.execute_batch(
             "
             CREATE TABLE IF NOT EXISTS hosts (

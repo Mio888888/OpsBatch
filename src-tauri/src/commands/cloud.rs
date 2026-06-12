@@ -31,7 +31,7 @@ pub struct CloudProvider {
 
 #[tauri::command]
 pub fn list_cloud_providers(db: tauri::State<'_, Database>) -> Result<Vec<CloudProvider>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let result = conn.query_row(
         "SELECT value FROM settings WHERE key='cloud_providers'",
         [],
@@ -48,7 +48,7 @@ pub fn save_cloud_providers(
     db: tauri::State<'_, Database>,
     providers: Vec<CloudProvider>,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let json = serde_json::to_string(&providers).map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT OR REPLACE INTO settings (key, value) VALUES ('cloud_providers', ?1)",
@@ -64,7 +64,7 @@ pub fn fetch_cloud_instances(
     provider: String,
     region: String,
 ) -> Result<Vec<CloudInstance>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let json = conn
         .query_row(
             "SELECT value FROM settings WHERE key='cloud_providers'",
@@ -561,7 +561,7 @@ pub fn import_cloud_instances(
     instances: Vec<CloudInstance>,
     group_id: Option<String>,
 ) -> Result<u32, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut imported = 0u32;
 
     for inst in &instances {

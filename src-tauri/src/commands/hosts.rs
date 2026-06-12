@@ -116,7 +116,7 @@ fn get_host_connection_info(
     pool: &crate::ssh::SshConnectionRegistry,
     id: &str,
 ) -> Result<HostConnectionInfo, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let (ip, port, auth_type, username, password, private_key, os, proxy_settings): (
         String,
         i32,
@@ -607,9 +607,9 @@ pub async fn get_host_monitor_snapshot(
 }
 #[tauri::command]
 pub async fn list_hosts(db: tauri::State<'_, Database>) -> Result<Vec<Host>, String> {
-    let conn = db.conn.clone();
+    let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().map_err(|e| e.to_string())?;
+        let conn = conn.get().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
             "SELECT id, name, ip, port, auth_type, username, password, private_key, os, tags, group_id, remark, status, jump_chain, COALESCE(rdp_settings, '{}'), COALESCE(proxy_settings, '{}'), created_at, updated_at FROM hosts ORDER BY name"
         ).map_err(|e| e.to_string())?;
@@ -665,11 +665,11 @@ pub struct NewHost {
 
 #[tauri::command]
 pub async fn add_host(db: tauri::State<'_, Database>, host: NewHost) -> Result<String, String> {
-    let conn = db.conn.clone();
+    let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let id = uuid::Uuid::new_v4().to_string();
         let (password, private_key) = store_host_secrets(&id, host.password, host.private_key)?;
-        let conn = conn.lock().map_err(|e| e.to_string())?;
+        let conn = conn.get().map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT INTO hosts (id, name, ip, port, auth_type, username, password, private_key, os, tags, group_id, remark, jump_chain, rdp_settings, proxy_settings) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
@@ -700,7 +700,7 @@ pub async fn update_host(
     db: tauri::State<'_, Database>,
     host: UpdateHost,
 ) -> Result<(), String> {
-    let conn = db.conn.clone();
+    let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         crate::commands::app_log::emit_log(
             &app,
@@ -716,7 +716,7 @@ pub async fn update_host(
             "backend",
         );
         let (current_password, current_private_key): (Option<String>, Option<String>) = {
-            let conn = conn.lock().map_err(|e| e.to_string())?;
+            let conn = conn.get().map_err(|e| e.to_string())?;
             conn.query_row(
                 "SELECT password, private_key FROM hosts WHERE id=?1",
                 params![host.id],
@@ -746,7 +746,7 @@ pub async fn update_host(
         )?;
 
         {
-            let conn = conn.lock().map_err(|e| e.to_string())?;
+            let conn = conn.get().map_err(|e| e.to_string())?;
             conn.execute(
                 "UPDATE hosts SET name=?1, ip=?2, port=?3, auth_type=?4, username=?5, password=?6, private_key=?7, os=?8, tags=?9, group_id=?10, remark=?11, jump_chain=?12, rdp_settings=?13, proxy_settings=?14, updated_at=datetime('now','localtime') WHERE id=?15",
                 params![host.name, host.ip, host.port, host.auth_type, host.username, password, private_key, host.os, host.tags, host.group_id, host.remark, host.jump_chain.as_deref().unwrap_or("[]"), host.rdp_settings.as_deref().unwrap_or("{}"), host.proxy_settings.as_deref().unwrap_or("{}"), host.id],
@@ -773,9 +773,9 @@ pub async fn delete_host(
     db: tauri::State<'_, Database>,
     id: String,
 ) -> Result<(), String> {
-    let conn = db.conn.clone();
+    let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
-        let conn = conn.lock().map_err(|e| e.to_string())?;
+        let conn = conn.get().map_err(|e| e.to_string())?;
         conn.execute("DELETE FROM hosts WHERE id=?1", params![id])
             .map_err(|e| e.to_string())?;
         let _ = crate::keychain::delete_host_password(&id);
@@ -791,7 +791,7 @@ pub async fn delete_host(
 #[tauri::command]
 pub fn check_host_status(db: tauri::State<'_, Database>, id: String) -> Result<String, String> {
     let (ip, port, rdp_settings) = {
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let conn = db.pool.get().map_err(|e| e.to_string())?;
         let result: (String, i32, String) = conn
             .query_row(
                 "SELECT ip, port, COALESCE(rdp_settings, '{}') FROM hosts WHERE id=?1",
@@ -820,7 +820,7 @@ pub fn check_host_status(db: tauri::State<'_, Database>, id: String) -> Result<S
     };
 
     {
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let conn = db.pool.get().map_err(|e| e.to_string())?;
         conn.execute(
             "UPDATE hosts SET status=?1 WHERE id=?2",
             params![status, id],

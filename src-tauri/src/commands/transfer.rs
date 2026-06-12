@@ -66,7 +66,7 @@ pub fn file_transfer(
     request: TransferRequest,
 ) -> Result<String, String> {
     let task_id = uuid::Uuid::new_v4().to_string();
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
 
     let mut configs: Vec<(String, String, ssh::SshConfig)> = Vec::new();
     for hid in &request.host_ids {

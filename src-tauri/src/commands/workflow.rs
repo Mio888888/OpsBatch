@@ -18,7 +18,7 @@ pub struct Workflow {
 
 #[tauri::command]
 pub async fn list_workflows(db: tauri::State<'_, Database>) -> Result<Vec<Workflow>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
         "SELECT id, name, description, nodes, connections, status, created_at, updated_at FROM workflows ORDER BY updated_at DESC"
     ).map_err(|e| e.to_string())?;
@@ -48,7 +48,7 @@ pub async fn create_workflow(
     description: String,
 ) -> Result<Workflow, String> {
     let id = uuid::Uuid::new_v4().to_string();
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO workflows (id, name, description, nodes, connections, status) VALUES (?1, ?2, ?3, '[]', '[]', 'draft')",
         params![id, name, description],
@@ -79,7 +79,7 @@ pub async fn update_workflow(
     db: tauri::State<'_, Database>,
     workflow: Workflow,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE workflows SET name=?1, description=?2, nodes=?3, connections=?4, status=?5, updated_at=datetime('now','localtime') WHERE id=?6",
         params![workflow.name, workflow.description, workflow.nodes, workflow.connections, workflow.status, workflow.id],
@@ -89,7 +89,7 @@ pub async fn update_workflow(
 
 #[tauri::command]
 pub async fn delete_workflow(db: tauri::State<'_, Database>, id: String) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM workflows WHERE id=?1", params![id])
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -111,7 +111,7 @@ pub struct WorkflowTemplate {
 pub async fn list_workflow_templates(
     db: tauri::State<'_, Database>,
 ) -> Result<Vec<WorkflowTemplate>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
         "SELECT id, name, description, nodes, connections, created_at FROM workflow_templates ORDER BY name"
     ).map_err(|e| e.to_string())?;
@@ -141,7 +141,7 @@ pub async fn save_workflow_template(
     connections: String,
 ) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO workflow_templates (id, name, description, nodes, connections) VALUES (?1, ?2, ?3, ?4, ?5)",
         params![id, name, description, nodes, connections],
@@ -154,7 +154,7 @@ pub async fn delete_workflow_template(
     db: tauri::State<'_, Database>,
     id: String,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM workflow_templates WHERE id=?1", params![id])
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -178,7 +178,7 @@ pub struct ScheduledTask {
 pub async fn list_scheduled_tasks(
     db: tauri::State<'_, Database>,
 ) -> Result<Vec<ScheduledTask>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
         "SELECT id, name, cron, workflow_id, enabled, last_run_at, next_run_at, created_at FROM scheduled_tasks ORDER BY name"
     ).map_err(|e| e.to_string())?;
@@ -209,7 +209,7 @@ pub async fn add_scheduled_task(
     workflow_id: String,
 ) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO scheduled_tasks (id, name, cron, workflow_id, enabled) VALUES (?1, ?2, ?3, ?4, 1)",
         params![id, name, cron, workflow_id],
@@ -226,7 +226,7 @@ pub async fn update_scheduled_task(
     workflow_id: String,
     enabled: bool,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE scheduled_tasks SET name=?1, cron=?2, workflow_id=?3, enabled=?4 WHERE id=?5",
         params![name, cron, workflow_id, enabled as i32, id],
@@ -240,7 +240,7 @@ pub async fn delete_scheduled_task(
     db: tauri::State<'_, Database>,
     id: String,
 ) -> Result<(), String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute("DELETE FROM scheduled_tasks WHERE id=?1", params![id])
         .map_err(|e| e.to_string())?;
     Ok(())
@@ -252,7 +252,7 @@ pub async fn delete_scheduled_task(
 #[tauri::command]
 pub async fn check_scheduled_tasks(db: tauri::State<'_, Database>) -> Result<Vec<String>, String> {
     let tasks: Vec<(String, String, String, String, Option<String>)> = {
-        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let conn = db.pool.get().map_err(|e| e.to_string())?;
         let mut stmt = conn.prepare(
             "SELECT id, name, cron, workflow_id, last_run_at FROM scheduled_tasks WHERE enabled=1"
         ).map_err(|e| e.to_string())?;

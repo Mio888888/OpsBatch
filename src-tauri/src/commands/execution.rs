@@ -290,21 +290,27 @@ pub fn execute_command(
             }
         }
 
-        // Single DB lock acquisition for all detail inserts
-        {
-            let db = app.state::<Database>();
-            if let Ok(conn) = db.pool.get() {
-                for (host_id, hn, result_flag, output, exit_code, dur) in pending_db_writes
-                {
-                    if let Err(e) = conn.execute(
-                        "INSERT INTO execution_details (history_id, host_id, host_name, status, output, exit_code, duration) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                        rusqlite::params![&*task_id_arc, host_id, hn, if result_flag == 1 { "success" } else { "failed" }, output, exit_code, dur as i64],
-                    ) {
-                        eprintln!("[Exec] DB insert failed host={}: {}", host_id, e);
-                    }
-                }
-            };
-        }
+       // Single DB lock acquisition for all detail inserts
+       {
+           let db = app.state::<Database>();
+           // 单次事务批量写入,避免逐条 INSERT 触发独立 fsync
+           if let Ok(mut conn) = db.pool.get() {
+               if let Ok(tx) = conn.transaction() {
+                   for (host_id, hn, result_flag, output, exit_code, dur) in pending_db_writes
+                   {
+                       if let Err(e) = tx.execute(
+                           "INSERT INTO execution_details (history_id, host_id, host_name, status, output, exit_code, duration) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                           rusqlite::params![&*task_id_arc, host_id, hn, if result_flag == 1 { "success" } else { "failed" }, output, exit_code, dur as i64],
+                       ) {
+                           eprintln!("[Exec] DB insert failed host={}: {}", host_id, e);
+                       }
+                   }
+                   if let Err(e) = tx.commit() {
+                       eprintln!("[Exec] DB transaction commit failed: {}", e);
+                   }
+               }
+           };
+       }
 
         let duration_ms = start.elapsed().as_millis() as i32;
 

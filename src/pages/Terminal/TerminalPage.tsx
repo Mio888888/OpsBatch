@@ -260,17 +260,20 @@ const HostMonitorPanel = memo(function HostMonitorPanel({ hostId, hostIp, initia
   const memoryPercent = snapshot?.memoryUsedMb && snapshot.memoryTotalMb
     ? formatPercent((snapshot.memoryUsedMb / snapshot.memoryTotalMb) * 100)
     : undefined;
-  const swapPercent = snapshot?.swapUsedMb && snapshot.swapTotalMb
-    ? formatPercent((snapshot.swapUsedMb / snapshot.swapTotalMb) * 100)
-    : undefined;
-  const networkMax = Math.max(1, ...history.map((item, index) => {
-    const prev = history[index - 1];
-    const itemNetwork = getNetworkByInterface(item, activeInterface);
-    const prevNetwork = getNetworkByInterface(prev, activeInterface);
-    const seconds = prev ? Math.max(1, (item.timestamp - prev.timestamp) / 1000) : 0;
-    const rate = getNetworkRate(itemNetwork, prevNetwork, seconds);
-    return Math.max(rate.rx, rate.tx);
-  }));
+ const swapPercent = snapshot?.swapUsedMb && snapshot.swapTotalMb
+   ? formatPercent((snapshot.swapUsedMb / snapshot.swapTotalMb) * 100)
+   : undefined;
+  const networkMax = useMemo(() => {
+    // reduce 取代 Math.max(...spread),避免大 history 时调用栈溢出;useMemo 避免每次渲染重算
+    return history.reduce((max, item, index) => {
+      const prev = history[index - 1];
+      const itemNetwork = getNetworkByInterface(item, activeInterface);
+      const prevNetwork = getNetworkByInterface(prev, activeInterface);
+      const seconds = prev ? Math.max(1, (item.timestamp - prev.timestamp) / 1000) : 0;
+      const rate = getNetworkRate(itemNetwork, prevNetwork, seconds);
+      return Math.max(max, rate.rx, rate.tx);
+    }, 1);
+  }, [history, activeInterface]);
 
   return (
     <aside className="terminal-monitor-panel" style={{ width, flexBasis: width, maxWidth: MAX_MONITOR_PANEL_WIDTH }}>

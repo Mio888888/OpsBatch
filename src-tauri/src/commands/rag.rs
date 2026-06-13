@@ -170,17 +170,22 @@ fn document_frequency(all_tokens: &[Vec<String>]) -> HashMap<String, f64> {
 // Vector Similarity (simplified TF-IDF vectors)
 // ---------------------------------------------------------------------------
 
-fn cosine_similarity(a: &[f64], b: &[f64]) -> f64 {
-    if a.len() != b.len() || a.is_empty() {
+/// 向量 L2 范数
+fn vector_norm(v: &[f64]) -> f64 {
+    v.iter().map(|x| x * x).sum::<f64>().sqrt()
+}
+
+/// 复用预计算的 query norm 计算 cosine,避免对 N 个 doc 重复求 query norm
+fn cosine_similarity_with_query_norm(query: &[f64], query_norm: f64, doc: &[f64]) -> f64 {
+    if query.len() != doc.len() || query.is_empty() || query_norm == 0.0 {
         return 0.0;
     }
-    let dot: f64 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let norm_a: f64 = a.iter().map(|x| x * x).sum::<f64>().sqrt();
-    let norm_b: f64 = b.iter().map(|x| x * x).sum::<f64>().sqrt();
-    if norm_a == 0.0 || norm_b == 0.0 {
+    let dot: f64 = query.iter().zip(doc.iter()).map(|(x, y)| x * y).sum();
+    let doc_norm: f64 = vector_norm(doc);
+    if doc_norm == 0.0 {
         return 0.0;
     }
-    dot / (norm_a * norm_b)
+    dot / (query_norm * doc_norm)
 }
 
 fn build_tfidf_vector(tokens: &[String], vocab: &[String], idf: &HashMap<String, f64>) -> Vec<f64> {
@@ -511,11 +516,12 @@ pub fn rag_search(
         .collect();
 
     let query_vec = build_tfidf_vector(&query_tokens, &vocab, &idf_map);
+    let query_norm = vector_norm(&query_vec);
     let mut vector_ranking: Vec<(String, f64)> = parsed
         .iter()
         .map(|(id, _, _, _, tokens)| {
             let doc_vec = build_tfidf_vector(tokens, &vocab, &idf_map);
-            let sim = cosine_similarity(&query_vec, &doc_vec);
+            let sim = cosine_similarity_with_query_norm(&query_vec, query_norm, &doc_vec);
             (id.clone(), sim)
         })
         .filter(|(_, sim)| *sim > 0.0)

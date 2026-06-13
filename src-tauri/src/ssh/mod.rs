@@ -827,7 +827,7 @@ pub struct SshConnectionRegistry {
     connections: DashMap<String, ConnectionEntry>,
     config_cache: DashMap<String, CachedSshConfig>,
     connection_locks: DashMap<String, Arc<Mutex<()>>>,
-    app_handle: Mutex<Option<tauri::AppHandle>>,
+    app_handle: std::sync::OnceLock<tauri::AppHandle>,
     idle_timeout: Duration,
     config_cache_ttl: Duration,
     shared_runtime: Arc<Runtime>,
@@ -839,7 +839,7 @@ impl SshConnectionRegistry {
             connections: DashMap::new(),
             config_cache: DashMap::new(),
             connection_locks: DashMap::new(),
-            app_handle: Mutex::new(None),
+            app_handle: std::sync::OnceLock::new(),
             idle_timeout: Duration::from_secs(15 * 60),
             config_cache_ttl: Duration::from_secs(120),
             shared_runtime: Arc::new(
@@ -854,7 +854,7 @@ impl SshConnectionRegistry {
             connections: DashMap::new(),
             config_cache: DashMap::new(),
             connection_locks: DashMap::new(),
-            app_handle: Mutex::new(None),
+            app_handle: std::sync::OnceLock::new(),
             idle_timeout: Duration::from_secs(15 * 60),
             config_cache_ttl,
             shared_runtime: Arc::new(
@@ -888,51 +888,48 @@ impl SshConnectionRegistry {
     }
 
     pub fn set_app_handle(&self, handle: tauri::AppHandle) {
-        if let Ok(mut guard) = self.app_handle.lock() {
-            *guard = Some(handle);
-        }
+        // 启动时设置一次,之后只读;OnceLock 避免后续每次状态推送时的锁开销
+        let _ = self.app_handle.set(handle);
     }
 
     fn emit_connection_status(&self, host_id: &str, state: ConnectionState) {
-        if let Ok(guard) = self.app_handle.lock() {
-            if let Some(app) = guard.as_ref() {
-                use tauri::Emitter;
-                let status = match state {
-                    ConnectionState::Connecting => "connecting",
-                    ConnectionState::Active => "active",
-                    ConnectionState::Idle => "idle",
-                    ConnectionState::LinkDown => "link_down",
-                    ConnectionState::Reconnecting => "reconnecting",
-                };
-                let _ = app.emit(
-                    "connection_status_changed",
-                    serde_json::json!({ "hostId": host_id, "status": status }),
-                );
+        let Some(app) = self.app_handle.get() else {
+            return;
+        };
+        use tauri::Emitter;
+        let status = match state {
+            ConnectionState::Connecting => "connecting",
+            ConnectionState::Active => "active",
+            ConnectionState::Idle => "idle",
+            ConnectionState::LinkDown => "link_down",
+            ConnectionState::Reconnecting => "reconnecting",
+        };
+        let _ = app.emit(
+            "connection_status_changed",
+            serde_json::json!({ "hostId": host_id, "status": status }),
+        );
 
-                // Push to global log
-                let level = match state {
-                    ConnectionState::LinkDown => "error",
-                    ConnectionState::Reconnecting => "warn",
-                    _ => "info",
-                };
-                let msg = match state {
-                    ConnectionState::Connecting => format!("主机 {} 正在连接...", host_id),
-                    ConnectionState::Active => format!("主机 {} 已连接", host_id),
-                    ConnectionState::Idle => format!("主机 {} 连接空闲", host_id),
-                    ConnectionState::LinkDown => format!("主机 {} 连接断开", host_id),
-                    ConnectionState::Reconnecting => format!("主机 {} 正在重连...", host_id),
-                };
-                crate::commands::app_log::emit_log(app, level, "ssh", &msg, "backend");
-            }
-        }
+        // 推入全局日志
+        let level = match state {
+            ConnectionState::LinkDown => "error",
+            ConnectionState::Reconnecting => "warn",
+            _ => "info",
+        };
+        let msg = match state {
+            ConnectionState::Connecting => format!("主机 {} 正在连接...", host_id),
+            ConnectionState::Active => format!("主机 {} 已连接", host_id),
+            ConnectionState::Idle => format!("主机 {} 连接空闲", host_id),
+            ConnectionState::LinkDown => format!("主机 {} 连接断开", host_id),
+            ConnectionState::Reconnecting => format!("主机 {} 正在重连...", host_id),
+        };
+        crate::commands::app_log::emit_log(app, level, "ssh", &msg, "backend");
     }
 
     fn log(&self, level: &str, message: &str) {
-        if let Ok(guard) = self.app_handle.lock() {
-            if let Some(app) = guard.as_ref() {
-                crate::commands::app_log::emit_log(app, level, "ssh", message, "backend");
-            }
-        }
+        let Some(app) = self.app_handle.get() else {
+            return;
+        };
+        crate::commands::app_log::emit_log(app, level, "ssh", message, "backend");
     }
 
     pub fn start_idle_reaper(app_handle: tauri::AppHandle) {

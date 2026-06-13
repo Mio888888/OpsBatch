@@ -1,6 +1,5 @@
 use std::fs;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use std::io::{BufReader, BufWriter};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -546,8 +545,6 @@ fn upload_file_blocking(
     }
 
     let file_size = local.metadata().map(|m| m.len()).unwrap_or(0);
-    let local_file = fs::File::open(local).map_err(|e| format!("open local: {}", e))?;
-    let mut reader = BufReader::with_capacity(SFTP_TRANSFER_CHUNK_SIZE, local_file);
 
     let entry = manager
         .sessions
@@ -562,7 +559,11 @@ fn upload_file_blocking(
 
     let start = Instant::now();
     let result: Result<(), String> = entry.lease.block_on(async {
-        use tokio::io::AsyncWriteExt;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        // 用 tokio async 读本地文件,避免在 async 块内同步阻塞 executor
+        let mut local_file = tokio::fs::File::open(local)
+            .await
+            .map_err(|e| format!("open local: {}", e))?;
         let mut file = sftp
             .create(remote_path)
             .await
@@ -570,7 +571,9 @@ fn upload_file_blocking(
         let mut buffer = vec![0u8; SFTP_TRANSFER_CHUNK_SIZE];
 
         loop {
-            let read_bytes = std::io::Read::read(&mut reader, &mut buffer)
+            let read_bytes = local_file
+                .read(&mut buffer)
+                .await
                 .map_err(|e| format!("read local: {}", e))?;
             if read_bytes == 0 {
                 break;
@@ -657,8 +660,6 @@ fn download_file_blocking(
     if let Some(parent) = local_target.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("create local parent: {}", e))?;
     }
-    let local_file = fs::File::create(&local_target).map_err(|e| format!("create local: {}", e))?;
-    let mut writer = BufWriter::with_capacity(SFTP_TRANSFER_CHUNK_SIZE, local_file);
 
     let _ = app.emit(
         &format!("sftp-transfer:{}:start", transfer_id),
@@ -667,8 +668,12 @@ fn download_file_blocking(
 
     let start = Instant::now();
     let result: Result<(), String> = entry.lease.block_on(async {
-        use tokio::io::AsyncReadExt;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let mut remote_file = sftp.open(remote_path).await.map_err(|e| format!("{}", e))?;
+        // 用 tokio async 写本地文件,避免在 async 块内同步阻塞 executor
+        let mut local_file = tokio::fs::File::create(&local_target)
+            .await
+            .map_err(|e| format!("create local: {}", e))?;
         let mut buffer = vec![0u8; SFTP_TRANSFER_CHUNK_SIZE];
 
         loop {
@@ -679,11 +684,13 @@ fn download_file_blocking(
             if read_bytes == 0 {
                 break;
             }
-            std::io::Write::write_all(&mut writer, &buffer[..read_bytes])
+            local_file
+                .write_all(&buffer[..read_bytes])
+                .await
                 .map_err(|e| format!("write local: {}", e))?;
         }
 
-        std::io::Write::flush(&mut writer).map_err(|e| format!("flush local: {}", e))?;
+        local_file.flush().await.map_err(|e| format!("flush local: {}", e))?;
         Ok(())
     });
 

@@ -183,11 +183,22 @@ const RdpAiPanel: FC<RdpAiPanelProps> = ({
 
   const [showHistory, setShowHistory] = useState(false);
   const [batchExecutingId, setBatchExecutingId] = useState<string | null>(null);
+  const [goalMode, setGoalMode] = useState(false);
+  const [goalText, setGoalText] = useState('');
+  const [goalRunning, setGoalRunning] = useState(false);
+  const [goalRound, setGoalRound] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const executorRef = useRef(executeRdpOperations);
   executorRef.current = executeRdpOperations;
 
+  // 目标模式运行时状态（用 ref 避免 effect 闭包陈旧）
+  const goalActiveRef = useRef(false);
+  const goalTargetRef = useRef('');
+  const goalRoundRef = useRef(0);
+  const lastHandledActionCountRef = useRef(0);
+
   const batchExecuting = batchExecutingId !== null;
+  const GOAL_MAX_ROUNDS = 8;
 
   // 激活 RDP 会话
   useEffect(() => {
@@ -297,6 +308,90 @@ const RdpAiPanel: FC<RdpAiPanelProps> = ({
     setBatchExecutingId(null);
   }, [approveAction, rdpActions, rdpSessionId]);
 
+  const sendGoalContextMessage = useCallback(async (target: string, round: number, check: boolean) => {
+    const prompt = check
+      ? `目标：${target}\n刚才执行了第 ${round} 轮操作。请判断目标是否已经完成。如果已完成，直接回复"目标已完成"并简要说明；如果未完成，请给出下一步操作（用 <RDP_PLAN> 格式）。`
+      : `目标：${target}\n请给出实现该目标的第一步操作计划（用 <RDP_PLAN> 格式）。步骤要精确，坐标基于 ${desktopWidth}x${desktopHeight} 分辨率。`;
+    void sendMessage(prompt);
+  }, [desktopHeight, desktopWidth, sendMessage]);
+
+  const handleStartGoal = useCallback(() => {
+    const target = goalText.trim();
+    if (!target || streaming) return;
+    goalActiveRef.current = true;
+    goalTargetRef.current = target;
+    goalRoundRef.current = 0;
+    lastHandledActionCountRef.current = 0;
+    setGoalRunning(true);
+    setGoalRound(0);
+    setGoalText('');
+    void sendGoalContextMessage(target, 0, false);
+  }, [goalText, sendGoalContextMessage, streaming]);
+
+  const handleStopGoal = useCallback(() => {
+    goalActiveRef.current = false;
+    setGoalRunning(false);
+  }, []);
+
+  // 目标模式循环：当有新的待执行操作且目标模式运行中时，自动审批执行
+  useEffect(() => {
+    if (!goalActiveRef.current) return;
+    const pendingRdpActions = rdpActions.filter((a) => !a.executed && !a.rejected);
+    if (pendingRdpActions.length === 0) return;
+
+    // 自动执行所有待执行操作
+    let cancelled = false;
+    void (async () => {
+      for (const action of pendingRdpActions) {
+        if (cancelled || !goalActiveRef.current) return;
+        setBatchExecutingId(action.id);
+        try {
+          await approveAction(action.id, rdpSessionId ?? undefined);
+        } catch {
+          // 忽略单步错误继续
+        }
+      }
+      setBatchExecutingId(null);
+
+      if (cancelled || !goalActiveRef.current) return;
+      // 等待操作在远程桌面生效
+      await new Promise<void>((resolve) => setTimeout(resolve, 2500));
+
+      if (cancelled || !goalActiveRef.current) return;
+      // 进入下一轮检查
+      goalRoundRef.current += 1;
+      setGoalRound(goalRoundRef.current);
+      if (goalRoundRef.current >= GOAL_MAX_ROUNDS) {
+        goalActiveRef.current = false;
+        setGoalRunning(false);
+        return;
+      }
+      void sendGoalContextMessage(goalTargetRef.current, goalRoundRef.current, true);
+    })();
+
+    return () => { cancelled = true; };
+  }, [rdpActions, approveAction, rdpSessionId, sendGoalContextMessage]);
+
+  // 目标模式：AI 检查轮回复不含 RDP_PLAN（无新操作）时判定完成
+  useEffect(() => {
+    if (!goalActiveRef.current || streaming) return;
+    if (messages.length === 0) return;
+    const lastMsg = messages[messages.length - 1];
+    // 最后一条是 AI 回复、流式已结束、且没有 pendingActions（说明没有生成新操作）
+    if (
+      lastMsg.role === 'assistant'
+      && !lastMsg.streaming
+      && !(lastMsg.pendingActions?.length)
+    ) {
+      const timer = setTimeout(() => {
+        if (!goalActiveRef.current) return;
+        goalActiveRef.current = false;
+        setGoalRunning(false);
+      }, 1500);
+      return () => clearTimeout(timer);
+    }
+  }, [messages, streaming]);
+
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.key === 'Enter' && !e.shiftKey) {
@@ -318,6 +413,13 @@ const RdpAiPanel: FC<RdpAiPanelProps> = ({
             {desktopWidth}×{desktopHeight}
           </span>
         )}
+        <button
+          className={`rdp-ai-toolbar-btn ${goalMode ? 'rdp-ai-toolbar-btn-active' : ''}`}
+          onClick={() => { setGoalMode((v) => !v); if (goalRunning) handleStopGoal(); }}
+          title={tText('rdp.aiGoalMode')}
+        >
+          🎯
+        </button>
         <button
           className="rdp-ai-toolbar-btn"
           onClick={() => newConversation()}
@@ -369,6 +471,37 @@ const RdpAiPanel: FC<RdpAiPanelProps> = ({
               </button>
             </div>
           ))}
+        </div>
+      )}
+
+      {goalMode && (
+        <div className="rdp-ai-goal-bar">
+          {goalRunning ? (
+            <div className="rdp-ai-goal-running-info">
+              <span className="rdp-ai-goal-label">🎯 {tText('rdp.aiGoalRunning')}</span>
+              <span className="rdp-ai-goal-round">{tText('rdp.aiGoalRound', { round: goalRound, max: GOAL_MAX_ROUNDS })}</span>
+              <button className="rdp-ai-goal-stop" onClick={handleStopGoal}>
+                ⏹ {tText('rdp.aiGoalStop')}
+              </button>
+            </div>
+          ) : (
+            <>
+              <input
+                className="rdp-ai-goal-input"
+                value={goalText}
+                onChange={(e) => setGoalText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleStartGoal(); }}
+                placeholder={tText('rdp.aiGoalPlaceholder')}
+              />
+              <button
+                className="rdp-ai-goal-start"
+                onClick={handleStartGoal}
+                disabled={!goalText.trim() || streaming}
+              >
+                ▶ {tText('rdp.aiGoalStart')}
+              </button>
+            </>
+          )}
         </div>
       )}
 

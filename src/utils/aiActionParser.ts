@@ -35,6 +35,7 @@ export interface ParsedAiActionsResult {
   displayContent: string;
   actions: ParsedPendingAction[];
   commandPlanNotice?: ParsedCommandPlanNotice;
+  rdpParseError?: string;
 }
 
 export interface AiActionAssessment {
@@ -161,7 +162,11 @@ export async function parseAiPendingActionsAsync(
   if (rdpContext) {
     const rdpResult = parseRdpActions(content, rdpContext);
     if (rdpResult) {
-      return { displayContent: rdpResult.displayContent, actions: rdpResult.actions };
+      return {
+        displayContent: rdpResult.displayContent,
+        actions: rdpResult.actions,
+        rdpParseError: rdpResult.parseError,
+      };
     }
   }
 
@@ -866,6 +871,7 @@ export function validateRdpPlan(
 export interface ParsedRdpActionsResult {
   displayContent: string;
   actions: ParsedPendingAction[];
+  parseError?: string;
 }
 
 export function parseRdpActions(
@@ -876,10 +882,13 @@ export function parseRdpActions(
   if (!candidate) return null;
 
   let plan: ValidatedRdpPlan;
+  let parseError: string | undefined;
   try {
     plan = validateRdpPlan(candidate.rawPlan, maxCoords);
-  } catch {
-    return null;
+  } catch (e) {
+    parseError = e instanceof Error ? e.message : String(e);
+    const displayContentErr = removeRange(content, candidate.startIndex, candidate.endIndex).replace(/^\s+|\s+$/g, '');
+    return { displayContent: displayContentErr, actions: [], parseError };
   }
 
   const displayContent = removeRange(content, candidate.startIndex, candidate.endIndex).replace(/^\s+|\s+$/g, '');

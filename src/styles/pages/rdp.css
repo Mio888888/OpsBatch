@@ -950,6 +950,13 @@
   padding: 6px 0;
 }
 
+.rdp-ai-msg-error-detail {
+  margin-top: 4px;
+  font-weight: var(--font-weight-normal);
+  color: #7d3c34;
+  opacity: 0.85;
+}
+
 /* 目标模式 */
 .rdp-ai-toolbar-btn-active {
   background: #35b779;

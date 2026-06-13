@@ -62,7 +62,10 @@ const RdpMessageContent: FC<{ msg: ChatMessage }> = memo(({ msg }) => {
   const hasActions = (msg.pendingActions?.length ?? 0) > 0;
   // AI 输出了 RDP_PLAN 但解析失败（无操作卡片）：给用户明确反馈
   const hasRdpPlanBlock = !isUser && /<RDP_PLAN/i.test(msg.content);
-  const parseFailed = isEmpty && !msg.streaming && !hasActions && hasRdpPlanBlock;
+  const parseError = !isUser && !msg.streaming && !hasActions
+    ? (msg.rdpParseError ?? (hasRdpPlanBlock && isEmpty ? t('rdp.aiParseFailed') : null))
+    : null;
+  const parseFailed = Boolean(parseError);
 
   return (
     <div className={`rdp-ai-msg ${isUser ? 'rdp-ai-msg-user' : 'rdp-ai-msg-assistant'}`}>
@@ -77,9 +80,12 @@ const RdpMessageContent: FC<{ msg: ChatMessage }> = memo(({ msg }) => {
       {isEmpty && !msg.streaming && hasActions && (
         <div className="rdp-ai-msg-plan-ready">{t('rdp.aiPlanReady')}</div>
       )}
-      {parseFailed && (
+      {parseFailed && parseError && (
         <div className="rdp-ai-msg-error">
           ⚠ {t('rdp.aiParseFailed')}
+          {msg.rdpParseError && (
+            <div className="rdp-ai-msg-error-detail">{msg.rdpParseError}</div>
+          )}
         </div>
       )}
       {msg.streaming && !isEmpty && <span className="rdp-ai-msg-cursor" />}

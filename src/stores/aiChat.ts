@@ -13,6 +13,7 @@ export interface ChatMessage {
   streaming?: boolean;
   pendingActions?: PendingAction[];
   commandPlanNotice?: ParsedCommandPlanNotice;
+  rdpParseError?: string;
 }
 
 export interface PendingAction extends ParsedPendingAction {}
@@ -647,7 +648,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
             };
           });
           const rdpCtx = getSession(get().sessions, sid).rdpContext;
-          void parseAiPendingActionsAsync(rawContent, rdpCtx).then(({ displayContent, actions, commandPlanNotice }) => {
+          void parseAiPendingActionsAsync(rawContent, rdpCtx).then(({ displayContent, actions, commandPlanNotice, rdpParseError }) => {
             const initialActions = actions.map((action) => ({
               ...action,
               assessmentLoading: action.type === 'command',
@@ -666,6 +667,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
                           content: displayContent,
                           pendingActions: initialActions.length > 0 ? initialActions : undefined,
                           commandPlanNotice,
+                          rdpParseError: rdpParseError ?? undefined,
                         }
                         : m,
                     ),

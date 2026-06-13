@@ -64,6 +64,36 @@ function limitTrackedOutput(output: string): string {
 function cleanExecutionOutput(output: string): string {
   return stripTrackedCommandOutputArtifacts(output).trim();
 }
+/**
+ * 本地追踪用户终端输入,返回命令提交时的完整命令文本。
+ * 不依赖远程回显（SSH 有网络延迟）也不受 writeQueue flush 影响。
+ * 返回 { buffer, command }：command 非 null 表示检测到换行（命令提交）。
+ */
+function processTerminalInput(buffer: string, data: string): { buffer: string; command: string | null } {
+  const newlineIdx = data.search(/[\r\n]/);
+  if (newlineIdx !== -1) {
+    const beforeNewline = data.slice(0, newlineIdx);
+    const command = (buffer + beforeNewline).trim();
+    return { buffer: '', command: command || null };
+  }
+  // 退格 / DEL
+  if (data === '\x7f' || data === '\x08') {
+    return { buffer: buffer.slice(0, -1), command: null };
+  }
+  // Ctrl+C 取消、Ctrl+U 清行
+  if (data === '\x03' || data === '\x15') {
+    return { buffer: '', command: null };
+  }
+  // 转义序列（方向键、功能键等）忽略
+  if (data.charCodeAt(0) === 0x1b) {
+    return { buffer, command: null };
+  }
+  // 可打印字符
+  if (data.charCodeAt(0) >= 32) {
+    return { buffer: buffer + data, command: null };
+  }
+  return { buffer, command: null };
+}
 
 export default memo(function TerminalView({ sessionId, active = true, onTerminalReady }: TerminalViewProps) {
   const termRef = useRef<HTMLDivElement>(null);
@@ -78,6 +108,7 @@ export default memo(function TerminalView({ sessionId, active = true, onTerminal
   const doneDetectorBufferRef = useRef('');
   const compiledDangerRulesRef = useRef<CompiledDangerRule[]>([]);
   const pendingDangerConfirmRef = useRef<string | null>(null);
+  const localCommandBufferRef = useRef('');
 
   useEffect(() => {
     latestActiveRef.current = active;
@@ -318,10 +349,13 @@ export default memo(function TerminalView({ sessionId, active = true, onTerminal
     });
 
     const dataDisposable = terminal.onData((data) => {
-      if (data === '\r') {
+      // 本地追踪输入,获取命令提交时的完整文本
+      const inputResult = processTerminalInput(localCommandBufferRef.current, data);
+      localCommandBufferRef.current = inputResult.buffer;
+
+      if (data.includes('\r') || data.includes('\n')) {
         const line = terminal.buffer.active.getLine(terminal.buffer.active.cursorY);
         const lineText = line ? line.translateToString(true).trim() : '';
-        const writeQueueText = writeQueueRef.current.trim();
 
         if (pendingDangerConfirmRef.current === lineText) {
           pendingDangerConfirmRef.current = null;
@@ -329,7 +363,8 @@ export default memo(function TerminalView({ sessionId, active = true, onTerminal
           return;
         }
 
-        const cmd = writeQueueText || lineText;
+        // 优先使用本地缓冲的完整命令，回退到终端行文本
+        const cmd = inputResult.command || lineText;
         if (cmd) {
           const matched = checkDangerousCommand(compiledDangerRulesRef.current, cmd);
           if (matched.length > 0) {
@@ -427,6 +462,7 @@ export default memo(function TerminalView({ sessionId, active = true, onTerminal
       outputPumpRef.current = null;
       terminalRef.current = null;
       fitAddonRef.current = null;
+      localCommandBufferRef.current = '';
 
       // Defer ALL teardown to the next event loop to keep tab-close responsive.
       const capturedResizeObserver = resizeObserver;

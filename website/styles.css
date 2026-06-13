@@ -665,11 +665,13 @@ p { margin: 0; }
   background: rgba(45, 52, 54, 0.3);
   backdrop-filter: blur(4px);
   opacity: 0;
+  pointer-events: none;
   transition: opacity 0.3s ease;
 }
 
 .mobile-overlay.is-visible {
   opacity: 1;
+  pointer-events: auto;
 }
 
 .mobile-nav {
@@ -687,11 +689,13 @@ p { margin: 0; }
   box-shadow: var(--shadow-xl);
   border-radius: var(--r-xl) 0 0 var(--r-xl);
   transform: translateX(100%);
+  pointer-events: none;
   transition: transform var(--dur) var(--ease-clay);
 }
 
 .mobile-nav.is-open {
   transform: translateX(0);
+  pointer-events: auto;
 }
 
 .mobile-nav-header {

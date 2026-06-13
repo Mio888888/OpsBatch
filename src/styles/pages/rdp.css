@@ -168,8 +168,6 @@
 
 .rdp-vnc-screen {
   position: relative;
-  width: min(100%, 1280px);
-  height: min(100%, 720px);
   overflow: hidden;
 }
 

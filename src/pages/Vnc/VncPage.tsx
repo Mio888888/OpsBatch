@@ -14,8 +14,6 @@ import {
   type VncConnectionState,
   type VncSessionStatus,
   vncDefaultResolution,
-  vncPresentationSize,
-  vncResolutionLimit,
 } from './vncProtocol';
 
 interface VncConnectResponse {
@@ -31,8 +29,22 @@ interface VncConnectResponse {
 type RfbEvent<TDetail = unknown> = Event & { detail?: TDetail };
 
 const VNC_INTERACTIVE_QUALITY_LEVEL = 2;
-const VNC_INTERACTIVE_COMPRESSION_LEVEL = 0;
+const VNC_INTERACTIVE_COMPRESSION_LEVEL = 2;
 const VNC_CONNECT_WATCHDOG_MS = 15000;
+
+const VNC_ENCODING_COPY_RECT = 1;
+const VNC_ENCODING_RRE = 2;
+const VNC_ENCODING_HEXTILE = 5;
+const VNC_ENCODING_ZLIB = 6;
+const VNC_ENCODING_TIGHT = 7;
+const VNC_ENCODING_ZRLE = 16;
+const VNC_ENCODING_JPEG = 21;
+const VNC_ENCODING_RAW = 0;
+const VNC_ENCODING_TIGHT_PNG = -260;
+
+type NoVncMessages = {
+  clientEncodings?: (sock: unknown, encodings: number[]) => void;
+};
 
 type RfbDebugState = {
   _display?: {
@@ -50,6 +62,10 @@ type RfbDebugState = {
   _rfbVersion?: number;
   _enabledContinuousUpdates?: boolean;
   _supportsSetDesktopSize?: boolean;
+};
+
+type RfbEncodingState = {
+  messages?: NoVncMessages;
 };
 
 function writeVncDiagnosticLog(message: string) {
@@ -115,6 +131,38 @@ function vncEncodingName(encoding: number | null | undefined) {
     [-308]: 'extendedDesktopSize',
   };
   return names[encoding ?? Number.NaN] ?? String(encoding ?? 'unknown');
+}
+
+function installVncEncodingPreferences() {
+  const messages = (RFB as unknown as RfbEncodingState).messages;
+  const originalClientEncodings = messages?.clientEncodings;
+  if (!messages || !originalClientEncodings) return undefined;
+
+  messages.clientEncodings = function preferredClientEncodings(sock: unknown, requestedEncodings: number[]) {
+    const preferred = [
+      VNC_ENCODING_COPY_RECT,
+      VNC_ENCODING_RRE,
+      VNC_ENCODING_HEXTILE,
+      VNC_ENCODING_ZRLE,
+      VNC_ENCODING_TIGHT,
+      VNC_ENCODING_TIGHT_PNG,
+      VNC_ENCODING_JPEG,
+      VNC_ENCODING_ZLIB,
+      VNC_ENCODING_RAW,
+    ];
+    const reordered = [
+      ...preferred.filter((encoding) => requestedEncodings.includes(encoding)),
+      ...requestedEncodings.filter((encoding) => !preferred.includes(encoding)),
+    ];
+
+    return originalClientEncodings.call(this, sock, reordered);
+  };
+
+  return () => {
+    if (messages.clientEncodings !== originalClientEncodings) {
+      messages.clientEncodings = originalClientEncodings;
+    }
+  };
 }
 
 function installVncPerformanceDiagnostics(
@@ -353,6 +401,7 @@ export default function VncPage() {
     let disposed = false;
     let disposePerformanceDiagnostics: (() => void) | undefined;
     let disposeInputDiagnostics: (() => void) | undefined;
+    let disposeEncodingPreferences: (() => void) | undefined;
     const connectWatchdog = window.setTimeout(() => {
       if (disposed || sessionIdRef.current !== nextSessionId || statusRef.current !== 'connecting') return;
       disposed = true;
@@ -388,6 +437,7 @@ export default function VncPage() {
       const credentials: Record<string, string> = {};
       if (response.username) credentials.username = response.username;
       if (response.password) credentials.password = response.password;
+      disposeEncodingPreferences = installVncEncodingPreferences();
       const rfb = new RFB(target, response.websocketUrl, {
         credentials,
         shared: response.shared,
@@ -400,6 +450,10 @@ export default function VncPage() {
       rfb.qualityLevel = VNC_INTERACTIVE_QUALITY_LEVEL;
       rfb.compressionLevel = VNC_INTERACTIVE_COMPRESSION_LEVEL;
       rfb.background = '#101417';
+      rfb.showDotCursor = true;
+      writeVncDiagnosticLog(
+        `novnc preferences hostId=${activeHostId} sessionId=${nextSessionId} cursor=local-dot encodingPreference=copyrect,rre,hextile,zrle,tight,tightpng,jpeg,zlib,raw`,
+      );
       if (vncDebugEnabled) {
         disposePerformanceDiagnostics = installVncPerformanceDiagnostics(rfb, activeHostId, nextSessionId);
         disposeInputDiagnostics = installVncInputDiagnostics(rfb, target, activeHostId, nextSessionId);
@@ -490,6 +544,7 @@ export default function VncPage() {
       disposed = true;
       disposePerformanceDiagnostics?.();
       disposeInputDiagnostics?.();
+      disposeEncodingPreferences?.();
       window.clearTimeout(connectWatchdog);
       window.clearInterval(statusInterval);
       if (sessionIdRef.current === nextSessionId) {
@@ -535,8 +590,6 @@ export default function VncPage() {
   const showConnecting = status === 'connecting';
   const showError = status === 'error';
   const defaultResolution = vncDefaultResolution();
-  const presentation = vncPresentationSize(defaultResolution.width, defaultResolution.height);
-  const limit = vncResolutionLimit(presentation.width, presentation.height);
   const targetLabel = host.ip || host.name;
 
   return (
@@ -577,8 +630,8 @@ export default function VncPage() {
           ref={screenRef}
           className="rdp-canvas rdp-vnc-screen"
           style={{
-            width: `${limit.width}px`,
-            height: `${limit.height}px`,
+            width: `${defaultResolution.width}px`,
+            height: `${defaultResolution.height}px`,
           }}
         />
         {showConnecting ? (

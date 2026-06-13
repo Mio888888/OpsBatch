@@ -57,7 +57,10 @@ impl ManagedWindow {
             Self::Settings => Ok("/settings".to_string()),
             Self::GlobalLog => Ok("/global-log".to_string()),
             Self::Rdp => Ok(format!("/rdp?hostId={}", encode_single_host_id(host_ids)?)),
-            Self::Vnc => Ok(format!("/vnc?hostId={}", encode_single_host_id(host_ids)?)),
+            Self::Vnc => Ok(format!(
+                "/vnc?hostId={}&vncDebug=1",
+                encode_single_host_id(host_ids)?
+            )),
         }
     }
 

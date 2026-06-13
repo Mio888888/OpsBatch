@@ -97,7 +97,7 @@ test('registers a managed VNC window and backend VNC commands', () => {
 
   assert.match(windowSource, /Vnc/);
   assert.match(windowSource, /"vnc"/);
-  assert.match(windowSource, /\/vnc\?hostId=/);
+  assert.match(windowSource, /\/vnc\?hostId=\{\}&vncDebug=1/);
   assert.match(libSource, /commands::vnc::vnc_connect/);
   assert.match(libSource, /commands::vnc::vnc_disconnect/);
   assert.match(libSource, /commands::vnc::get_vnc_session_status/);
@@ -169,10 +169,11 @@ test('frontend uses noVNC RFB directly and does not keep the legacy pixel pipeli
   assert.match(source, /scaleViewport\s*=\s*true/);
   assert.match(source, /resizeSession\s*=\s*true/);
   assert.match(source, /VNC_INTERACTIVE_QUALITY_LEVEL\s*=\s*2/);
-  assert.match(source, /VNC_INTERACTIVE_COMPRESSION_LEVEL\s*=\s*0/);
+  assert.match(source, /VNC_INTERACTIVE_COMPRESSION_LEVEL\s*=\s*2/);
   assert.match(source, /qualityLevel\s*=\s*VNC_INTERACTIVE_QUALITY_LEVEL/);
   assert.match(source, /compressionLevel\s*=\s*VNC_INTERACTIVE_COMPRESSION_LEVEL/);
   assert.match(source, /focusOnClick\s*=\s*true/);
+  assert.match(source, /showDotCursor\s*=\s*true/);
   assert.match(source, /describeRfbRuntime/);
   assert.match(source, /installVncPerformanceDiagnostics/);
   assert.match(source, /installVncInputDiagnostics/);
@@ -190,6 +191,42 @@ test('frontend uses noVNC RFB directly and does not keep the legacy pixel pipeli
   assert.doesNotMatch(source, /send_vnc_pointer_event/);
   assert.doesNotMatch(source, /send_vnc_key_event/);
   assert.doesNotMatch(source, /texSubImage2D/);
+});
+
+test('frontend requests 1920x1080 VNC sessions and scales without scrollbars', () => {
+  const source = readVncFrontendSource();
+  const styles = readFileSync('src/styles/pages/rdp.css', 'utf8');
+
+  assert.match(source, /scaleViewport\s*=\s*true/);
+  assert.match(source, /const defaultResolution = vncDefaultResolution\(\)/);
+  assert.match(source, /width:\s*`\$\{defaultResolution\.width\}px`/);
+  assert.match(source, /height:\s*`\$\{defaultResolution\.height\}px`/);
+  assert.doesNotMatch(source, /const limit = vncResolutionLimit/);
+  assert.match(styles, /\.rdp-vnc-screen\s*\{[^}]*overflow:\s*hidden/s);
+  assert.match(styles, /\.rdp-vnc-screen > div\s*\{[^}]*width:\s*100%/s);
+  assert.match(styles, /\.rdp-vnc-screen > div\s*\{[^}]*height:\s*100%/s);
+  assert.match(styles, /\.rdp-vnc-screen canvas\s*\{[^}]*max-width:\s*100%/s);
+  assert.match(styles, /\.rdp-vnc-screen canvas\s*\{[^}]*max-height:\s*100%/s);
+});
+
+test('frontend prefers low-overhead local cursor and RRE VNC encoding', () => {
+  const source = readVncFrontendSource();
+  const novncTypes = readFileSync('src/types/novnc.d.ts', 'utf8');
+
+  assert.match(novncTypes, /showDotCursor:\s*boolean/);
+  assert.match(source, /const VNC_ENCODING_RRE = 2/);
+  assert.match(source, /installVncEncodingPreferences/);
+  assert.match(source, /messages\.clientEncodings = function preferredClientEncodings/);
+  assert.match(source, /VNC_ENCODING_COPY_RECT,\s*\n\s*VNC_ENCODING_RRE/);
+  assert.match(source, /VNC_ENCODING_RAW/);
+  assert.match(source, /rfb\.showDotCursor\s*=\s*true/);
+  assert.match(source, /disposeEncodingPreferences = installVncEncodingPreferences\(\)/);
+  assert.ok(
+    source.indexOf('disposeEncodingPreferences = installVncEncodingPreferences()')
+      < source.indexOf('const rfb = new RFB'),
+  );
+  assert.match(source, /disposeEncodingPreferences\?\.\(\)/);
+  assert.match(source, /encodingPreference=copyrect,rre/);
 });
 
 test('frontend closes stale noVNC sessions after asynchronous effect cleanup', () => {
@@ -269,14 +306,12 @@ test('VNC connection path writes diagnostics for frontend and backend handoff po
 test('frontend constrains VNC display defaults and maximum presentation size', () => {
   const source = readVncFrontendSource();
 
-  assert.deepEqual(vncDefaultResolution(), { width: 1280, height: 720 });
+  assert.deepEqual(vncDefaultResolution(), { width: 1920, height: 1080 });
   assert.deepEqual(vncResolutionLimit(3840, 2160), { width: 1920, height: 1080 });
   assert.deepEqual(vncResolutionLimit(1600, 900), { width: 1600, height: 900 });
   assert.deepEqual(vncPresentationSize(1920, 1200), { width: 1728, height: 1080 });
   assert.deepEqual(vncPresentationSize(3456, 2234), { width: 1671, height: 1080 });
   assert.match(source, /vncDefaultResolution/);
-  assert.match(source, /vncResolutionLimit/);
-  assert.match(source, /vncPresentationSize/);
   assert.match(source, /rdp-vnc-screen/);
 });
 

@@ -5,8 +5,8 @@ export interface VncSessionStatus {
   connected: boolean;
 }
 
-const VNC_DEFAULT_WIDTH = 1280;
-const VNC_DEFAULT_HEIGHT = 720;
+const VNC_DEFAULT_WIDTH = 1920;
+const VNC_DEFAULT_HEIGHT = 1080;
 const VNC_MAX_WIDTH = 1920;
 const VNC_MAX_HEIGHT = 1080;
 

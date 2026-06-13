@@ -49,8 +49,7 @@ export function checkDangerousCommand(compiled: CompiledDangerRule[], cmd: strin
  * 后端规则加载成功后会替换为完整列表（含用户自定义规则）。
  */
 const DEFAULT_DANGER_RULE_PATTERNS: DangerRuleRaw[] = [
-  { id: 'builtin-rm-rf-root', name: 'rm -rf /', pattern: 'rm\\s+-rf\\s+/', enabled: true, is_builtin: true },
-  { id: 'builtin-rm-rf-home', name: 'rm -rf ~', pattern: 'rm\\s+-rf\\s+~', enabled: true, is_builtin: true },
+  { id: 'builtin-rm-rf-danger', name: 'rm -rf (危险路径)', pattern: 'rm\\s+-rf\\s+[/.*~]', enabled: true, is_builtin: true },
   { id: 'builtin-fork-bomb', name: 'fork bomb', pattern: ':\\(\\)\\{\\s*:\\|:\\&\\s*\\}\\s*;', enabled: true, is_builtin: true },
   { id: 'builtin-dd', name: 'dd overwrite', pattern: 'dd\\s+if=', enabled: true, is_builtin: true },
   { id: 'builtin-mkfs', name: 'mkfs', pattern: 'mkfs\\.', enabled: true, is_builtin: true },

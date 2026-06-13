@@ -45,6 +45,7 @@ pub async fn list_danger_rules(db: tauri::State<'_, Database>) -> Result<Vec<Dan
     let builtin = vec![
         ("rm -rf /", "rm\\s+-rf\\s+/"),
         ("rm -rf ~", "rm\\s+-rf\\s+~"),
+        ("rm -rf (危险路径)", "rm\\s+-rf\\s+[/.*~]"),
         ("fork bomb", ":\\(\\)\\{\\s*:\\|:\\&\\s*\\}\\s*;"),
         ("dd overwrite", "dd\\s+if="),
         ("mkfs", "mkfs\\."),

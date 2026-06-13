@@ -23,10 +23,13 @@ jobs:
         id: check
         shell: bash
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
         run: |
           set -euo pipefail
+          RELEASE_JSON=""
+          trap 'rm -f "${RELEASE_JSON}"' EXIT
 
           VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
@@ -39,8 +42,19 @@ jobs:
 
           TAG="v${VERSION}"
           if git tag -l "$TAG" | grep -q .; then
-            echo "Tag ${TAG} already exists, skipping build"
-            echo "changed=false" >> "$GITHUB_OUTPUT"
+            RELEASE_JSON=$(mktemp)
+            if curl -fsSL \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" \
+              -o "$RELEASE_JSON" \
+              && jq -e '.assets[]? | select(.name == "latest.json")' "$RELEASE_JSON" >/dev/null; then
+              echo "Tag ${TAG} already exists with latest.json, skipping build"
+              echo "changed=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "Tag ${TAG} exists but latest.json is missing, will rebuild"
+              echo "changed=true" >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "Tag ${TAG} not found, will build"
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -88,7 +102,7 @@ jobs:
           releaseBody: See the assets to download this version.
           releaseDraft: true
           prerelease: false
-          uploadUpdaterJson: true
+          includeUpdaterJson: true
           updaterJsonPreferNsis: true
           args: --config src-tauri/tauri.updater.conf.json
 
@@ -142,7 +156,7 @@ jobs:
           releaseBody: See the assets to download this version.
           releaseDraft: true
           prerelease: false
-          uploadUpdaterJson: true
+          includeUpdaterJson: true
           updaterJsonPreferNsis: true
           args: --config src-tauri/tauri.updater.conf.json
 
@@ -209,7 +223,7 @@ jobs:
           releaseBody: See the assets to download this version.
           releaseDraft: true
           prerelease: false
-          uploadUpdaterJson: true
+          includeUpdaterJson: true
           updaterJsonPreferNsis: true
           args: --config src-tauri/tauri.updater.conf.json
 

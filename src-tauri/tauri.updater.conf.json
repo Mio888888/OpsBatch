@@ -1,4 +1,7 @@
 {
+  "bundle": {
+    "createUpdaterArtifacts": true
+  },
   "plugins": {
     "updater": {
       "pubkey": "__TAURI_UPDATER_PUBKEY__",

@@ -13,6 +13,7 @@ export function useUpdate() {
 
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
   const [updateModalOpen, setUpdateModalOpen] = useState(false);
+  const [updateCheckBusy, setUpdateCheckBusy] = useState(false);
   const [updateInstallState, setUpdateInstallState] = useState<UpdateInstallState>({
     phase: 'idle',
     downloaded: 0,
@@ -23,6 +24,7 @@ export function useUpdate() {
   const checkForUpdates = useCallback(async (silent = false) => {
     if (updateCheckInFlightRef.current) return null;
     updateCheckInFlightRef.current = true;
+    setUpdateCheckBusy(true);
     try {
       const nextInfo = await invoke<AppUpdateInfo>('check_app_update');
       setUpdateInfo(nextInfo);
@@ -39,6 +41,7 @@ export function useUpdate() {
       return null;
     } finally {
       updateCheckInFlightRef.current = false;
+      setUpdateCheckBusy(false);
     }
   }, [tText]);
 
@@ -138,13 +141,15 @@ export function useUpdate() {
           : updateInstallState.phase === 'error'
             ? t('common.retry')
             : t('appUpdate.downloadAndInstall');
-  const updateActionDisabled = updateBusy || !updateInfo?.hasUpdate;
+  const updateActionDisabled = updateBusy || updateCheckBusy || !updateInfo?.hasUpdate;
   const updateAction = updateInstallState.phase === 'ready' ? restartForUpdate : downloadAndInstallUpdate;
 
   return {
     updateInfo,
     updateModalOpen,
     setUpdateModalOpen,
+    checkForUpdates,
+    updateCheckBusy,
     updateInstallState,
     updateBusy,
     updatePercent,

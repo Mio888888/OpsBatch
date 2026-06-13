@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { Button, Modal } from '../ui';
-import { UpdateOutlined } from '../ui/icons';
+import { ReloadOutlined, UpdateOutlined } from '../ui/icons';
 import { useTranslation } from '../../i18n';
 import type { AppUpdateInfo, UpdateInstallState } from './constants';
 
@@ -8,6 +8,8 @@ interface UpdateModalProps {
   updateInfo: AppUpdateInfo | null;
   updateModalOpen: boolean;
   setUpdateModalOpen: (open: boolean) => void;
+  checkForUpdates: (silent?: boolean) => Promise<AppUpdateInfo | null>;
+  updateCheckBusy: boolean;
   updateInstallState: UpdateInstallState;
   updateBusy: boolean;
   updatePercent: number;
@@ -22,6 +24,8 @@ export default function UpdateModal({
   updateInfo,
   updateModalOpen,
   setUpdateModalOpen,
+  checkForUpdates,
+  updateCheckBusy,
   updateInstallState,
   updateBusy,
   updatePercent,
@@ -53,6 +57,16 @@ export default function UpdateModal({
           {updateInstallState.phase === 'error' ? (
             <Button onClick={resetUpdateInstall}>{t('common.cancel')}</Button>
           ) : null}
+          <Button
+            icon={<ReloadOutlined spin={updateCheckBusy} />}
+            loading={updateCheckBusy}
+            disabled={updateBusy || updateCheckBusy}
+            onClick={() => {
+              void checkForUpdates(false);
+            }}
+          >
+            {t('appUpdate.check')}
+          </Button>
           <Button
             type="primary"
             loading={updateBusy}

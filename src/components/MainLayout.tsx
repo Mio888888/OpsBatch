@@ -916,6 +916,8 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         updateInfo={updateState.updateInfo}
         updateModalOpen={updateState.updateModalOpen}
         setUpdateModalOpen={updateState.setUpdateModalOpen}
+        checkForUpdates={updateState.checkForUpdates}
+        updateCheckBusy={updateState.updateCheckBusy}
         updateInstallState={updateState.updateInstallState}
         updateBusy={updateState.updateBusy}
         updatePercent={updateState.updatePercent}

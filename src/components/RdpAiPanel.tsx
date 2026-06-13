@@ -171,6 +171,7 @@ const RdpAiPanel: FC<RdpAiPanelProps> = ({
   const activateSession = useAiChatStore((s) => s.activateSession);
   const setInputText = useAiChatStore((s) => s.setInputText);
   const sendMessage = useAiChatStore((s) => s.sendMessage);
+  const sendDirectMessage = useAiChatStore((s) => s.sendDirectMessage);
   const rejectAction = useAiChatStore((s) => s.rejectAction);
   const approveAction = useAiChatStore((s) => s.approveAction);
   const initStreamListener = useAiChatStore((s) => s.initStreamListener);
@@ -311,8 +312,8 @@ const RdpAiPanel: FC<RdpAiPanelProps> = ({
     const prompt = check
       ? `目标：${target}\n刚才执行了第 ${round} 轮操作。请判断目标是否已经完成。如果已完成，直接回复"目标已完成"并简要说明；如果未完成，请给出下一步操作（用 <RDP_PLAN> 格式）。`
       : `目标：${target}\n请给出实现该目标的第一步操作计划（用 <RDP_PLAN> 格式）。步骤要精确，坐标基于 ${desktopWidth}x${desktopHeight} 分辨率。`;
-    void sendMessage(prompt);
-  }, [desktopHeight, desktopWidth, sendMessage]);
+    void sendDirectMessage(prompt);
+  }, [desktopHeight, desktopWidth, sendDirectMessage]);
 
   const handleStartGoal = useCallback(() => {
     const target = goalText.trim();

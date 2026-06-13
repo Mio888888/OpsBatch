@@ -942,3 +942,10 @@
   color: #2a9d63;
   font-weight: var(--font-weight-bold);
 }
+
+.rdp-ai-msg-error {
+  font-size: var(--font-size-small);
+  color: #c0392b;
+  font-weight: var(--font-weight-bold);
+  padding: 6px 0;
+}

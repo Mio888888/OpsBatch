@@ -525,6 +525,8 @@ const RDP_SUPPORTED_KEY_NAMES = new Set([
   'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight',
   'CapsLock',
   'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
+  // 修饰键别名（与 executor MODIFIER_SCANCODES 保持一致）
+  'Win', 'Windows', 'Ctrl', 'AltGr',
 ]);
 
 // 尝试从可能被截断/不规范的 RDP_PLAN 标签块中提取 JSON 文本。

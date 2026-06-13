@@ -4515,7 +4515,7 @@ dependencies = [
 
 [[package]]
 name = "opsbatch"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "aes-gcm 0.10.3",
  "arboard",

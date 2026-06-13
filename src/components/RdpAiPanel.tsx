@@ -195,7 +195,6 @@ const RdpAiPanel: FC<RdpAiPanelProps> = ({
   const goalActiveRef = useRef(false);
   const goalTargetRef = useRef('');
   const goalRoundRef = useRef(0);
-  const lastHandledActionCountRef = useRef(0);
 
   const batchExecuting = batchExecutingId !== null;
   const GOAL_MAX_ROUNDS = 8;
@@ -321,7 +320,6 @@ const RdpAiPanel: FC<RdpAiPanelProps> = ({
     goalActiveRef.current = true;
     goalTargetRef.current = target;
     goalRoundRef.current = 0;
-    lastHandledActionCountRef.current = 0;
     setGoalRunning(true);
     setGoalRound(0);
     setGoalText('');

@@ -553,10 +553,16 @@ function extractRdpPlanCandidate(content: string): { rawPlan: string; startIndex
     const afterOpen = openMatch.index + openMatch[0].length;
     const jsonText = sliceBalancedJson(content, afterOpen);
     if (jsonText) {
+      // 扩展 endIndex 到包含后续闭合标签（完整或不完整），避免残留显示
+      const tail = content.slice(jsonText.endIndex);
+      const closeMatch = tail.match(/<\/RDP_PLAN?>?/i);
+      const endIndex = closeMatch && typeof closeMatch.index === 'number'
+        ? jsonText.endIndex + closeMatch.index + closeMatch[0].length
+        : jsonText.endIndex;
       return {
         rawPlan: jsonText.text.trim(),
         startIndex: openMatch.index,
-        endIndex: jsonText.endIndex,
+        endIndex,
       };
     }
   }
@@ -828,7 +834,9 @@ export function validateRdpPlan(
 ): ValidatedRdpPlan {
   const plan = parsePlanJsonLoose(raw);
   if (!plan) throw new Error('RdpPlan JSON 解析失败');
-  if (plan.version !== 1) throw new Error('RdpPlan version 必须为 1');
+  // version 宽容校验：接受缺失（默认 1）、数字 1、字符串 "1"
+  const versionNum = Number(plan.version ?? 1);
+  if (versionNum !== 1) throw new Error(`RdpPlan version 必须为 1，实际为 ${String(plan.version)}`);
 
   const summary = String(plan.summary ?? '').trim();
   if (!summary) throw new Error('RdpPlan summary 不能为空');

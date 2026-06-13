@@ -575,7 +575,7 @@ function sliceBalancedJson(content: string, startIndex: number): { text: string;
   let inString = false;
   let escape = false;
   let firstBrace = -1;
-  let lastBrace = -1;
+  const openStack: string[] = [];
 
   for (let idx = startIndex; idx < content.length; idx += 1) {
     const ch = content[idx];
@@ -593,35 +593,33 @@ function sliceBalancedJson(content: string, startIndex: number): { text: string;
       inString = true;
       continue;
     }
-    if (ch === '{') {
-      if (depth === 0) firstBrace = idx;
+    if (ch === '{' || ch === '[') {
+      if (depth === 0 && ch === '{') firstBrace = idx;
       depth += 1;
-      lastBrace = idx;
-    } else if (ch === '}') {
+      openStack.push(ch);
+    } else if (ch === '}' || ch === ']') {
       depth -= 1;
-      lastBrace = idx;
+      openStack.pop();
       if (depth === 0 && firstBrace >= 0) {
         return { text: content.slice(firstBrace, idx + 1), endIndex: idx + 1 };
       }
     }
   }
 
-  // 截断场景：花括号未平衡，但有内容——尝试补全闭合
-  if (firstBrace >= 0 && depth > 0) {
-    const partial = content.slice(firstBrace, lastBrace + 1);
-    const repaired = repairTruncatedJson(partial, depth);
+  if (firstBrace >= 0 && openStack.length > 0) {
+    const partial = content.slice(firstBrace);
+    const repaired = repairTruncatedJson(partial, openStack);
     if (repaired) {
-      return { text: repaired, endIndex: lastBrace + 1 };
+      return { text: repaired, endIndex: content.length };
     }
   }
 
   return null;
 }
 
-// 尝试修复被截断的 JSON：补全未闭合的花括号与字符串，并清理尾部逗号。
-function repairTruncatedJson(partial: string, openBraces: number): string | null {
+function repairTruncatedJson(partial: string, openStack: string[]): string | null {
   let repaired = partial;
-  // 若字符串未闭合，补一个引号
+
   let inString = false;
   let escape = false;
   for (let idx = 0; idx < repaired.length; idx += 1) {
@@ -634,20 +632,17 @@ function repairTruncatedJson(partial: string, openBraces: number): string | null
   }
   if (inString) repaired += '"';
 
-  // 移除尾部不完整的 token（逗号、冒号后无值等）
   repaired = repaired.replace(/[,\s]+$/, '');
   repaired = repaired.replace(/:\s*$/, '');
-
-  // 若最后一个属性值不完整（如 "text": "notepad 被截断在引号内已被上面处理），
-  // 尝试补全：若以逗号结尾无需处理；若以未闭合值结尾，去掉该属性
-  // 移除尾部的孤立键（如 "intent": ）
   repaired = repaired.replace(/,\s*"[A-Za-z_]+"\s*:\s*$/, '');
 
-  // 补全未闭合的花括号
-  for (let i = 0; i < openBraces; i += 1) repaired += '}';
+  for (let idx = openStack.length - 1; idx >= 0; idx -= 1) {
+    repaired += openStack[idx] === '{' ? '}' : ']';
+  }
 
   return repaired;
 }
+
 
 function looksLikeRdpPlanJson(raw: string): boolean {
   try {

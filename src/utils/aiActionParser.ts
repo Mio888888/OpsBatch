@@ -841,13 +841,19 @@ export function validateRdpPlan(
   maxCoords: { width: number; height: number },
 ): ValidatedRdpPlan {
   const plan = parsePlanJsonLoose(raw);
+  // eslint-disable-next-line no-console
+  console.log('[validateRdpPlan] parsed:', { version: plan?.version, summary: plan?.summary, stepsLen: (plan?.steps as unknown[])?.length, rawPreview: raw.slice(0, 200) });
   if (!plan) throw new Error('RdpPlan JSON 解析失败');
   // version 宽容校验：接受缺失（默认 1）、数字 1、字符串 "1"
   const versionNum = Number(plan.version ?? 1);
   if (versionNum !== 1) throw new Error(`RdpPlan version 必须为 1，实际为 ${String(plan.version)}`);
 
-  const summary = String(plan.summary ?? '').trim();
-  if (!summary) throw new Error('RdpPlan summary 不能为空');
+  let summary = String(plan.summary ?? '').trim();
+  // summary 宽容处理：为空时尝试从 steps 推导，而非直接拒绝
+  if (!summary && Array.isArray(plan.steps) && plan.steps.length > 0) {
+    summary = String(plan.steps[0]?.description ?? '').trim().slice(0, 120) || 'RDP 操作';
+  }
+  if (!summary) throw new Error('RdpPlan summary 和 steps 均为空，无法解析操作计划');
   if (summary.length > 200) throw new Error('RdpPlan summary 不能超过 200 字符');
 
   if (!Array.isArray(plan.steps) || plan.steps.length === 0) {
@@ -895,6 +901,9 @@ export function parseRdpActions(
   maxCoords: { width: number; height: number },
 ): ParsedRdpActionsResult | null {
   const candidate = extractRdpPlanCandidate(content);
+  // 诊断日志：帮助定位 AI 输出格式问题
+  // eslint-disable-next-line no-console
+  console.log('[parseRdpActions] candidate:', candidate ? { rawPlanLen: candidate.rawPlan.length, rawPlanPreview: candidate.rawPlan.slice(0, 200), extractError: candidate.extractError } : null);
   if (!candidate) return null;
 
   // 开标签存在但 JSON 提取失败的诊断

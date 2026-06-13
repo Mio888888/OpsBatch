@@ -11,7 +11,7 @@ import { createTerminalOutputPump, type TerminalOutputPump } from '../utils/term
 import { createTrackedCommand, createTrackedCommandOutputCleaner, stripTrackedCommandOutputArtifacts } from '../utils/terminalTracker';
 import { getCurrentTerminalAppearance, onThemeChange } from '../stores/theme';
 import { logHandledError } from '../utils/globalLogger';
-import { compileDangerRules, checkDangerousCommand, type CompiledDangerRule } from '../utils/dangerCommandCheck';
+import { compileDangerRules, checkDangerousCommand, DEFAULT_COMPILED_DANGER_RULES, type CompiledDangerRule } from '../utils/dangerCommandCheck';
 
 export interface TerminalCommandExecutionOptions {
   timeoutMs?: number;
@@ -106,7 +106,8 @@ export default memo(function TerminalView({ sessionId, active = true, onTerminal
   const pendingExecutionsRef = useRef<Map<string, PendingTerminalExecution>>(new Map());
   const commandExecutionChainRef = useRef<Promise<void>>(Promise.resolve());
   const doneDetectorBufferRef = useRef('');
-  const compiledDangerRulesRef = useRef<CompiledDangerRule[]>([]);
+  // 使用默认内置规则初始化，确保终端创建时即可拦截；异步加载后替换为完整列表
+  const compiledDangerRulesRef = useRef<CompiledDangerRule[]>(DEFAULT_COMPILED_DANGER_RULES);
   const pendingDangerConfirmRef = useRef<string | null>(null);
   const localCommandBufferRef = useRef('');
 

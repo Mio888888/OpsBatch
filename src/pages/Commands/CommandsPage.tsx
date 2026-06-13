@@ -13,7 +13,7 @@ import {
 } from '../../components/ui/icons';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
 import { invoke } from '@tauri-apps/api/core';
-import { compileDangerRules, checkDangerousCommand as checkDanger, type CompiledDangerRule } from '../../utils/dangerCommandCheck';
+import { compileDangerRules, checkDangerousCommand as checkDanger, DEFAULT_COMPILED_DANGER_RULES, type CompiledDangerRule } from '../../utils/dangerCommandCheck';
 import type { ColumnsType } from '../../components/ui';
 import { useLocation } from 'react-router-dom';
 import { useAssetsStore } from '../../stores/assets';
@@ -169,14 +169,14 @@ export default function CommandsPage() {
     }
   }, []);
 
-  const [compiledDangerRules, setCompiledDangerRules] = useState<CompiledDangerRule[]>([]);
+  const [compiledDangerRules, setCompiledDangerRules] = useState<CompiledDangerRule[]>(DEFAULT_COMPILED_DANGER_RULES);
 
   const loadDangerRules = async () => {
     try {
       const rules = await invoke<{ id: string; name: string; pattern: string; enabled: boolean; is_builtin: boolean }[]>('list_danger_rules');
       setCompiledDangerRules(compileDangerRules(rules));
     } catch {
-      setCompiledDangerRules([]);
+      // 保留默认内置规则，不清空
     }
   };
 

@@ -60,10 +60,12 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${TAURI_UPDATER_PUBKEY}"
+          test -n "${TAURI_SIGNING_PRIVATE_KEY}"
           sed -i.bak "s#__TAURI_UPDATER_PUBKEY__#${TAURI_UPDATER_PUBKEY}#g" src-tauri/tauri.updater.conf.json
           rm src-tauri/tauri.updater.conf.json.bak
         env:
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -77,6 +79,7 @@ jobs:
           releaseBody: See the assets to download this version.
           releaseDraft: true
           prerelease: false
+          uploadUpdaterJson: true
           updaterJsonPreferNsis: true
           args: --config src-tauri/tauri.updater.conf.json
 
@@ -111,10 +114,12 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${TAURI_UPDATER_PUBKEY}"
+          test -n "${TAURI_SIGNING_PRIVATE_KEY}"
           sed -i.bak "s#__TAURI_UPDATER_PUBKEY__#${TAURI_UPDATER_PUBKEY}#g" src-tauri/tauri.updater.conf.json
           rm src-tauri/tauri.updater.conf.json.bak
         env:
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -128,6 +133,7 @@ jobs:
           releaseBody: See the assets to download this version.
           releaseDraft: true
           prerelease: false
+          uploadUpdaterJson: true
           updaterJsonPreferNsis: true
           args: --config src-tauri/tauri.updater.conf.json
 
@@ -175,10 +181,12 @@ jobs:
         run: |
           set -euo pipefail
           test -n "${TAURI_UPDATER_PUBKEY}"
+          test -n "${TAURI_SIGNING_PRIVATE_KEY}"
           sed -i.bak "s#__TAURI_UPDATER_PUBKEY__#${TAURI_UPDATER_PUBKEY}#g" src-tauri/tauri.updater.conf.json
           rm src-tauri/tauri.updater.conf.json.bak
         env:
           TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
@@ -192,6 +200,7 @@ jobs:
           releaseBody: See the assets to download this version.
           releaseDraft: true
           prerelease: false
+          uploadUpdaterJson: true
           updaterJsonPreferNsis: true
           args: --config src-tauri/tauri.updater.conf.json
 

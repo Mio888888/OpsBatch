@@ -48,6 +48,8 @@ interface SessionState {
   inputText: string;
   scope: AiChatScope;
   activeRequestId: string | null;
+  rdpContext?: { width: number; height: number; sessionId?: string };
+  rdpExecutor?: (operations: import('../utils/aiActionParser').RdpOperation[]) => Promise<void>;
 }
 
 interface AiChatState {
@@ -74,6 +76,8 @@ interface AiChatState {
   sendMessageInline: () => Promise<void>;
   initStreamListener: () => Promise<void>;
   destroyStreamListener: () => void;
+  setRdpContext: (ctx: { width: number; height: number; sessionId?: string } | null) => void;
+  setRdpExecutor: (executor: ((operations: import('../utils/aiActionParser').RdpOperation[]) => Promise<void>) | null) => void;
   approveAction: (actionId: string, sessionId?: string) => Promise<void>;
   rejectAction: (actionId: string) => void;
 }
@@ -243,6 +247,30 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
     set((prev) => ({
       sessions: { ...prev.sessions, [sid]: { ...getSession(prev.sessions, sid), inputText: text } },
     }));
+  },
+
+  setRdpContext: (ctx) => {
+    const sid = get().activeSessionId;
+    if (!sid) return;
+    set((prev) => {
+      const sessions = { ...prev.sessions };
+      const existing = sessions[sid];
+      if (!existing) return prev;
+      sessions[sid] = { ...existing, rdpContext: ctx ?? undefined };
+      return { sessions };
+    });
+  },
+
+  setRdpExecutor: (executor) => {
+    const sid = get().activeSessionId;
+    if (!sid) return;
+    set((prev) => {
+      const sessions = { ...prev.sessions };
+      const existing = sessions[sid];
+      if (!existing) return prev;
+      sessions[sid] = { ...existing, rdpExecutor: executor ?? undefined };
+      return { sessions };
+    });
   },
 
   activateSession: (sessionId, scope) => {
@@ -618,7 +646,8 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
               },
             };
           });
-          void parseAiPendingActionsAsync(rawContent).then(({ displayContent, actions, commandPlanNotice }) => {
+          const rdpCtx = getSession(get().sessions, sid).rdpContext;
+          void parseAiPendingActionsAsync(rawContent, rdpCtx).then(({ displayContent, actions, commandPlanNotice }) => {
             const initialActions = actions.map((action) => ({
               ...action,
               assessmentLoading: action.type === 'command',
@@ -701,6 +730,16 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
       try {
         const bracketedPaste = `\x1b[200~${action.command}\x1b[201~\r`;
         await invoke('terminal_write', { sessionId, data: bracketedPaste });
+      } catch {
+        return;
+      }
+    }
+
+    if (action.type === 'rdp_action' && action.rdpOperations && action.rdpOperations.length > 0) {
+      const executor = session.rdpExecutor;
+      if (!executor) return;
+      try {
+        await executor(action.rdpOperations);
       } catch {
         return;
       }

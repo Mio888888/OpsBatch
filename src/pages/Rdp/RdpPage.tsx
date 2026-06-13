@@ -9,6 +9,10 @@ import { useAssetsStore } from '../../stores/assets';
 import { useTranslation } from '../../i18n';
 import { clamp, getOpenHostRequest, getRdpKeyboardInputEvents, getRdpOverlayText, type OpenHostRequest } from './rdpProtocol';
 import { useRdpConnection } from './useRdpConnection';
+import RdpAiPanel from '../../components/RdpAiPanel';
+import { executeRdpOperations } from '../../utils/rdpAgentExecutor';
+import type { RdpOperation } from '../../utils/aiActionParser';
+import { BotOutlined } from '../../components/ui/icons';
 
 export default function RdpPage() {
   const { t, tText } = useTranslation();
@@ -32,6 +36,7 @@ export default function RdpPage() {
     };
   }, [hosts, queryHostId, stateHostRequest]);
   const [connectNonce, setConnectNonce] = useState(0);
+  const [aiPanelOpen, setAiPanelOpen] = useState(true);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -56,6 +61,18 @@ export default function RdpPage() {
     invalidFrameMessage: tText('rdp.invalidFrame'),
     transportMode: 'h264Direct',
   });
+
+  const rdpSessionId = connection?.sessionId ?? null;
+  const desktopWidth = connection?.width ?? 1280;
+  const desktopHeight = connection?.height ?? 720;
+
+  const handleExecuteRdpOperations = useCallback(
+    async (ops: RdpOperation[]) => {
+      if (!rdpSessionId) return;
+      await executeRdpOperations(ops, { sessionId: rdpSessionId });
+    },
+    [rdpSessionId],
+  );
 
   useEffect(() => {
     if (!stateHostRequest && queryHostId && hosts.length === 0) {
@@ -216,6 +233,13 @@ export default function RdpPage() {
         <div className="rdp-toolbar-actions">
           <Button
             size="small"
+            icon={<BotOutlined />}
+            onClick={() => setAiPanelOpen((value) => !value)}
+          >
+            {t('rdp.aiToggle')}
+          </Button>
+          <Button
+            size="small"
             icon={<ReloadOutlined />}
             onClick={() => setConnectNonce((value) => value + 1)}
           >
@@ -231,6 +255,7 @@ export default function RdpPage() {
         </div>
       </header>
 
+      <div className={`rdp-body ${aiPanelOpen ? 'rdp-body-with-ai' : ''}`}>
       <div
         ref={stageRef}
         className="rdp-stage"
@@ -276,6 +301,20 @@ export default function RdpPage() {
             </Button>
           </div>
         )}
+      </div>
+      {aiPanelOpen && hostRequest && (
+        <aside className="rdp-ai-aside">
+          <RdpAiPanel
+            hostId={hostRequest.hostId}
+            hostName={hostRequest.name}
+            rdpSessionId={rdpSessionId}
+            desktopWidth={desktopWidth}
+            desktopHeight={desktopHeight}
+            executeRdpOperations={handleExecuteRdpOperations}
+            onClose={() => setAiPanelOpen(false)}
+          />
+        </aside>
+      )}
       </div>
     </section>
   );

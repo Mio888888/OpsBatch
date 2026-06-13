@@ -2,6 +2,7 @@ import {
   Activity,
   AlertTriangle,
   Archive,
+  Bot,
   CheckCircle,
   CirclePause,
   CirclePlay,
@@ -43,6 +44,7 @@ function icon(Component: typeof Activity) {
   };
 }
 
+export const BotOutlined = icon(Bot);
 export const ApartmentOutlined = icon(Archive);
 export const CheckCircleOutlined = icon(CheckCircle);
 export const ClearOutlined = icon(XCircle);

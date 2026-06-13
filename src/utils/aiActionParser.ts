@@ -1,11 +1,21 @@
 import { invoke } from '@tauri-apps/api/core';
 
+// RDP 操作：AI agent 输出的远程桌面操作指令
+export type RdpOperation =
+  | { type: 'click'; x: number; y: number; button?: number; doubleClick?: boolean }
+  | { type: 'move'; x: number; y: number }
+  | { type: 'drag'; fromX: number; fromY: number; toX: number; toY: number; button?: number }
+  | { type: 'scroll'; x: number; y: number; delta: number; vertical?: boolean }
+  | { type: 'type'; text: string }
+  | { type: 'key'; keys: string[] };
+
 export interface ParsedPendingAction {
   id: string;
-  type: 'command' | 'file_inspect' | 'diagnose';
+  type: 'command' | 'file_inspect' | 'diagnose' | 'rdp_action';
   description: string;
   command?: string;
-  source?: 'action_block' | 'fence' | 'command_plan';
+  rdpOperations?: RdpOperation[];
+  source?: 'action_block' | 'fence' | 'command_plan' | 'rdp_plan';
   intent?: string;
   expectedOutcome?: string;
   assessment?: AiActionAssessment;
@@ -143,7 +153,18 @@ interface CommandPlanCandidate {
   endIndex: number;
 }
 
-export async function parseAiPendingActionsAsync(content: string): Promise<ParsedAiActionsResult> {
+export async function parseAiPendingActionsAsync(
+  content: string,
+  rdpContext?: { width: number; height: number },
+): Promise<ParsedAiActionsResult> {
+  // RDP 场景：优先尝试解析 RDP 操作计划
+  if (rdpContext) {
+    const rdpResult = parseRdpActions(content, rdpContext);
+    if (rdpResult) {
+      return { displayContent: rdpResult.displayContent, actions: rdpResult.actions };
+    }
+  }
+
   const candidate = extractCommandPlanCandidate(content);
   if (!candidate) return parseAiPendingActions(content);
 
@@ -446,4 +467,437 @@ function extractDescriptionBeforeFence(content: string, fenceStartIndex: number)
   }
 
   return '执行终端命令';
+}
+
+// ---------------------------------------------------------------------------
+// agent-rdp: RDP 操作计划解析与验证
+// ---------------------------------------------------------------------------
+
+const RDP_PLAN_FENCE_LANGUAGES = new Set(['rdp', 'rdp-plan', 'rdp_actions', 'rdp-ops']);
+
+interface RawRdpPlan {
+  version?: unknown;
+  summary?: unknown;
+  steps?: unknown;
+}
+
+interface RawRdpPlanStep {
+  description?: unknown;
+  operations?: unknown;
+  intent?: unknown;
+  expected_outcome?: unknown;
+}
+
+interface ValidatedRdpPlan {
+  version: number;
+  summary: string;
+  steps: ValidatedRdpPlanStep[];
+}
+
+interface ValidatedRdpPlanStep {
+  id: string;
+  description: string;
+  operations: RdpOperation[];
+  intent: string;
+  expected_outcome: string;
+}
+
+const RDP_PLAN_MAX_STEPS = 12;
+const RDP_PLAN_MAX_OPS_PER_STEP = 30;
+const RDP_ALLOWED_INTENTS = new Set([
+  'click',
+  'type',
+  'key',
+  'scroll',
+  'navigate',
+  'launch',
+  'operate',
+  'interact',
+]);
+
+// 常用按键名映射到 RDP scancode 体系（仅用于描述与校验，实际发送由前端键盘事件处理）
+const RDP_SUPPORTED_KEY_NAMES = new Set([
+  'Enter', 'Tab', 'Escape', 'Backspace', 'Delete', 'Insert',
+  'Home', 'End', 'PageUp', 'PageDown',
+  'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+  'Space',
+  'Shift', 'Control', 'Alt', 'Meta',
+  'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight',
+  'CapsLock',
+  'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
+]);
+
+// 尝试从可能被截断/不规范的 RDP_PLAN 标签块中提取 JSON 文本。
+// 流式输出或模型截断时，闭合标签可能是 </RDP_PLAN>、</RDP、或不完整。
+function extractRdpPlanCandidate(content: string): { rawPlan: string; startIndex: number; endIndex: number } | null {
+  // 1. 完整闭合标签（标准情况）
+  const tagged = content.match(/<RDP_PLAN>\s*([\s\S]*?)\s*<\/RDP_PLAN>/i);
+  if (tagged && typeof tagged.index === 'number') {
+    return {
+      rawPlan: tagged[1].trim(),
+      startIndex: tagged.index,
+      endIndex: tagged.index + tagged[0].length,
+    };
+  }
+
+  // 2. 开标签存在但闭合不完整（截断/不规范）：用括号平衡提取 JSON
+  const openMatch = content.match(/<RDP_PLAN>/i);
+  if (openMatch && typeof openMatch.index === 'number') {
+    const afterOpen = openMatch.index + openMatch[0].length;
+    const jsonText = sliceBalancedJson(content, afterOpen);
+    if (jsonText) {
+      return {
+        rawPlan: jsonText.text.trim(),
+        startIndex: openMatch.index,
+        endIndex: jsonText.endIndex,
+      };
+    }
+  }
+
+  // 3. fence 代码块
+  for (const block of extractFenceBlocks(content)) {
+    if (!RDP_PLAN_FENCE_LANGUAGES.has(block.language)) continue;
+    if (!looksLikeRdpPlanJson(block.code)) continue;
+    return {
+      rawPlan: block.code.trim(),
+      startIndex: block.startIndex,
+      endIndex: findFenceEnd(content, block.startIndex),
+    };
+  }
+
+  return null;
+}
+
+// 从 startIndex 起查找第一个完整 JSON 对象（花括号平衡），容忍中间空白。
+// 用于流式截断/闭合标签缺失的场景。若 JSON 不完整则返回 null。
+function sliceBalancedJson(content: string, startIndex: number): { text: string; endIndex: number } | null {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let firstBrace = -1;
+  let lastBrace = -1;
+
+  for (let idx = startIndex; idx < content.length; idx += 1) {
+    const ch = content[idx];
+    if (inString) {
+      if (escape) {
+        escape = false;
+      } else if (ch === '\\') {
+        escape = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') {
+      if (depth === 0) firstBrace = idx;
+      depth += 1;
+      lastBrace = idx;
+    } else if (ch === '}') {
+      depth -= 1;
+      lastBrace = idx;
+      if (depth === 0 && firstBrace >= 0) {
+        return { text: content.slice(firstBrace, idx + 1), endIndex: idx + 1 };
+      }
+    }
+  }
+
+  // 截断场景：花括号未平衡，但有内容——尝试补全闭合
+  if (firstBrace >= 0 && depth > 0) {
+    const partial = content.slice(firstBrace, lastBrace + 1);
+    const repaired = repairTruncatedJson(partial, depth);
+    if (repaired) {
+      return { text: repaired, endIndex: lastBrace + 1 };
+    }
+  }
+
+  return null;
+}
+
+// 尝试修复被截断的 JSON：补全未闭合的花括号与字符串，并清理尾部逗号。
+function repairTruncatedJson(partial: string, openBraces: number): string | null {
+  let repaired = partial;
+  // 若字符串未闭合，补一个引号
+  let inString = false;
+  let escape = false;
+  for (let idx = 0; idx < repaired.length; idx += 1) {
+    const ch = repaired[idx];
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === '\\') escape = true;
+      else if (ch === '"') inString = false;
+    } else if (ch === '"') inString = true;
+  }
+  if (inString) repaired += '"';
+
+  // 移除尾部不完整的 token（逗号、冒号后无值等）
+  repaired = repaired.replace(/[,\s]+$/, '');
+  repaired = repaired.replace(/:\s*$/, '');
+
+  // 若最后一个属性值不完整（如 "text": "notepad 被截断在引号内已被上面处理），
+  // 尝试补全：若以逗号结尾无需处理；若以未闭合值结尾，去掉该属性
+  // 移除尾部的孤立键（如 "intent": ）
+  repaired = repaired.replace(/,\s*"[A-Za-z_]+"\s*:\s*$/, '');
+
+  // 补全未闭合的花括号
+  for (let i = 0; i < openBraces; i += 1) repaired += '}';
+
+  return repaired;
+}
+
+function looksLikeRdpPlanJson(raw: string): boolean {
+  try {
+    const parsed = JSON.parse(raw) as RawRdpPlan;
+    return Array.isArray(parsed.steps);
+  } catch {
+    return false;
+  }
+}
+
+function validateRdpOperations(rawOps: unknown, maxCoords: { width: number; height: number }): RdpOperation[] {
+  if (!Array.isArray(rawOps)) throw new Error('RDP operations 必须是数组');
+  if (rawOps.length === 0) throw new Error('RDP operations 不能为空');
+  if (rawOps.length > RDP_PLAN_MAX_OPS_PER_STEP) {
+    throw new Error(`RDP operations 单步不能超过 ${RDP_PLAN_MAX_OPS_PER_STEP} 个操作`);
+  }
+
+  const result: RdpOperation[] = [];
+  for (const raw of rawOps) {
+    if (!raw || typeof raw !== 'object') throw new Error('RDP operation 必须是对象');
+    const op = raw as Record<string, unknown>;
+    const type = op.type;
+
+    const clampCoord = (v: unknown, max: number): number => {
+      const n = Math.floor(Number(v));
+      if (!Number.isFinite(n)) throw new Error('RDP 坐标必须是数字');
+      if (n < 0 || n >= max) throw new Error(`RDP 坐标超出范围: ${n} (允许 0..${max - 1})`);
+      return n;
+    };
+
+    switch (type) {
+      case 'click':
+      case 'move': {
+        const x = clampCoord(op.x, maxCoords.width);
+        const y = clampCoord(op.y, maxCoords.height);
+        if (type === 'click') {
+          const button = op.button === undefined ? 0 : Math.floor(Number(op.button));
+          if (![0, 1, 2].includes(button)) throw new Error(`RDP click button 不支持: ${button}`);
+          const doubleClick = Boolean(op.doubleClick);
+          result.push({ type: 'click', x, y, button, doubleClick });
+        } else {
+          result.push({ type: 'move', x, y });
+        }
+        break;
+      }
+      case 'drag': {
+        const fromX = clampCoord(op.fromX ?? op.from_x, maxCoords.width);
+        const fromY = clampCoord(op.fromY ?? op.from_y, maxCoords.height);
+        const toX = clampCoord(op.toX ?? op.to_x, maxCoords.width);
+        const toY = clampCoord(op.toY ?? op.to_y, maxCoords.height);
+        const button = op.button === undefined ? 0 : Math.floor(Number(op.button));
+        if (![0, 2].includes(button)) throw new Error(`RDP drag button 不支持: ${button}`);
+        result.push({ type: 'drag', fromX, fromY, toX, toY, button });
+        break;
+      }
+      case 'scroll': {
+        const x = clampCoord(op.x, maxCoords.width);
+        const y = clampCoord(op.y, maxCoords.height);
+        const delta = Math.floor(Number(op.delta));
+        if (!Number.isFinite(delta) || delta === 0) throw new Error('RDP scroll delta 必须是非零整数');
+        if (Math.abs(delta) > 100) throw new Error('RDP scroll delta 不能超过 ±100');
+        const vertical = op.vertical === undefined ? true : Boolean(op.vertical);
+        result.push({ type: 'scroll', x, y, delta, vertical });
+        break;
+      }
+      case 'type': {
+        const text = String(op.text ?? '');
+        if (text.length === 0) throw new Error('RDP type text 不能为空');
+        if (text.length > 500) throw new Error('RDP type text 不能超过 500 字符');
+        if (text.includes('\0')) throw new Error('RDP type text 包含非法字符');
+        result.push({ type: 'type', text });
+        break;
+      }
+      case 'key': {
+        const rawKeys = Array.isArray(op.keys) ? op.keys : (typeof op.keys === 'string' ? [op.keys] : []);
+        if (rawKeys.length === 0) throw new Error('RDP key keys 不能为空');
+        if (rawKeys.length > 6) throw new Error('RDP key 组合键不能超过 6 个');
+        const keys: string[] = [];
+        for (const k of rawKeys) {
+          const keyName = String(k);
+          if (keyName.length === 1) {
+            keys.push(keyName);
+          } else if (RDP_SUPPORTED_KEY_NAMES.has(keyName)) {
+            keys.push(keyName);
+          } else {
+            throw new Error(`RDP 不支持的按键: ${keyName}`);
+          }
+        }
+        result.push({ type: 'key', keys });
+        break;
+      }
+      default:
+        throw new Error(`RDP operation type 不支持: ${String(type)}`);
+    }
+  }
+
+  return result;
+}
+
+// 宽松解析：先尝试严格 JSON.parse，失败则尝试规范化常见 AI 输出问题。
+// 主要处理：summary/description 等字符串值里未转义的 ASCII 双引号，
+// 以及被截断的 JSON（补全花括号/引号）。
+function parsePlanJsonLoose(raw: string): RawRdpPlan | null {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    // 尝试逐字符扫描，重建合法 JSON：识别字符串边界时，
+    // 用「下一个结构字符前是否有引号」来判断字符串是否闭合。
+    const repaired = rebuildJsonStructure(raw);
+    if (repaired) {
+      try {
+        return JSON.parse(repaired);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
+// 通过状态机重建 JSON：当遇到疑似字符串内部的未转义引号时，
+// 检查其后是否紧跟合法的 JSON 结构字符（, } ] : 或 EOF），
+// 若不是则判定为内部引号并转义。
+function rebuildJsonStructure(raw: string): string | null {
+  let result = '';
+  let idx = 0;
+  const len = raw.length;
+  while (idx < len) {
+    const ch = raw[idx];
+    if (ch !== '"') {
+      result += ch;
+      idx += 1;
+      continue;
+    }
+    // 进入字符串：找到所有候选闭合引号，选第一个「后跟结构字符」的作为真正闭合
+    result += '"';
+    idx += 1;
+    let closed = false;
+    while (idx < len) {
+      const inner = raw[idx];
+      if (inner === '\\' && idx + 1 < len) {
+        result += raw.slice(idx, idx + 2);
+        idx += 2;
+        continue;
+      }
+      if (inner !== '"') {
+        result += inner;
+        idx += 1;
+        continue;
+      }
+      // 遇到引号：判断是否为真正闭合
+      const after = raw[idx + 1];
+      const nextNonSpace = after === undefined ? '' : after;
+      const isStructural = /[,}\]:\s]/.test(nextNonSpace) || idx + 1 >= len;
+      if (isStructural) {
+        result += '"';
+        idx += 1;
+        closed = true;
+        break;
+      }
+      // 内部未转义引号：转义
+      result += '\\"';
+      idx += 1;
+    }
+    if (!closed) {
+      // 字符串未闭合（截断）：补闭合引号
+      result += '"';
+    }
+  }
+  return result;
+}
+
+export function validateRdpPlan(
+  raw: string,
+  maxCoords: { width: number; height: number },
+): ValidatedRdpPlan {
+  const plan = parsePlanJsonLoose(raw);
+  if (!plan) throw new Error('RdpPlan JSON 解析失败');
+  if (plan.version !== 1) throw new Error('RdpPlan version 必须为 1');
+
+  const summary = String(plan.summary ?? '').trim();
+  if (!summary) throw new Error('RdpPlan summary 不能为空');
+  if (summary.length > 200) throw new Error('RdpPlan summary 不能超过 200 字符');
+
+  if (!Array.isArray(plan.steps) || plan.steps.length === 0) {
+    throw new Error('RdpPlan steps 必须包含 1 到 12 个步骤');
+  }
+  if (plan.steps.length > RDP_PLAN_MAX_STEPS) {
+    throw new Error(`RdpPlan steps 不能超过 ${RDP_PLAN_MAX_STEPS} 个步骤`);
+  }
+
+  const steps: ValidatedRdpPlanStep[] = [];
+  for (const rawStep of plan.steps as RawRdpPlanStep[]) {
+    const description = String(rawStep.description ?? '').trim();
+    if (!description) throw new Error('RdpPlan step description 不能为空');
+    if (description.length > 120) throw new Error('RdpPlan step description 不能超过 120 字符');
+
+    const operations = validateRdpOperations(rawStep.operations, maxCoords);
+
+    const intent = String(rawStep.intent ?? 'operate')
+      .trim()
+      .toLowerCase();
+    if (!RDP_ALLOWED_INTENTS.has(intent)) throw new Error(`RdpPlan step intent 不支持: ${intent}`);
+
+    const expectedOutcome = String(rawStep.expected_outcome ?? '').trim().slice(0, 240);
+
+    steps.push({
+      id: crypto.randomUUID(),
+      description,
+      operations,
+      intent,
+      expected_outcome: expectedOutcome,
+    });
+  }
+
+  return { version: 1, summary, steps };
+}
+
+export interface ParsedRdpActionsResult {
+  displayContent: string;
+  actions: ParsedPendingAction[];
+}
+
+export function parseRdpActions(
+  content: string,
+  maxCoords: { width: number; height: number },
+): ParsedRdpActionsResult | null {
+  const candidate = extractRdpPlanCandidate(content);
+  if (!candidate) return null;
+
+  let plan: ValidatedRdpPlan;
+  try {
+    plan = validateRdpPlan(candidate.rawPlan, maxCoords);
+  } catch {
+    return null;
+  }
+
+  const displayContent = removeRange(content, candidate.startIndex, candidate.endIndex).replace(/^\s+|\s+$/g, '');
+
+  const actions: ParsedPendingAction[] = plan.steps.map((step) => ({
+    id: step.id,
+    type: 'rdp_action',
+    description: step.description,
+    rdpOperations: step.operations,
+    source: 'rdp_plan',
+    intent: step.intent,
+    expectedOutcome: step.expected_outcome,
+    approved: false,
+    executed: false,
+  }));
+
+  return { displayContent, actions };
 }

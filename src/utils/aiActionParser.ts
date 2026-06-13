@@ -841,8 +841,6 @@ export function validateRdpPlan(
   maxCoords: { width: number; height: number },
 ): ValidatedRdpPlan {
   const plan = parsePlanJsonLoose(raw);
-  // eslint-disable-next-line no-console
-  console.log('[validateRdpPlan] parsed:', { version: plan?.version, summary: plan?.summary, stepsLen: (plan?.steps as unknown[])?.length, rawPreview: raw.slice(0, 200) });
   if (!plan) throw new Error('RdpPlan JSON 解析失败');
   // version 宽容校验：接受缺失（默认 1）、数字 1、字符串 "1"
   const versionNum = Number(plan.version ?? 1);
@@ -901,9 +899,6 @@ export function parseRdpActions(
   maxCoords: { width: number; height: number },
 ): ParsedRdpActionsResult | null {
   const candidate = extractRdpPlanCandidate(content);
-  // 诊断日志：帮助定位 AI 输出格式问题
-  // eslint-disable-next-line no-console
-  console.log('[parseRdpActions] candidate:', candidate ? { rawPlanLen: candidate.rawPlan.length, rawPlanPreview: candidate.rawPlan.slice(0, 200), extractError: candidate.extractError } : null);
   if (!candidate) return null;
 
   // 开标签存在但 JSON 提取失败的诊断

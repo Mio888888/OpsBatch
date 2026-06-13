@@ -47,10 +47,53 @@ function describeOperation(op: RdpOperation): string {
 // 剥离逻辑与 aiActionParser 的提取保持一致：匹配完整标签或未闭合的开标签到末尾。
 function stripRdpPlanBlock(content: string): string {
   // 完整闭合标签
-  let result = content.replace(/<RDP_PLAN>[\s\S]*?<\/RDP_PLAN>/gi, '');
+  let result = content.replace(/<RDP_PLAN\s*>?[\s\S]*?<\/RDP_PLAN?>?/gi, '');
   // 未闭合的开标签（流式截断）：从 <RDP_PLAN> 到字符串末尾
-  result = result.replace(/<RDP_PLAN>[\s\S]*$/i, '');
+  result = result.replace(/<RDP_PLAN\s*>?[\s\S]*$/i, '');
+  // 不完整闭合标签残留（例如 </RDP、</RDP_PLAN）
+  result = result.replace(/<\/RDP(?:_PLAN?)?>?\s*$/i, '');
   return result.replace(/^[\s\n]+|[\s\n]+$/g, '');
+}
+
+function buildRdpAgentContext(width: number, height: number): string {
+  return [
+    '你是一个 Windows 远程桌面操作助手（agent-rdp）。',
+    `当前远程桌面分辨率：${width}x${height}，坐标原点 (0,0) 在左上角。`,
+    '当需要操作远程桌面时，必须输出一个完整的 <RDP_PLAN> JSON 块，不要输出空对象，不要省略 steps。',
+    '格式如下：',
+    '<RDP_PLAN>',
+    '{',
+    '  "version": 1,',
+    '  "summary": "操作摘要",',
+    '  "steps": [',
+    '    {',
+    '      "description": "步骤描述",',
+    '      "intent": "click|type|key|scroll|navigate|launch|operate|interact",',
+    '      "operations": [',
+    '        {"type": "click", "x": 100, "y": 200},',
+    '        {"type": "type", "text": "notepad"},',
+    '        {"type": "key", "keys": ["Enter"]},',
+    '        {"type": "key", "keys": ["Control", "s"]},',
+    '        {"type": "scroll", "x": 400, "y": 300, "delta": -3},',
+    '        {"type": "drag", "fromX": 10, "fromY": 10, "toX": 500, "toY": 500}',
+    '      ],',
+    '      "expected_outcome": "预期结果"',
+    '    }',
+    '  ]',
+    '}',
+    '</RDP_PLAN>',
+    '操作类型说明：',
+    '- click: 单击坐标(x,y)，可选 button(0左/1中/2右)、doubleClick',
+    '- move: 移动鼠标到坐标',
+    '- drag: 从(fromX,fromY)拖拽到(toX,toY)',
+    '- scroll: 在(x,y)滚动，delta正数向上、负数向下',
+    '- type: 输入文本',
+    '- key: 按键，单键如 ["Enter"]，组合键如 ["Control","c"]',
+    '支持按键：Enter, Tab, Escape, Backspace, Delete, Insert, Home, End, PageUp, PageDown, ArrowUp/Down/Left/Right, Space, Shift, Control, Alt, Meta, Win, F1-F12 等。',
+    '普通字符直接用 type 输入。坐标必须基于实际分辨率，不要超出范围。',
+    '如果当前目标需要多步完成，只给出下一步可执行操作；执行后会继续检查。',
+    '每个 step 必须包含非空 operations，不能只描述不操作。',
+  ].join('\n');
 }
 
 const RdpMessageContent: FC<{ msg: ChatMessage }> = memo(({ msg }) => {
@@ -253,42 +296,7 @@ const RdpAiPanel: FC<RdpAiPanelProps> = ({
 
   const handleSend = useCallback(() => {
     if (streaming || !inputText.trim()) return;
-    const context = [
-      '你是一个 Windows 远程桌面操作助手（agent-rdp）。',
-      `当前远程桌面分辨率：${desktopWidth}x${desktopHeight}，坐标原点 (0,0) 在左上角。`,
-      '当需要操作远程桌面时，输出 <RDP_PLAN> JSON 块，格式如下：',
-      '```rdp',
-      '{',
-      '  "version": 1,',
-      '  "summary": "操作摘要",',
-      '  "steps": [',
-      '    {',
-      '      "description": "步骤描述",',
-      '      "intent": "click|type|key|scroll|navigate|launch|operate|interact",',
-      '      "operations": [',
-      '        {"type": "click", "x": 100, "y": 200},',
-      '        {"type": "type", "text": "notepad"},',
-      '        {"type": "key", "keys": ["Enter"]},',
-      '        {"type": "key", "keys": ["Control", "s"]},',
-      '        {"type": "scroll", "x": 400, "y": 300, "delta": -3},',
-      '        {"type": "drag", "fromX": 10, "fromY": 10, "toX": 500, "toY": 500}',
-      '      ],',
-      '      "expected_outcome": "预期结果"',
-      '    }',
-      '  ]',
-      '}',
-      '```',
-      '操作类型说明：',
-      '- click: 单击坐标(x,y)，可选 button(0左/1中/2右)、doubleClick',
-      '- move: 移动鼠标到坐标',
-      '- drag: 从(fromX,fromY)拖拽到(toX,toY)',
-      '- scroll: 在(x,y)滚动，delta正数向上、负数向下',
-      '- type: 输入文本',
-      '- key: 按键，单键如 ["Enter"]，组合键如 ["Control","c"]',
-      '支持按键：Enter, Tab, Escape, Backspace, Delete, Insert, Home, End, PageUp, PageDown, ArrowUp/Down/Left/Right, Space, Shift, Control, Alt, Meta, F1-F12 等。',
-      '普通字符直接用 type 输入。坐标必须基于实际分辨率，不要超出范围。',
-      '每个步骤都会让用户审批后执行。优先给出清晰的步骤描述与预期结果。',
-    ].join('\n');
+    const context = buildRdpAgentContext(desktopWidth, desktopHeight);
     void sendMessage(context);
   }, [desktopHeight, desktopWidth, inputText, sendMessage, streaming]);
 
@@ -316,9 +324,9 @@ const RdpAiPanel: FC<RdpAiPanelProps> = ({
 
   const sendGoalContextMessage = useCallback(async (target: string, round: number, check: boolean) => {
     const prompt = check
-      ? `目标：${target}\n刚才执行了第 ${round} 轮操作。请判断目标是否已经完成。如果已完成，直接回复"目标已完成"并简要说明；如果未完成，请给出下一步操作（用 <RDP_PLAN> 格式）。`
-      : `目标：${target}\n请给出实现该目标的第一步操作计划（用 <RDP_PLAN> 格式）。步骤要精确，坐标基于 ${desktopWidth}x${desktopHeight} 分辨率。`;
-    void sendDirectMessage(prompt);
+      ? `目标：${target}\n刚才执行了第 ${round} 轮操作。请判断目标是否已经完成。如果已完成，直接回复"目标已完成"并简要说明；如果未完成，请输出下一步完整 <RDP_PLAN>。`
+      : `目标：${target}\n请给出实现该目标的第一步操作计划。必须输出完整 <RDP_PLAN> JSON，steps 和 operations 不能为空。步骤要精确，坐标基于 ${desktopWidth}x${desktopHeight} 分辨率。`;
+    void sendDirectMessage(prompt, buildRdpAgentContext(desktopWidth, desktopHeight));
   }, [desktopHeight, desktopWidth, sendDirectMessage]);
 
   const handleStartGoal = useCallback(() => {

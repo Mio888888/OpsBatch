@@ -43,14 +43,38 @@ function describeOperation(op: RdpOperation): string {
   }
 }
 
+// 流式输出时实时剥离 <RDP_PLAN> 块，避免把原始 JSON 显示给用户。
+// 剥离逻辑与 aiActionParser 的提取保持一致：匹配完整标签或未闭合的开标签到末尾。
+function stripRdpPlanBlock(content: string): string {
+  // 完整闭合标签
+  let result = content.replace(/<RDP_PLAN>[\s\S]*?<\/RDP_PLAN>/gi, '');
+  // 未闭合的开标签（流式截断）：从 <RDP_PLAN> 到字符串末尾
+  result = result.replace(/<RDP_PLAN>[\s\S]*$/i, '');
+  return result.replace(/^[\s\n]+|[\s\n]+$/g, '');
+}
+
 const RdpMessageContent: FC<{ msg: ChatMessage }> = memo(({ msg }) => {
+  const { t } = useTranslation();
   if (msg.role === 'system') return null;
   const isUser = msg.role === 'user';
+  const displayContent = isUser ? msg.content : stripRdpPlanBlock(msg.content);
+  const isEmpty = !displayContent;
+  const hasActions = (msg.pendingActions?.length ?? 0) > 0;
+
   return (
     <div className={`rdp-ai-msg ${isUser ? 'rdp-ai-msg-user' : 'rdp-ai-msg-assistant'}`}>
       <div className="rdp-ai-msg-role">{isUser ? '我' : 'AI'}</div>
-      {msg.content && <div className="rdp-ai-msg-text">{msg.content}</div>}
-      {msg.streaming && <span className="rdp-ai-msg-cursor" />}
+      {displayContent && <div className="rdp-ai-msg-text">{displayContent}</div>}
+      {isEmpty && msg.streaming && (
+        <div className="rdp-ai-msg-thinking">
+          <span className="rdp-ai-msg-thinking-dots" />
+          {t('rdp.aiThinking')}
+        </div>
+      )}
+      {isEmpty && !msg.streaming && hasActions && (
+        <div className="rdp-ai-msg-plan-ready">{t('rdp.aiPlanReady')}</div>
+      )}
+      {msg.streaming && !isEmpty && <span className="rdp-ai-msg-cursor" />}
     </div>
   );
 });

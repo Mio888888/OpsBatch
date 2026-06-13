@@ -893,3 +893,52 @@
   color: var(--color-text-secondary);
   white-space: nowrap;
 }
+
+/* AI 思考中 / 计划就绪 提示 */
+.rdp-ai-msg-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-small);
+  color: var(--color-text-secondary);
+}
+
+.rdp-ai-msg-thinking-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.rdp-ai-msg-thinking-dots::before,
+.rdp-ai-msg-thinking-dots::after,
+.rdp-ai-msg-thinking {
+  position: relative;
+}
+
+.rdp-ai-msg-thinking-dots::before,
+.rdp-ai-msg-thinking-dots::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+  animation: rdp-ai-dot-bounce 1.2s infinite ease-in-out;
+}
+
+.rdp-ai-msg-thinking-dots::after {
+  animation-delay: 0.2s;
+}
+
+.rdp-ai-msg-thinking .rdp-ai-msg-thinking-dots::before {
+  box-shadow: 10px 0 0 var(--color-text-muted);
+}
+
+@keyframes rdp-ai-dot-bounce {
+  0%, 80%, 100% { opacity: 0.3; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1); }
+}
+
+.rdp-ai-msg-plan-ready {
+  font-size: var(--font-size-small);
+  color: #2a9d63;
+  font-weight: var(--font-weight-bold);
+}

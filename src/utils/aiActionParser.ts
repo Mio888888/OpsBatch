@@ -518,6 +518,7 @@ const RDP_ALLOWED_INTENTS = new Set([
   'launch',
   'operate',
   'interact',
+  'wait',
 ]);
 
 // 常用按键名映射到 RDP scancode 体系（仅用于描述与校验，实际发送由前端键盘事件处理）

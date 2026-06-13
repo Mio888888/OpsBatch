@@ -68,7 +68,7 @@ function buildRdpAgentContext(width: number, height: number): string {
     '  "steps": [',
     '    {',
     '      "description": "步骤描述",',
-    '      "intent": "click|type|key|scroll|navigate|launch|operate|interact",',
+    '      "intent": "click|type|key|scroll|navigate|launch|operate|interact|wait",',
     '      "operations": [',
     '        {"type": "click", "x": 100, "y": 200},',
     '        {"type": "type", "text": "notepad"},',

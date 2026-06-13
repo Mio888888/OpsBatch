@@ -2,7 +2,7 @@
 
 [简体中文](README_CN.md) | [English](README_EN.md)
 
-OpsBatch is a local desktop workbench for operations workflows. It centralizes server assets, SSH terminals, RDP/VNC remote desktop, batch commands, script libraries, file transfer, automation workflows, and operations knowledge synchronization. The current project version is `0.1.3`. The desktop app is built with Tauri v2, React 19, TypeScript/Vite, and a Rust backend, with core data persisted in a local SQLite database.
+OpsBatch is a local desktop workbench for operations workflows. It centralizes server assets, SSH terminals, RDP/VNC remote desktop, batch commands, script libraries, file transfer, automation workflows, and operations knowledge synchronization. The current project version is `0.1.4`. The desktop app is built with Tauri v2, React 19, TypeScript/Vite, and a Rust backend, with core data persisted in a local SQLite database.
 
 
 ## Product Positioning
@@ -269,7 +269,7 @@ OpsBatch is intended for authorized operations workflows. It provides SSH, SFTP,
 
 The README, website, application UI, risk prompts, and AI outputs do not constitute legal, compliance, security-audit, or professional operations advice. Requirements vary across organizations, industries, and jurisdictions. For production changes, personal information, sensitive data, regulated industries, or cross-border processing, consult qualified professionals and follow your organization's formal processes.
 
-## Performance Optimizations (0.1.3)
+## Performance Optimizations (0.1.4)
 
 - Database connection pool: replaced single-connection Mutex with r2d2 connection pool, reducing lock contention under high concurrency.
 - SSH connection pool: eliminated per-connection tokio Runtime, unified to a shared Runtime via connection pool, reducing resource usage for batch operations.

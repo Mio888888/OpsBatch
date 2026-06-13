@@ -536,7 +536,7 @@ const RDP_SUPPORTED_KEY_NAMES = new Set([
 
 // 尝试从可能被截断/不规范的 RDP_PLAN 标签块中提取 JSON 文本。
 // 流式输出或模型截断时，闭合标签可能是 </RDP_PLAN>、</RDP、或不完整。
-function extractRdpPlanCandidate(content: string): { rawPlan: string; startIndex: number; endIndex: number } | null {
+function extractRdpPlanCandidate(content: string): { rawPlan: string; startIndex: number; endIndex: number; extractError?: string } | null {
   // 1. 完整闭合标签（标准情况）
   const tagged = content.match(/<RDP_PLAN>\s*([\s\S]*?)\s*<\/RDP_PLAN>/i);
   if (tagged && typeof tagged.index === 'number') {
@@ -548,7 +548,8 @@ function extractRdpPlanCandidate(content: string): { rawPlan: string; startIndex
   }
 
   // 2. 开标签存在但闭合不完整（截断/不规范）：用括号平衡提取 JSON
-  const openMatch = content.match(/<RDP_PLAN>/i);
+  // 宽容匹配开标签：接受 <RDP_PLAN> 后跟空白、或 <RDP_PLAN 直接换行
+  const openMatch = content.match(/<RDP_PLAN\s*>?/i);
   if (openMatch && typeof openMatch.index === 'number') {
     const afterOpen = openMatch.index + openMatch[0].length;
     const jsonText = sliceBalancedJson(content, afterOpen);
@@ -565,6 +566,13 @@ function extractRdpPlanCandidate(content: string): { rawPlan: string; startIndex
         endIndex,
       };
     }
+    // JSON 提取失败但确实有开标签：返回错误诊断
+    return {
+      rawPlan: '',
+      startIndex: openMatch.index,
+      endIndex: content.length,
+      extractError: '检测到 <RDP_PLAN> 标签但无法提取有效 JSON（可能格式错误或被截断）',
+    };
   }
 
   // 3. fence 代码块
@@ -888,6 +896,12 @@ export function parseRdpActions(
 ): ParsedRdpActionsResult | null {
   const candidate = extractRdpPlanCandidate(content);
   if (!candidate) return null;
+
+  // 开标签存在但 JSON 提取失败的诊断
+  if (candidate.extractError) {
+    const displayContentErr = removeRange(content, candidate.startIndex, candidate.endIndex).replace(/^\s+|\s+$/g, '');
+    return { displayContent: displayContentErr, actions: [], parseError: candidate.extractError };
+  }
 
   let plan: ValidatedRdpPlan;
   let parseError: string | undefined;

@@ -1,6 +1,6 @@
 [package]
 name = "opsbatch"
-version = "0.1.5"
+version = "0.1.6"
 description = "OpsBatch - 批量运维管理工具"
 authors = ["mio"]
 edition = "2021"

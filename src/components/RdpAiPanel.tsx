@@ -245,6 +245,7 @@ const RdpAiPanel: FC<RdpAiPanelProps> = ({
   const goalActiveRef = useRef(false);
   const goalTargetRef = useRef('');
   const goalRoundRef = useRef(0);
+  const goalLoopBusyRef = useRef(false);
 
   const batchExecuting = batchExecutingId !== null;
   const GOAL_MAX_ROUNDS = 8;
@@ -335,6 +336,7 @@ const RdpAiPanel: FC<RdpAiPanelProps> = ({
     goalActiveRef.current = true;
     goalTargetRef.current = target;
     goalRoundRef.current = 0;
+    goalLoopBusyRef.current = false;
     setGoalRunning(true);
     setGoalRound(0);
     setGoalText('');
@@ -343,46 +345,51 @@ const RdpAiPanel: FC<RdpAiPanelProps> = ({
 
   const handleStopGoal = useCallback(() => {
     goalActiveRef.current = false;
+    goalLoopBusyRef.current = false;
     setGoalRunning(false);
   }, []);
 
   // 目标模式循环：当有新的待执行操作且目标模式运行中时，自动审批执行
   useEffect(() => {
     if (!goalActiveRef.current) return;
+    if (goalLoopBusyRef.current) return;
     const pendingRdpActions = rdpActions.filter((a) => !a.executed && !a.rejected);
     if (pendingRdpActions.length === 0) return;
 
     // 自动执行所有待执行操作
-    let cancelled = false;
+    goalLoopBusyRef.current = true;
     void (async () => {
-      for (const action of pendingRdpActions) {
-        if (cancelled || !goalActiveRef.current) return;
-        setBatchExecutingId(action.id);
-        try {
-          await approveAction(action.id, rdpSessionId ?? undefined);
-        } catch {
-          // 忽略单步错误继续
+      try {
+        for (const action of pendingRdpActions) {
+          if (!goalActiveRef.current) return;
+          setBatchExecutingId(action.id);
+          try {
+            await approveAction(action.id, rdpSessionId ?? undefined);
+          } catch {
+            // 忽略单步错误继续
+          }
         }
-      }
-      setBatchExecutingId(null);
+        setBatchExecutingId(null);
 
-      if (cancelled || !goalActiveRef.current) return;
-      // 等待操作在远程桌面生效
-      await new Promise<void>((resolve) => setTimeout(resolve, 2500));
+        if (!goalActiveRef.current) return;
+        // 等待操作在远程桌面生效
+        await new Promise<void>((resolve) => setTimeout(resolve, 2500));
 
-      if (cancelled || !goalActiveRef.current) return;
-      // 进入下一轮检查
-      goalRoundRef.current += 1;
-      setGoalRound(goalRoundRef.current);
-      if (goalRoundRef.current >= GOAL_MAX_ROUNDS) {
-        goalActiveRef.current = false;
-        setGoalRunning(false);
-        return;
+        if (!goalActiveRef.current) return;
+        // 进入下一轮检查
+        goalRoundRef.current += 1;
+        setGoalRound(goalRoundRef.current);
+        if (goalRoundRef.current >= GOAL_MAX_ROUNDS) {
+          goalActiveRef.current = false;
+          setGoalRunning(false);
+          return;
+        }
+        void sendGoalContextMessage(goalTargetRef.current, goalRoundRef.current, true);
+      } finally {
+        goalLoopBusyRef.current = false;
+        setBatchExecutingId(null);
       }
-      void sendGoalContextMessage(goalTargetRef.current, goalRoundRef.current, true);
     })();
-
-    return () => { cancelled = true; };
   }, [rdpActions, approveAction, rdpSessionId, sendGoalContextMessage]);
 
   // 目标模式：AI 检查轮回复不含 RDP_PLAN（无新操作）时判定完成

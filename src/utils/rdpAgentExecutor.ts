@@ -126,11 +126,9 @@ export function rdpOperationsToInputEvents(ops: RdpOperation[]): RdpInputEvent[]
       }
       case 'type': {
         const chars = Array.from(op.text);
-        const batch: RdpInputEvent[] = [];
         for (const ch of chars) {
-          batch.push(...unicodeEvents(ch));
+          batches.push(unicodeEvents(ch));
         }
-        if (batch.length > 0) batches.push(batch);
         break;
       }
       case 'key': {
@@ -177,8 +175,8 @@ function delayForKind(kind: BatchKind): number {
     case 'drag':
       return 300;
     case 'type':
-      // 文本输入：字符间短间隔即可
-      return 40;
+      // 文本输入：逐字符等待，避免远程输入法/开始菜单搜索吞字或重复
+      return 90;
     case 'scroll':
       return 120;
     case 'move':

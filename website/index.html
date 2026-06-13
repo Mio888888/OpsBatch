@@ -5,15 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="robots" content="index, follow, max-image-preview:large" />
     <meta name="author" content="Mio" />
-    <meta
-      name="keywords"
-      content="OpsBatch, 运维工具, SSH 终端, SFTP, RDP, VNC, 远程桌面, 批量命令, 自动化工作流, SRE, DevOps, 本地桌面应用, Tauri"
-    />
-    <meta
-      name="description"
-      content="OpsBatch 是面向运维工程师、SRE 与平台团队的本地优先运维工作区，把 SSH 终端、SFTP、RDP/VNC 远程桌面、批量命令、文件分发、工作流和 AI 辅助收进一个桌面应用。"
-    />
-    <meta name="theme-color" content="#fff1e8" />
+    <meta name="keywords" content="OpsBatch, 运维工具, SSH 终端, SFTP, RDP, VNC, 远程桌面, 批量命令, 自动化工作流, SRE, DevOps, 本地桌面应用, Tauri" />
+    <meta name="description" content="OpsBatch — 面向运维工程师、SRE 与平台团队的本地优先运维工作区。SSH 终端、SFTP、RDP/VNC 远程桌面、批量命令、工作流与 AI 辅助，一个桌面应用全搞定。" />
+    <meta name="theme-color" content="#fff5f9" />
     <meta name="application-name" content="OpsBatch" />
     <meta name="apple-mobile-web-app-title" content="OpsBatch" />
     <link rel="canonical" href="https://mio888888.github.io/OpsBatch/" />
@@ -22,10 +16,7 @@
     <link rel="preconnect" href="https://api.github.com" crossorigin />
     <link rel="preconnect" href="https://github.com" crossorigin />
     <meta property="og:title" content="OpsBatch - 本地优先运维工作区" />
-    <meta
-      property="og:description"
-      content="在一个桌面端工作区里管理 SSH、SFTP、RDP/VNC、批量命令、工作流与 AI 运维辅助，数据优先留在本机。"
-    />
+    <meta property="og:description" content="SSH、SFTP、RDP/VNC、批量命令、工作流与 AI 运维辅助，数据优先留在本机。" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://mio888888.github.io/OpsBatch/" />
     <meta property="og:site_name" content="OpsBatch" />
@@ -34,13 +25,13 @@
     <meta property="og:image:alt" content="OpsBatch 应用图标" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="OpsBatch - 本地优先运维工作区" />
-    <meta
-      name="twitter:description"
-      content="本地管理 SSH 终端、SFTP、RDP/VNC、批量命令、工作流和 AI 运维辅助。"
-    />
+    <meta name="twitter:description" content="本地管理 SSH 终端、SFTP、RDP/VNC、批量命令、工作流和 AI 运维辅助。" />
     <meta name="twitter:image" content="https://mio888888.github.io/OpsBatch/assets/app-icon.png" />
     <title>OpsBatch - 本地 SSH / SFTP / RDP / VNC 运维工作区</title>
     <link rel="icon" href="./assets/app-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./sections.css" />
     <link rel="stylesheet" href="./responsive.css" />
@@ -52,595 +43,486 @@
         "applicationCategory": "DeveloperApplication",
         "operatingSystem": "macOS, Windows, Linux",
         "softwareVersion": "0.1.3",
-        "description": "OpsBatch 是面向运维工程师、SRE 与平台团队的本地桌面工作区，用于集中管理 SSH 终端、SFTP 文件传输、RDP/VNC 远程桌面、批量命令、自动化工作流与 AI 运维辅助。",
+        "description": "OpsBatch 是面向运维工程师、SRE 与平台团队的本地桌面工作区，集中管理 SSH 终端、SFTP 文件传输、RDP/VNC 远程桌面、批量命令、自动化工作流与 AI 运维辅助。",
         "url": "https://mio888888.github.io/OpsBatch/",
         "downloadUrl": "https://github.com/Mio888888/OpsBatch/releases/latest",
         "image": "https://mio888888.github.io/OpsBatch/assets/app-icon.png",
-        "author": {
-          "@type": "Organization",
-          "name": "Mio"
-        },
-        "offers": {
-          "@type": "Offer",
-          "price": "0",
-          "priceCurrency": "USD"
-        },
+        "author": { "@type": "Organization", "name": "Mio" },
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
         "sameAs": ["https://github.com/Mio888888/OpsBatch"]
       }
     </script>
   </head>
   <body>
     <a class="skip-link" href="#main-content">跳到主要内容</a>
+
+    <!-- Decorative Background -->
+    <div class="bg-decor" aria-hidden="true">
+      <div class="bg-blob blob-1"></div>
+      <div class="bg-blob blob-2"></div>
+      <div class="bg-blob blob-3"></div>
+      <div class="bg-blob blob-4"></div>
+      <div class="bg-blob blob-5"></div>
+    </div>
+
+    <!-- Mobile Overlay -->
+    <div class="mobile-overlay" aria-hidden="true"></div>
+
+    <!-- Mobile Navigation Drawer -->
+    <nav class="mobile-nav" aria-label="移动端导航" aria-hidden="true">
+      <div class="mobile-nav-header">
+        <strong>OpsBatch</strong>
+        <button class="mobile-nav-close clay-btn-icon" aria-label="关闭菜单">✕</button>
+      </div>
+      <div class="mobile-nav-links">
+        <a href="#why">为什么</a>
+        <a href="#features">能力</a>
+        <a href="#workflow">工作流</a>
+        <a href="#architecture">架构</a>
+        <a href="#security">安全</a>
+        <a href="#download">下载</a>
+      </div>
+      <a class="mobile-nav-cta clay-btn clay-btn-primary" href="#download">免费下载</a>
+    </nav>
+
+    <!-- Site Shell -->
     <div class="site-shell">
+
+      <!-- Top Bar -->
       <header class="topbar" aria-label="主导航">
         <a class="brand" href="#hero" aria-label="OpsBatch 首页">
           <span class="brand-mark" aria-hidden="true">
-            <img src="./assets/app-icon.png" alt="OpsBatch 应用图标" />
+            <img src="./assets/app-icon.png" alt="" />
           </span>
           <span class="brand-copy">
             <strong>OpsBatch</strong>
             <small>local-first ops</small>
           </span>
         </a>
-
         <nav class="nav-links" aria-label="页面区块">
           <a href="#why">为什么</a>
           <a href="#features">能力</a>
+          <a href="#workflow">工作流</a>
           <a href="#architecture">架构</a>
           <a href="#security">安全</a>
-          <a href="#compliance">合规</a>
           <a href="#download">下载</a>
         </nav>
-
-        <a class="nav-cta clay-button" href="#download">软件下载</a>
-
-        <button class="menu-toggle" type="button" aria-label="打开导航菜单" aria-expanded="false">
-          <svg viewBox="0 0 24 24"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+        <a class="nav-cta clay-btn clay-btn-primary" href="#download">免费下载</a>
+        <button class="menu-toggle clay-btn-icon" aria-label="打开菜单" aria-expanded="false">
+          <span></span><span></span><span></span>
         </button>
       </header>
 
-      <div class="mobile-overlay" aria-hidden="true"></div>
-      <aside class="mobile-nav" aria-label="移动端导航">
-        <div class="mobile-nav-header">
-          <a class="brand" href="#hero" aria-label="OpsBatch 首页">
-            <span class="brand-mark" aria-hidden="true"><img src="./assets/app-icon.png" alt="" /></span>
-            <span class="brand-copy"><strong>OpsBatch</strong><small>local-first ops</small></span>
-          </a>
-          <button class="mobile-nav-close" type="button" aria-label="关闭导航菜单">
-            <svg viewBox="0 0 24 24"><line x1="6" y1="6" x2="18" y2="18"/><line x1="6" y1="18" x2="18" y2="6"/></svg>
-          </button>
-        </div>
-        <nav class="mobile-nav-links">
-          <a href="#why">为什么</a>
-          <a href="#features">能力</a>
-          <a href="#architecture">架构</a>
-          <a href="#security">安全</a>
-          <a href="#compliance">合规</a>
-          <a href="#download">下载</a>
-        </nav>
-        <a class="mobile-nav-cta" href="#download">软件下载</a>
-      </aside>
-
+      <!-- Main Content -->
       <main id="main-content">
+
+        <!-- Hero Section -->
         <section id="hero" class="hero-section" aria-labelledby="hero-title">
           <div class="hero-copy">
-            <p class="eyebrow">Local-first SSH / SFTP / RDP / VNC / Workflow / AI</p>
-            <h1 id="hero-title" class="hero-title">
-              <span>把远程运维</span>
-              <span>放进一个 <em>本地</em></span>
-              <span class="title-chip">工作区</span>
-            </h1>
-            <p class="hero-subtitle">
-              OpsBatch 把主机资产、SSH 终端、SFTP、RDP/VNC 远程桌面、批量命令、文件分发、可视化工作流和 AI 辅助集中在一个桌面应用里。无需先搭中心服务，日常操作也能沉淀成可复用资产。
-            </p>
-            <div class="hero-actions" aria-label="主要操作">
-              <a class="clay-button clay-button-primary" href="#download">立即下载</a>
-              <a class="text-link" href="#features">查看能力</a>
+            <div class="hero-eyebrow clay-tag clay-tag-pink">v0.1.3 · 开源免费</div>
+            <h1 id="hero-title">本地优先<br/>运维工作区</h1>
+            <p class="hero-desc">面向运维工程师、SRE 与平台团队的桌面客户端。SSH 终端、SFTP 文件传输、RDP/VNC 远程桌面、批量命令、自动化工作流与 AI 辅助 — 数据优先留在本机，无需部署中心服务。</p>
+            <div class="hero-actions">
+              <a class="clay-btn clay-btn-primary clay-btn-lg" href="#download">
+                <span class="btn-icon">⬇</span> 免费下载桌面版
+              </a>
+              <a class="clay-btn clay-btn-ghost clay-btn-lg" href="https://github.com/Mio888888/OpsBatch" target="_blank" rel="noreferrer">
+                <span class="btn-icon">⌨</span> GitHub 源码
+              </a>
             </div>
-            <div class="trust-strip" aria-label="产品特点">
-              <span>Tauri 2 桌面端</span>
-              <span>SQLite 连接池</span>
-              <span>RDP / VNC 独立窗口</span>
-              <span>16 台广播终端</span>
-              <span>SSH 连接池复用</span>
+            <div class="hero-trust">
+              <span class="clay-tag">macOS</span>
+              <span class="clay-tag">Windows</span>
+              <span class="clay-tag">Linux</span>
+              <span class="clay-tag clay-tag-green">Tauri + Rust</span>
+              <span class="clay-tag clay-tag-blue">React 19</span>
             </div>
-            <a class="release-link" href="https://github.com/Mio888888/OpsBatch/releases/latest" target="_blank" rel="noreferrer">
-              查看最新 Release
-            </a>
           </div>
 
-          <div class="hero-visual" aria-label="OpsBatch 产品界面示意">
-            <div class="clay-window product-window">
-              <div class="window-toolbar">
-                <div class="traffic-lights" aria-hidden="true">
-                  <span></span><span></span><span></span>
-                </div>
-                <div class="mode-pill">
-                  <span class="pill-active">终端</span>
-                  <span>SFTP</span>
-                  <span>桌面</span>
-                </div>
+          <!-- Product Preview Window -->
+          <div class="product-window clay-window">
+            <div class="window-toolbar">
+              <div class="traffic-lights">
+                <span></span><span></span><span></span>
               </div>
-              <div class="product-grid">
-                <div class="terminal-panel clay-recessed">
-                  <div class="terminal-tabs">
-                    <span class="online-dot"></span>
-                    <strong>prod-group</strong>
-                    <span>16 hosts connected</span>
-                  </div>
-                  <pre><code>$ run health-check --group prod
-prod-api-01  CPU ok   MEM ok   SSH ok
-prod-api-02  CPU ok   MEM ok   SSH ok
-prod-db-01   CPU ok   MEM warn DISK ok
-
-$ replay batch/2026-06-09-2353
-history opened with host timeline
-$ _</code></pre>
+              <div class="mode-pill">
+                <span class="pill-active">终端</span>
+                <span>SFTP</span>
+                <span>监控</span>
+              </div>
+              <div class="window-actions">
+                <small>● 已连接</small>
+              </div>
+            </div>
+            <div class="product-grid">
+              <!-- Terminal Panel -->
+              <div class="terminal-panel clay-card">
+                <div class="terminal-tabs">
+                  <span class="tab-active">prod-web-01</span>
+                  <span>db-master</span>
+                  <span>gateway</span>
                 </div>
-                <aside class="monitor-card clay-card">
-                  <div class="monitor-head">
-                    <span>主机快照</span>
-                    <button type="button" aria-label="复制主机 IP">复制</button>
-                  </div>
-                  <div class="metric">
-                    <span>CPU</span>
-                    <i style="--value: 34%"></i>
-                    <b>34%</b>
-                  </div>
-                  <div class="metric">
-                    <span>内存</span>
-                    <i style="--value: 68%"></i>
-                    <b>1.3G/1.9G</b>
-                  </div>
-                  <div class="process-list">
-                    <div><b>139.0M</b><span>1panel</span></div>
-                    <div><b>82.7M</b><span>dockerd</span></div>
-                    <div><b>53.3M</b><span>systemd</span></div>
-                  </div>
-                </aside>
-                <div class="sftp-card clay-card">
-                  <div class="split-title"><span>本机</span><span>远程</span></div>
-                  <div class="file-row"><span class="folder-icon"></span>scripts</div>
-                  <div class="file-row"><span class="folder-icon"></span>deploy</div>
-                  <div class="file-row"><span class="file-icon"></span>health-check.log</div>
+                <pre><code><span class="t-prompt">opsbatch $</span> <span class="t-cmd">ssh prod-web-01</span>
+<span class="t-ok">✓ Connected to prod-web-01 (10.0.1.15)</span>
+
+<span class="t-prompt">root@prod-web-01:~$</span> <span class="t-cmd">docker ps --format '{{.Names}}'</span>
+nginx-proxy
+api-server
+redis-cache
+postgres-db
+
+<span class="t-prompt">root@prod-web-01:~$</span> <span class="t-cmd">df -h /data</span>
+Filesystem  Size  Used  Avail  Use%
+/dev/sda1   200G   87G   113G  44%
+
+<span class="t-prompt">root@prod-web-01:~$</span> <span class="t-cursor">_</span></code></pre>
+              </div>
+              <!-- Monitor Card -->
+              <div class="monitor-card clay-card">
+                <div class="monitor-head">
+                  <span>📊 主机监控</span>
+                  <small>实时</small>
+                </div>
+                <div class="metric">
+                  <span>CPU</span>
+                  <div class="metric-bar"><div class="metric-fill" style="--value: 34%"></div></div>
+                  <b>34%</b>
+                </div>
+                <div class="metric">
+                  <span>内存</span>
+                  <div class="metric-bar"><div class="metric-fill" style="--value: 67%"></div></div>
+                  <b>67%</b>
+                </div>
+                <div class="metric">
+                  <span>磁盘</span>
+                  <div class="metric-bar"><div class="metric-fill" style="--value: 44%"></div></div>
+                  <b>44%</b>
+                </div>
+                <div class="process-list">
+                  <div><b>nginx</b> <span>2.1% CPU</span></div>
+                  <div><b>node</b> <span>18.4% CPU</span></div>
+                  <div><b>postgres</b> <span>5.7% CPU</span></div>
                 </div>
               </div>
             </div>
-            <div class="floating-badge badge-a">命令确认后执行</div>
-            <div class="floating-badge badge-b">终端上下文 AI</div>
+            <!-- Floating Badges -->
+            <div class="floating-badge badge-a">🚀 批量执行</div>
+            <div class="floating-badge badge-b">🔄 工作流</div>
           </div>
         </section>
 
-        <section id="why" class="why-section" aria-labelledby="why-title">
-          <div class="section-heading">
-            <div class="section-kicker">
-              <p class="eyebrow">Why OpsBatch</p>
-              <h2 id="why-title">不只是终端，而是给重复运维准备的本地工作台。</h2>
-              <p class="section-note">
-                参考远程服务器工作区的组织方式，OpsBatch 更关注日常运维里的批量操作、文件分发、执行记录和流程复用。
-              </p>
+        <!-- Why Section -->
+        <section id="why" class="why-section reveal-section" aria-labelledby="why-title">
+          <div class="section-header">
+            <p class="eyebrow clay-tag clay-tag-purple">Why OpsBatch</p>
+            <h2 id="why-title">运维工具够了，但碎片化太严重</h2>
+            <p class="section-note">SSH 客户端、文件传输、远程桌面、批量脚本、知识库散落在多个工具中。OpsBatch 把它们装进一个桌面应用，数据优先留在本机。</p>
+          </div>
+          <div class="compare-list clay-window">
+            <div class="compare-row">
+              <div class="compare-pain clay-recessed">
+                <div class="compare-label">痛点</div>
+                <strong>SSH / SFTP / RDP 各用各的软件，来回切窗口</strong>
+              </div>
+              <div class="compare-solution clay-card">
+                <div class="compare-label">OpsBatch</div>
+                <strong>终端、文件、远程桌面放进同一套主机上下文</strong>
+              </div>
+            </div>
+            <div class="compare-row">
+              <div class="compare-pain clay-recessed">
+                <div class="compare-label">痛点</div>
+                <strong>批量操作靠手动 for 循环，没有历史回放</strong>
+              </div>
+              <div class="compare-solution clay-card">
+                <div class="compare-label">OpsBatch</div>
+                <strong>多主机批量执行 + 失败重试 + asciinema 回放</strong>
+              </div>
+            </div>
+            <div class="compare-row">
+              <div class="compare-pain clay-recessed">
+                <div class="compare-label">痛点</div>
+                <strong>命令、脚本散落在 wiki / 笔记本，找不到也复用不了</strong>
+              </div>
+              <div class="compare-solution clay-card">
+                <div class="compare-label">OpsBatch</div>
+                <strong>命令库 + 脚本库 + 快捷动作 + Git 仓库同步</strong>
+              </div>
+            </div>
+            <div class="compare-row">
+              <div class="compare-pain clay-recessed">
+                <div class="compare-label">痛点</div>
+                <strong>操作审计靠云平台，数据不在自己手里</strong>
+              </div>
+              <div class="compare-solution clay-card">
+                <div class="compare-label">OpsBatch</div>
+                <strong>本地 SQLite + 系统关键凭据 + 无云依赖即可运行</strong>
+              </div>
+            </div>
+            <div class="compare-row">
+              <div class="compare-pain clay-recessed">
+                <div class="compare-label">痛点</div>
+                <strong>重复运维流程靠记忆，新人上手周期长</strong>
+              </div>
+              <div class="compare-solution clay-card">
+                <div class="compare-label">OpsBatch</div>
+                <strong>可视化工作流编排 + 模板复用 + AI 辅助说明</strong>
+              </div>
             </div>
           </div>
-          <div class="compare-list clay-window" aria-label="痛点与 OpsBatch 方案对照">
-            <article class="compare-row">
-              <div class="compare-pain">
-                <span>痛点</span>
-                <strong>SSH、SFTP、远程桌面、脚本和记录散在不同工具里</strong>
+        </section>
+
+        <!-- Features Section -->
+        <section id="features" class="features-section reveal-section" aria-labelledby="features-title">
+          <div class="section-header">
+            <p class="eyebrow clay-tag clay-tag-blue">Core Features</p>
+            <h2 id="features-title">一站式运维能力</h2>
+            <p class="section-note">从资产管理到远程桌面，从批量执行到工作流编排，覆盖日常运维高频场景。</p>
+          </div>
+          <div class="feature-grid">
+            <!-- Asset Management -->
+            <article class="feature-card clay-card">
+              <div class="feature-meta">
+                <span class="feature-icon">资产管理</span>
+                <small>核心基础</small>
               </div>
-              <div class="compare-solution">
-                <span>OpsBatch</span>
-                <strong>一个主机入口连接终端、文件、远程桌面、监控、命令库和工作流</strong>
-              </div>
+              <h3>主机资产与分组</h3>
+              <ul class="feature-list">
+                <li>主机名称、IP、端口、认证方式、操作系统、分组标签</li>
+                <li>嵌套分组、资产搜索、批量选择</li>
+                <li>解析 <code>~/.ssh/config</code> 与 ProxyJump 跳板链路</li>
+                <li>CSV 导入导出 + 阿里云 / AWS / 腾讯云实例拉取</li>
+              </ul>
             </article>
-            <article class="compare-row">
-              <div class="compare-pain">
-                <span>痛点</span>
-                <strong>临时命令跑完就丢，复盘时只能翻聊天记录</strong>
+
+            <!-- Terminal -->
+            <article class="feature-card clay-card">
+              <div class="feature-meta">
+                <span class="feature-icon">终端</span>
+                <small>xterm.js</small>
               </div>
-              <div class="compare-solution">
-                <span>OpsBatch</span>
-                <strong>批量执行保留主机维度结果、失败重试和终端回放</strong>
-              </div>
+              <h3>SSH 终端工作区</h3>
+              <ul class="feature-list">
+                <li>本地终端 + 远程 SSH 多标签页</li>
+                <li>Rust SSH 实现（russh），稳定低延迟</li>
+                <li>主机监控：CPU、内存、磁盘、网络、进程快照</li>
+                <li>端口转发面板 + 远程编辑器（CodeMirror）</li>
+              </ul>
             </article>
-            <article class="compare-row">
-              <div class="compare-pain">
-                <span>痛点</span>
-                <strong>多台机器发文件、改配置、查状态很容易漏一步</strong>
+
+            <!-- SFTP -->
+            <article class="feature-card clay-card">
+              <div class="feature-meta">
+                <span class="feature-icon">文件传输</span>
+                <small>SFTP</small>
               </div>
-              <div class="compare-solution">
-                <span>OpsBatch</span>
-                <strong>批量文件上传、变量路径和工作流节点把步骤串起来</strong>
-              </div>
+              <h3>SFTP 文件面板</h3>
+              <ul class="feature-list">
+                <li>本地 / 远程双栏浏览</li>
+                <li>上传、下载、预览、重命名、删除、书签</li>
+                <li>传输队列 + 解压支持</li>
+                <li>远程编辑器：从 SFTP 打开文件并保存回远端</li>
+              </ul>
             </article>
-            <article class="compare-row">
-              <div class="compare-pain">
-                <span>痛点</span>
-                <strong>AI 可以解释命令，但拿不到当前操作上下文</strong>
+
+            <!-- Remote Desktop -->
+            <article class="feature-card clay-card card-wide">
+              <div class="feature-meta">
+                <span class="feature-icon">远程桌面</span>
+                <small>RDP / VNC</small>
               </div>
-              <div class="compare-solution">
-                <span>OpsBatch</span>
-                <strong>从终端上下文生成命令、分析输出，确认后再执行</strong>
+              <h3>RDP 与 VNC 远程桌面</h3>
+              <ul class="feature-list">
+                <li>Windows RDP：独立窗口连接，H.264 直显 / bitmap 双路径，支持分辨率 / 剪贴板 / 音频 / 磁盘映射</li>
+                <li>VNC：noVNC + WebSocket bridge，支持共享连接和只读模式</li>
+                <li>连接、帧率、传输诊断日志，便于排查问题</li>
+                <li>分辨率边界保护：VNC ≤ 1920×1080，RDP 640×480 ~ 3840×2160</li>
+              </ul>
+            </article>
+
+            <!-- AI -->
+            <article class="feature-card clay-card">
+              <div class="feature-meta">
+                <span class="feature-icon">AI 辅助</span>
+                <small>可选功能</small>
               </div>
+              <h3>AI 运维助手</h3>
+              <ul class="feature-list">
+                <li>终端上下文 AI 问答与建议</li>
+                <li>危险命令风险说明</li>
+                <li>自定义 API 端点与模型</li>
+                <li>仅用户主动发起时提交上下文</li>
+              </ul>
+            </article>
+
+            <!-- Command & Script Library -->
+            <article class="feature-card clay-card">
+              <div class="feature-meta">
+                <span class="feature-icon">知识沉淀</span>
+                <small>命令 / 脚本</small>
+              </div>
+              <h3>命令库 & 脚本库</h3>
+              <ul class="feature-list">
+                <li>搜索、分类筛选、自定义命令和脚本</li>
+                <li>风险等级、平台字段、远程 URL 命令</li>
+                <li>快捷动作：参数占位符、JSON 导入导出</li>
+                <li>Git 仓库同步：定时拉取命令 / 脚本 / 快捷动作</li>
+              </ul>
+            </article>
+
+            <!-- Batch Execution -->
+            <article class="feature-card clay-card card-wide">
+              <div class="feature-meta">
+                <span class="feature-icon">批量执行</span>
+                <small>并发控制</small>
+              </div>
+              <h3>批量命令与文件分发</h3>
+              <ul class="feature-list">
+                <li>多主机并发执行：并发数、超时、实时结果、失败重试、历史记录</li>
+                <li>危险命令防护：内置 + 自定义正则规则，高风险命令执行前确认，支持 AI 风险说明</li>
+                <li>广播终端：独立窗口对多台主机广播输入（最多 16 台）</li>
+                <li>批量文件分发：上传到多台主机，支持 <code>{host}</code> 变量</li>
+                <li>asciinema 格式执行回放</li>
+              </ul>
             </article>
           </div>
         </section>
 
-        <section class="demo-section" aria-labelledby="demo-title">
-          <div class="workflow-copy">
-            <p class="eyebrow">One minute flow</p>
-            <h2 id="demo-title">从一次登录，到一条可复用流程。</h2>
-            <p>
-              先连到主机解决问题，再把命令、文件、确认点和结果保存为团队可复用的运维资产。临时操作不再只存在于某个人的终端历史里。
-            </p>
+        <!-- Workflow Section -->
+        <section id="workflow" class="demo-section reveal-section" aria-labelledby="workflow-title">
+          <div class="demo-copy">
+            <p class="eyebrow clay-tag clay-tag-green">Workflow</p>
+            <h2 id="workflow-title">可视化工作流编排</h2>
+            <p>基于 React Flow 的拖拽式工作流编辑器。将日常运维流程沉淀为可复用、可审计的自动化工作流。支持条件分支、人工确认、回滚等节点类型。</p>
           </div>
-          <div class="demo-console clay-window" aria-label="OpsBatch 操作流程示意">
+          <div class="demo-console clay-window">
+            <div class="demo-step">
+              <div class="step-num">01</div>
+              <div class="step-body">
+                <strong>选择主机</strong>
+                <small>从资产分组中勾选目标主机</small>
+              </div>
+            </div>
+            <div class="demo-step">
+              <div class="step-num">02</div>
+              <div class="step-body">
+                <strong>编排节点</strong>
+                <small>拖拽命令、脚本、传输、条件分支等节点</small>
+              </div>
+            </div>
+            <div class="demo-step">
+              <div class="step-num">03</div>
+              <div class="step-body">
+                <strong>配置变量</strong>
+                <small>结果变量传递、超时重试、失败策略</small>
+              </div>
+            </div>
             <div class="demo-step is-live">
-              <span>01</span>
-              <strong>选择主机组</strong>
-              <small>prod / staging / jump hosts</small>
+              <div class="step-num">04</div>
+              <div class="step-body">
+                <strong>执行 & 追踪</strong>
+                <small>实时查看每步执行结果，支持回滚和重试</small>
+              </div>
             </div>
             <div class="demo-step">
-              <span>02</span>
-              <strong>运行命令或脚本</strong>
-              <small>并发、超时、失败重试</small>
-            </div>
-            <div class="demo-step">
-              <span>03</span>
-              <strong>人工确认风险</strong>
-              <small>危险规则 + AI 说明</small>
-            </div>
-            <div class="demo-step">
-              <span>04</span>
-              <strong>保存结果与回放</strong>
-              <small>按主机追踪执行时间线</small>
+              <div class="step-num">05</div>
+              <div class="step-body">
+                <strong>模板复用</strong>
+                <small>保存为模板，一键应用到其他主机分组</small>
+              </div>
             </div>
           </div>
         </section>
 
-        <section id="features" class="section-block" aria-labelledby="features-title">
-          <div class="section-heading">
-            <div class="section-kicker">
-              <p class="eyebrow">Everything you need</p>
-              <h2 id="features-title">你需要的一切，集中但不拥挤。</h2>
-              <p class="section-note">OpsBatch 的能力围绕远程节点展开：连接、观察、传输、执行、编排、复盘，每一步都尽量少离开当前上下文。</p>
+        <!-- Architecture Section -->
+        <section id="architecture" class="arch-section reveal-section" aria-labelledby="arch-title">
+          <div class="section-header">
+            <p class="eyebrow clay-tag clay-tag-yellow">Architecture</p>
+            <h2 id="arch-title">技术架构</h2>
+            <p class="section-note">前端 React 19 + TypeScript / Vite，后端 Rust / Tauri v2。核心数据持久化在本机 SQLite 数据库，通过 Tauri IPC 桥接前后端。</p>
+          </div>
+          <div class="arch-map clay-window">
+            <div class="map-layer map-ui">
+              React 19 + TypeScript
+              <small>终端 · SFTP · RDP · VNC · 工作流 · AI</small>
             </div>
-          </div>
-          <div class="feature-grid feature-grid-large">
-            <article class="feature-card clay-card">
-              <div class="feature-meta"><span class="feature-icon">SSH</span><small>01</small></div>
-              <h3>主机与终端</h3>
-              <p>管理主机、分组、标签与跳板链路，一处打开本地或远程 SSH 终端。</p>
-              <ul class="feature-list">
-                <li>解析 <code>~/.ssh/config</code> 与 ProxyJump</li>
-                <li>本地终端和远程终端并列使用</li>
-                <li>连接后查看 Linux 主机监控快照</li>
-              </ul>
-            </article>
-            <article class="feature-card clay-card">
-              <div class="feature-meta"><span class="feature-icon">SFTP</span><small>02</small></div>
-              <h3>SFTP 文件管理</h3>
-              <p>本地/远程双栏浏览，上传下载、预览、书签和远程编辑都在同一处。</p>
-              <ul class="feature-list">
-                <li>传输队列、重命名、新建目录、解压</li>
-                <li>从文件面板打开 CodeMirror 编辑器</li>
-                <li>面向批量上传的文件分发入口</li>
-              </ul>
-            </article>
-            <article class="feature-card clay-card">
-              <div class="feature-meta"><span class="feature-icon">RDP</span><small>03</small></div>
-              <h3>RDP / VNC 远程桌面</h3>
-              <p>Windows 主机走 RDP 独立窗口，VNC 主机走 noVNC + 本地 WebSocket bridge。</p>
-              <ul class="feature-list">
-                <li>RDP 支持分辨率、剪贴板、音频和磁盘映射配置</li>
-                <li>VNC 默认 1280x720，显示限制在 1920x1080 内</li>
-                <li>连接、帧率和传输日志便于排查问题</li>
-              </ul>
-            </article>
-            <article class="feature-card clay-card">
-              <div class="feature-meta"><span class="feature-icon">RUN</span><small>04</small></div>
-              <h3>批量执行</h3>
-              <p>对选中主机并发运行命令，保留结果、失败重试和终端回放。</p>
-              <ul class="feature-list">
-                <li>并发信号量控制、超时和失败主机重试</li>
-                <li>广播终端最多处理 16 台主机</li>
-                <li>执行历史支持回放与复盘</li>
-                <li>SSH 连接池共享 Runtime，降低并发资源占用</li>
-              </ul>
-            </article>
-            <article class="feature-card clay-card">
-              <div class="feature-meta"><span class="feature-icon">FLOW</span><small>05</small></div>
-              <h3>工作流编排</h3>
-              <p>命令、脚本、条件、人工确认和结果变量通过可视化流程串起来。</p>
-              <ul class="feature-list">
-                <li>React Flow 画布、模板和执行入口</li>
-                <li>节点依赖、条件分支与人工确认</li>
-                <li>轻量定时任务以 <code>every:N</code> 间隔为主</li>
-              </ul>
-            </article>
-            <article class="feature-card clay-card">
-              <div class="feature-meta"><span class="feature-icon">AI</span><small>06</small></div>
-              <h3>AI 辅助判断</h3>
-              <p>从终端上下文发起对话、生成脚本、解释输出、诊断错误和评估风险。</p>
-              <ul class="feature-list">
-                <li>支持 OpenAI、Ollama 与兼容端点</li>
-                <li>命令生成后由用户确认执行</li>
-                <li>适合日志分析和危险命令说明</li>
-              </ul>
-            </article>
-            <article class="feature-card clay-card">
-              <div class="feature-meta"><span class="feature-icon">LIB</span><small>07</small></div>
-              <h3>资产沉淀</h3>
-              <p>常用命令、脚本、快捷动作、危险规则、备份和日志都能回到同一套本地设置里。</p>
-              <ul class="feature-list">
-                <li>命令库、脚本库和快捷动作</li>
-                <li>Git 仓库同步和云主机导入</li>
-                <li>全局日志、危险规则与数据备份入口</li>
-              </ul>
-            </article>
-          </div>
-        </section>
-
-        <section id="architecture" class="architecture-section" aria-labelledby="architecture-title">
-          <div class="section-heading">
-            <div class="section-kicker">
-              <p class="eyebrow">Under the hood</p>
-              <h2 id="architecture-title">桌面端外壳，本地 Rust 能力内核。</h2>
-              <p class="section-note">OpsBatch 不把官网讲成云平台。它的核心是本地桌面应用：前端负责工作区体验，Tauri 命令把终端、SSH、SFTP、RDP、VNC、SQLite 和系统能力接起来。</p>
-            </div>
-          </div>
-          <div class="architecture-map clay-window" aria-label="OpsBatch 架构示意">
-            <div class="map-layer map-ui">React 19 / Vite / xterm.js / CodeMirror</div>
             <div class="map-rail" aria-hidden="true"></div>
-            <div class="map-layer map-ipc">Tauri IPC Commands</div>
+            <div class="map-layer map-ipc">
+              Tauri IPC
+              <small>命令桥接</small>
+            </div>
             <div class="map-rail" aria-hidden="true"></div>
-            <div class="map-layer map-core">Rust backend: SQLite / SSH / SFTP / RDP / VNC / local PTY / Git / HTTP</div>
-          </div>
-          <div class="architecture-grid">
-            <article class="architecture-card clay-card">
-              <span>01</span>
-              <h3>Tauri 2 原生桌面</h3>
-              <p>使用系统 WebView 承载界面，Rust 后端处理本地能力与跨平台集成。</p>
-            </article>
-            <article class="architecture-card clay-card">
-              <span>02</span>
-              <h3>本地 SQLite 数据</h3>
-              <p>主机、分组、标签、执行历史、命令库、工作流和日志优先保存在本机，使用 r2d2 连接池优化高并发读写。</p>
-            </article>
-            <article class="architecture-card clay-card">
-              <span>03</span>
-              <h3>终端与编辑器栈</h3>
-              <p>xterm.js 承载终端体验，CodeMirror 支持远程文件编辑和多语言高亮。</p>
-            </article>
-            <article class="architecture-card clay-card">
-              <span>04</span>
-              <h3>可视化流程画布</h3>
-              <p>工作流基于 React Flow，适合把一次排障动作整理成可重复执行的步骤。</p>
-            </article>
-            <article class="architecture-card clay-card">
-              <span>05</span>
-              <h3>远程桌面通道</h3>
-              <p>RDP 使用 ironrdp 相关后端能力，VNC 通过 noVNC 客户端和本地 WebSocket bridge 建立会话。</p>
-            </article>
-          </div>
-        </section>
-
-        <section id="security" class="section-block security-section" aria-labelledby="security-title">
-          <div class="security-shell clay-window">
-            <div class="security-copy">
-              <p class="eyebrow">Local-first safety</p>
-              <h2 id="security-title">风险不靠记忆管理，靠流程提前暴露。</h2>
-              <p>OpsBatch 的安全重点不是制造复杂门槛，而是在本地数据、主机信任、危险命令、确认点和执行记录上减少误操作。</p>
-            </div>
-            <aside class="security-status clay-recessed" aria-label="安全状态">
-              <span>Audit</span>
-              <strong>Records on</strong>
-              <small>rules / confirm / replay</small>
-            </aside>
-          </div>
-          <div class="security-grid" aria-label="安全能力">
-            <article class="risk-step">
-              <span>01</span>
-              <div>
-                <strong>本地优先</strong>
-                <p>主机资产、命令库、执行记录、工作流和日志优先保存在用户设备上。</p>
-              </div>
-            </article>
-            <article class="risk-step">
-              <span>02</span>
-              <div>
-                <strong>主机信任</strong>
-                <p>SSH 主机密钥采用首次信任指纹流程，后续指纹变化会阻止连接并提示确认。</p>
-              </div>
-            </article>
-            <article class="risk-step">
-              <span>03</span>
-              <div>
-                <strong>危险命令防护</strong>
-                <p>内置和自定义危险规则会在执行前触发确认，也可以结合 AI 解释潜在影响。</p>
-              </div>
-            </article>
-            <article class="risk-step">
-              <span>04</span>
-              <div>
-                <strong>确认后执行</strong>
-                <p>AI 生成命令不会自动落地到终端，必须由用户确认后再执行。</p>
-              </div>
-            </article>
-            <article class="risk-step">
-              <span>05</span>
-              <div>
-                <strong>结果可追踪</strong>
-                <p>批量任务保留主机维度结果、时间线与回放，复盘时不用猜。</p>
-              </div>
-            </article>
-            <article class="risk-step">
-              <span>06</span>
-              <div>
-                <strong>备份与迁移</strong>
-                <p>设置里提供数据备份入口，适合在本地设备间迁移运维资产。</p>
-              </div>
-            </article>
-          </div>
-        </section>
-
-        <section id="comparison" class="comparison-section" aria-labelledby="comparison-title">
-          <div class="section-heading">
-            <div class="section-kicker">
-              <p class="eyebrow">Comparison</p>
-              <h2 id="comparison-title">OpsBatch 有什么不同？</h2>
-              <p class="section-note">它不是要替代每个专业工具，而是把日常高频操作放进一个本地工作区，减少来回切换和人工记录。</p>
+            <div class="map-layer map-core">
+              Rust 后端
+              <small>SSH · RDP · VNC · SQLite · PTY</small>
             </div>
           </div>
-          <div class="comparison-table clay-window" role="region" aria-label="能力对比" tabindex="0">
-            <table>
-              <thead>
-                <tr>
-                  <th>能力</th>
-                  <th>OpsBatch</th>
-                  <th>终端 + 脚本组合</th>
-                  <th>中心化平台</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <th>部署方式</th>
-                  <td>桌面端直接运行</td>
-                  <td>各工具自行配置</td>
-                  <td>通常需要服务端</td>
-                </tr>
-                <tr>
-                  <th>SSH / SFTP / 远程桌面</th>
-                  <td>同一主机上下文</td>
-                  <td>多个窗口来回切换</td>
-                  <td>取决于平台集成</td>
-                </tr>
-                <tr>
-                  <th>批量执行</th>
-                  <td>并发、超时、重试、历史</td>
-                  <td>需要自己写脚本</td>
-                  <td>通常能力较强</td>
-                </tr>
-                <tr>
-                  <th>工作流复用</th>
-                  <td>可视化节点和确认点</td>
-                  <td>主要依赖脚本约定</td>
-                  <td>依赖管理员配置</td>
-                </tr>
-                <tr>
-                  <th>AI 辅助</th>
-                  <td>可选，结合终端上下文</td>
-                  <td>上下文需要手动复制</td>
-                  <td>视供应商而定</td>
-                </tr>
-                <tr>
-                  <th>数据位置</th>
-                  <td>优先保存在本机</td>
-                  <td>分散在文件和历史里</td>
-                  <td>多在服务端</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <section id="faq" class="faq-section" aria-labelledby="faq-title">
-          <div class="section-heading">
-            <div class="section-kicker">
-              <p class="eyebrow">FAQ</p>
-              <h2 id="faq-title">常见问题</h2>
-            </div>
-          </div>
-          <div class="faq-grid">
-            <details class="faq-item clay-card" open>
-              <summary>需要部署中心服务吗？</summary>
-              <p>不需要。OpsBatch 是本地桌面客户端，核心数据和日常操作都围绕本机应用展开。</p>
-            </details>
-            <details class="faq-item clay-card">
-              <summary>支持哪些系统？</summary>
-              <p>官网下载入口面向 macOS、Windows 和 Linux。具体安装包以 GitHub Releases 当前发布为准。</p>
-            </details>
-            <details class="faq-item clay-card">
-              <summary>AI 功能是必须的吗？</summary>
-              <p>不是。SSH、SFTP、批量命令和工作流可以独立使用；AI 是可选辅助能力，可配置 OpenAI、Ollama 或兼容端点。</p>
-            </details>
-            <details class="faq-item clay-card">
-              <summary>RDP 和 VNC 都支持吗？</summary>
-              <p>支持。Windows 主机可配置 RDP，VNC 主机可配置端口、用户名、密码、共享连接和只读模式；VNC 默认 1280x720，显示限制在 1920x1080 内。</p>
-            </details>
-            <details class="faq-item clay-card">
-              <summary>数据存储在哪里？</summary>
-              <p>主机、分组、执行历史、命令库、工作流、AI 会话和日志等核心数据保存在本机 SQLite 数据库或本地配置中。部分凭据会优先写入系统 keychain，但不要把它理解为所有敏感信息都已完整加密。</p>
-            </details>
-            <details class="faq-item clay-card">
-              <summary>可以批量操作多台主机吗？</summary>
-              <p>可以。OpsBatch 支持对选中主机批量执行命令、记录结果、失败重试，也支持独立广播终端窗口。</p>
-            </details>
-            <details class="faq-item clay-card">
-              <summary>适合什么使用场景？</summary>
-              <p>适合需要频繁连接、检查、传输文件、批量执行命令和整理运维流程的个人开发者、运维工程师、SRE 与平台团队。</p>
-            </details>
-          </div>
-          <p class="legal-note">
-            OpsBatch 仅用于你有权限管理的服务器和网络环境。执行批量命令前请确认目标范围、命令影响和回滚方式。
-          </p>
-        </section>
-
-        <section id="compliance" class="compliance-section" aria-labelledby="compliance-title">
-          <div class="section-heading">
-            <div class="section-kicker">
-              <p class="eyebrow">Compliance & Legal</p>
-              <h2 id="compliance-title">合规与法律声明</h2>
-              <p class="section-note">
-                OpsBatch 面向授权运维场景。它提供 SSH、SFTP、RDP/VNC 远程桌面、批量命令、工作流和 AI 辅助能力，但不会替用户取得授权，也不会替代组织内部审批、审计和变更管理制度。
-              </p>
-            </div>
-          </div>
-          <div class="compliance-grid">
-            <article class="compliance-card clay-card">
-              <span>01</span>
-              <h3>网络合规与授权访问</h3>
-              <p>
-                用户应仅在自己拥有、管理或获得明确授权的服务器、账号、网络与云资源上使用 OpsBatch。批量命令、文件分发、端口转发、远程桌面操作、脚本和工作流可能造成配置变更、数据移动或服务中断，执行前应确认目标范围、权限边界、审批要求和回滚方案。
-              </p>
+          <div class="arch-grid">
+            <article class="arch-card clay-card">
+              <div class="arch-num clay-badge clay-badge-blue">前端</div>
+              <h3>React 19 + Vite</h3>
+              <p>Radix UI 组件基座，Zustand 状态管理，xterm.js 终端，CodeMirror 编辑器，React Flow 工作流画布。</p>
             </article>
-            <article class="compliance-card clay-card">
-              <span>02</span>
-              <h3>生成式 AI 服务说明</h3>
-              <p>
-                AI 功能是可选辅助能力，支持 OpenAI、Ollama 或兼容端点。用户自行配置模型服务、API Key 和发送内容；终端输出、命令片段或错误信息可能被提交给所选服务商处理。AI 生成的命令和解释仅供参考，必须由用户审查确认后再执行。
-              </p>
+            <article class="arch-card clay-card">
+              <div class="arch-num clay-badge clay-badge-green">后端</div>
+              <h3>Rust / Tauri v2</h3>
+              <p>russh SSH 实现，ironrdp 远程桌面，rusqlite + r2d2 连接池，git2 仓库同步，本地 PTY。</p>
             </article>
-            <article class="compliance-card clay-card">
-              <span>03</span>
-              <h3>数据安全与隐私边界</h3>
-              <p>
-                OpsBatch 采用本地优先设计，主机资产、执行历史、命令库、工作流和日志主要保存在本机 SQLite 数据库中。部分凭据会尽力写入系统 keychain，但云厂商凭据、AI 配置或历史数据仍可能留存在本地配置或数据库中；请结合设备可信度、磁盘加密和最小权限策略使用。
-              </p>
+            <article class="arch-card clay-card">
+              <div class="arch-num clay-badge clay-badge-purple">数据</div>
+              <h3>本地优先</h3>
+              <p>SQLite 持久化（r2d2 连接池），系统 keychain 凭据保护，无需云服务即可完整运行。</p>
             </article>
-            <article class="compliance-card clay-card">
-              <span>04</span>
-              <h3>许可协议与第三方服务</h3>
-              <p>
-                OpsBatch 及其依赖遵循仓库声明的开源许可和各第三方组件许可。通过 OpsBatch 连接的云平台、AI 服务、Git 仓库、SSH 主机和网络资源，仍受对应服务条款、组织政策、地区法规和账号权限约束，用户需自行确保使用方式符合这些要求。
-              </p>
-            </article>
-            <article class="compliance-card clay-card">
-              <span>05</span>
-              <h3>非法律与专业建议</h3>
-              <p>
-                官网、README、应用界面、风险提示和 AI 输出均不构成法律、合规、安全审计或专业运维建议。不同组织和地区的要求可能不同，涉及生产变更、个人信息、敏感数据、监管行业或跨境处理时，请咨询具备资质的专业人员并遵循内部流程。
-              </p>
+            <article class="arch-card clay-card">
+              <div class="arch-num clay-badge clay-badge-yellow">部署</div>
+              <h3>跨平台安装包</h3>
+              <p>macOS .dmg / .app.tar.gz，Windows .exe / .msi，Linux .AppImage / .deb / .rpm。GitHub Releases 自动发布。</p>
             </article>
           </div>
         </section>
 
-        <section id="download" class="download-section clay-window" aria-labelledby="download-title">
+        <!-- Security Section -->
+        <section id="security" class="security-section reveal-section" aria-labelledby="security-title">
+          <div class="section-header">
+            <p class="eyebrow clay-tag clay-tag-pink">Security</p>
+            <h2 id="security-title">安全与隐私</h2>
+            <p class="section-note">OpsBatch 是本地优先的桌面应用，不依赖中心服务。主机资产、凭据、执行历史和工作流主要保存在本地 SQLite 和系统 keychain 中。</p>
+          </div>
+          <div class="security-grid">
+            <article class="sec-card clay-card">
+              <div class="sec-icon clay-badge clay-badge-green">🔐</div>
+              <h3>本地优先架构</h3>
+              <p>核心数据保存在本机 SQLite 数据库，不依赖云服务即可运行。部分凭据尽力写入系统 keychain。</p>
+            </article>
+            <article class="sec-card clay-card">
+              <div class="sec-icon clay-badge clay-badge-blue">🛡️</div>
+              <h3>危险命令防护</h3>
+              <p>内置和自定义正则规则，高风险命令执行前触发确认。预编译正则消除终端按键时的重复编译开销。支持 AI 辅助风险说明。</p>
+            </article>
+            <article class="sec-card clay-card">
+              <div class="sec-icon clay-badge clay-badge-purple">🔑</div>
+              <h3>SSH 原生连接</h3>
+              <p>基于 Rust SSH 实现（russh），解析 <code>~/.ssh/config</code> 和 ProxyJump 跳板链路。连接信号量限制单次并发为 4。</p>
+            </article>
+            <article class="sec-card clay-card">
+              <div class="sec-icon clay-badge clay-badge-yellow">📡</div>
+              <h3>AI 可选且受控</h3>
+              <p>AI 功能需用户自行配置端点和 API Key，终端上下文仅在用户主动发起时提交。AI 建议仅供参考，用户确认后执行。</p>
+            </article>
+            <article class="sec-card clay-card card-wide">
+              <div class="sec-icon clay-badge clay-badge-pink">📋</div>
+              <h3>合规与免责说明</h3>
+              <p>OpsBatch 及其依赖遵循仓库声明的开源许可。通过 OpsBatch 连接的云平台、AI 服务、SSH 主机和网络资源仍受对应服务条款和组织政策约束。官网和应用界面内容不构成法律、合规或专业运维建议。</p>
+            </article>
+          </div>
+        </section>
+
+        <!-- Download Section -->
+        <section id="download" class="download-section clay-window reveal-section" aria-labelledby="download-title">
           <div class="download-copy">
-            <p class="eyebrow">Download OpsBatch</p>
-            <h2 id="download-title">下载适合你系统的桌面版。</h2>
-            <p>
-              页面会自动识别 macOS、Windows 或 Linux，并推荐对应安装包。所有版本从 GitHub Releases 获取。
-            </p>
+            <p class="eyebrow clay-tag clay-tag-green">Download</p>
+            <h2 id="download-title">下载适合你系统的桌面版</h2>
+            <p>页面会自动识别操作系统并推荐对应安装包。所有版本从 GitHub Releases 获取，免费开源。</p>
             <div class="detected-system clay-recessed" aria-live="polite">
               <span>当前识别</span>
               <strong id="detected-os">正在识别系统...</strong>
@@ -648,43 +530,58 @@ $ _</code></pre>
             <p id="download-status" class="download-status" aria-live="polite">正在读取最新安装包列表...</p>
           </div>
           <div class="download-panel" aria-label="软件下载">
-            <a
-              id="primary-download"
-              class="download-primary clay-button clay-button-primary"
-              href="https://github.com/Mio888888/OpsBatch/releases/latest"
-              target="_blank"
-              rel="noreferrer"
-            >
+            <a id="primary-download" class="clay-btn clay-btn-primary clay-btn-lg download-primary" href="https://github.com/Mio888888/OpsBatch/releases/latest" target="_blank" rel="noreferrer">
               打开下载页
             </a>
             <div class="download-options">
-              <a class="download-option" data-os="mac" href="https://github.com/Mio888888/OpsBatch/releases/latest" target="_blank" rel="noreferrer">
-                <span>macOS</span>
+              <a class="download-option clay-card" data-os="mac" href="https://github.com/Mio888888/OpsBatch/releases/latest" target="_blank" rel="noreferrer">
+                <span class="dl-os">🍎 macOS</span>
                 <strong>.dmg / .app.tar.gz</strong>
               </a>
-              <a class="download-option" data-os="windows" href="https://github.com/Mio888888/OpsBatch/releases/latest" target="_blank" rel="noreferrer">
-                <span>Windows</span>
+              <a class="download-option clay-card" data-os="windows" href="https://github.com/Mio888888/OpsBatch/releases/latest" target="_blank" rel="noreferrer">
+                <span class="dl-os">🪟 Windows</span>
                 <strong>.exe / .msi</strong>
               </a>
-              <a class="download-option" data-os="linux" href="https://github.com/Mio888888/OpsBatch/releases/latest" target="_blank" rel="noreferrer">
-                <span>Linux</span>
+              <a class="download-option clay-card" data-os="linux" href="https://github.com/Mio888888/OpsBatch/releases/latest" target="_blank" rel="noreferrer">
+                <span class="dl-os">🐧 Linux</span>
                 <strong>.AppImage / .deb / .rpm</strong>
               </a>
             </div>
-            <p class="download-note">如果自动识别不准确，可以直接选择下面的系统版本。</p>
+            <p class="download-note">自动识别不准确时，可直接选择系统版本。</p>
+          </div>
+        </section>
+
+        <!-- Open Source CTA -->
+        <section class="oss-section reveal-section">
+          <div class="oss-card clay-card">
+            <div class="oss-content">
+              <h2>开源免费，社区驱动</h2>
+              <p>OpsBatch 采用开源许可发布，源码托管在 GitHub。欢迎提交 Issue、Pull Request 或参与讨论。</p>
+              <div class="oss-actions">
+                <a class="clay-btn clay-btn-primary" href="https://github.com/Mio888888/OpsBatch" target="_blank" rel="noreferrer">
+                  ⭐ GitHub Star
+                </a>
+                <a class="clay-btn clay-btn-ghost" href="https://github.com/Mio888888/OpsBatch/issues" target="_blank" rel="noreferrer">
+                  📝 提交 Issue
+                </a>
+                <a class="clay-btn clay-btn-ghost" href="https://github.com/Mio888888/OpsBatch/blob/master/README.md" target="_blank" rel="noreferrer">
+                  📖 阅读文档
+                </a>
+              </div>
+            </div>
           </div>
         </section>
       </main>
 
+      <!-- Footer -->
       <footer class="site-footer">
-        <div>
+        <div class="footer-brand">
           <strong>OpsBatch</strong>
-          <span>Local ops, softer surface.</span>
+          <span>本地优先运维工作台 · Clay Crafted</span>
         </div>
-        <nav aria-label="页脚链接">
+        <nav class="footer-nav" aria-label="页脚链接">
           <a href="#features">能力</a>
           <a href="#security">安全</a>
-          <a href="#compliance">合规</a>
           <a href="#download">下载</a>
           <a href="https://github.com/Mio888888/OpsBatch/releases/latest" target="_blank" rel="noreferrer">Release</a>
           <a href="https://github.com/Mio888888/OpsBatch" target="_blank" rel="noreferrer">源码</a>

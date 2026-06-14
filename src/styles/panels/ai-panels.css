@@ -232,6 +232,47 @@
   word-break: break-word;
 }
 
+.ai-msg-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--font-size-caption);
+  color: var(--terminal-muted);
+  white-space: nowrap;
+}
+
+.ai-msg-thinking-dots {
+  position: relative;
+  display: inline-flex;
+  gap: 3px;
+  width: 20px;
+  height: 6px;
+}
+
+.ai-msg-thinking-dots::before,
+.ai-msg-thinking-dots::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--terminal-muted);
+  animation: ai-thinking-dot 1.2s infinite ease-in-out;
+}
+
+.ai-msg-thinking-dots::before {
+  box-shadow: 8px 0 0 var(--terminal-muted);
+}
+
+.ai-msg-thinking-dots::after {
+  animation-delay: 0.2s;
+}
+
+.ai-msg-plan-ready {
+  color: var(--terminal-muted);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-message);
+}
+
 .ai-msg-cursor {
   display: inline-block;
   width: 6px;
@@ -256,6 +297,11 @@
 @keyframes ai-pulse {
   0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }
+}
+
+@keyframes ai-thinking-dot {
+  0%, 80%, 100% { opacity: 0.35; transform: scale(0.8); }
+  40% { opacity: 1; transform: scale(1); }
 }
 
 @keyframes ai-blink {

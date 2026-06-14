@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo, memo, useCallback } from 'react';
 import { useAiChatStore, selectMessages, selectActiveConversationId, selectInputText, selectStreamingMessageId, type AiChatScope, type ChatMessage, type PendingAction } from '../stores/aiChat';
 import { classifyTerminalFollowUp, stripTerminalControl } from '../utils/terminalFollowUp';
-import { extractEmptyCommandPlanNotice } from '../utils/aiActionParser';
+import { extractEmptyCommandPlanNotice, stripCommandPlanBlock } from '../utils/aiActionParser';
 import { useTranslation } from '../i18n';
 import type { TerminalCommandExecutionResult } from './TerminalView';
 import type { FC } from 'react';
@@ -24,18 +24,31 @@ const CommandPlanNotice: FC<{ notice: NonNullable<ChatMessage['commandPlanNotice
 CommandPlanNotice.displayName = 'CommandPlanNotice';
 
 const MessageContent: FC<{ msg: ChatMessage }> = memo(({ msg }) => {
+  const { t } = useTranslation();
   const fallbackPlan = useMemo(
     () => (!msg.commandPlanNotice && !msg.streaming ? extractEmptyCommandPlanNotice(msg.content) : null),
     [msg.commandPlanNotice, msg.content, msg.streaming],
   );
-  const content = fallbackPlan?.displayContent ?? msg.content;
+  const displayContent = msg.role === 'assistant' ? stripCommandPlanBlock(msg.content) : msg.content;
+  const content = fallbackPlan?.displayContent ?? displayContent;
   const notice = msg.commandPlanNotice ?? fallbackPlan?.commandPlanNotice;
+  const hasActions = (msg.pendingActions?.filter((action) => !action.rejected).length ?? 0) > 0;
+  const isEmpty = !content.trim() && !notice;
 
   return (
     <div className="ai-msg-content">
       {content && <div className="ai-msg-text">{content}</div>}
       {notice && <CommandPlanNotice notice={notice} />}
-      {msg.streaming && <span className="ai-msg-cursor" />}
+      {isEmpty && msg.streaming && (
+        <div className="ai-msg-thinking">
+          <span className="ai-msg-thinking-dots" />
+          {t('ai.thinking')}
+        </div>
+      )}
+      {isEmpty && !msg.streaming && hasActions && (
+        <div className="ai-msg-plan-ready">{t('ai.commandPlanReady')}</div>
+      )}
+      {msg.streaming && !isEmpty && <span className="ai-msg-cursor" />}
     </div>
   );
 });

@@ -250,6 +250,13 @@ export function extractEmptyCommandPlanNotice(content: string): ParsedAiActionsR
   };
 }
 
+export function stripCommandPlanBlock(content: string): string {
+  let result = content.replace(/<COMMAND_PLAN\s*>?[\s\S]*?<\/COMMAND_PLAN?>?/gi, '');
+  result = result.replace(/<COMMAND_PLAN\s*>?[\s\S]*$/i, '');
+  result = result.replace(/<\/COMMAND(?:_PLAN?)?>?\s*$/i, '');
+  return result.trim();
+}
+
 function addCommandAction(
   actions: ParsedPendingAction[],
   seenCommands: Set<string>,
@@ -274,13 +281,31 @@ function addCommandAction(
 }
 
 function extractCommandPlanCandidate(content: string): CommandPlanCandidate | null {
-  const tagged = content.match(/<COMMAND_PLAN>\s*([\s\S]*?)\s*<\/COMMAND_PLAN>/i);
+  const tagged = content.match(/<COMMAND_PLAN\s*>?\s*([\s\S]*?)\s*<\/COMMAND_PLAN?>?/i);
   if (tagged && typeof tagged.index === 'number') {
     return {
       rawPlan: tagged[1].trim(),
       startIndex: tagged.index,
       endIndex: tagged.index + tagged[0].length,
     };
+  }
+
+  const openMatch = content.match(/<COMMAND_PLAN\s*>?/i);
+  if (openMatch && typeof openMatch.index === 'number') {
+    const afterOpen = openMatch.index + openMatch[0].length;
+    const jsonText = sliceBalancedJson(content, afterOpen);
+    if (jsonText) {
+      const tail = content.slice(jsonText.endIndex);
+      const closeMatch = tail.match(/<\/COMMAND_PLAN?>?/i);
+      const endIndex = closeMatch && typeof closeMatch.index === 'number'
+        ? jsonText.endIndex + closeMatch.index + closeMatch[0].length
+        : jsonText.endIndex;
+      return {
+        rawPlan: jsonText.text.trim(),
+        startIndex: openMatch.index,
+        endIndex,
+      };
+    }
   }
 
   for (const block of extractFenceBlocks(content)) {
@@ -318,7 +343,7 @@ function removeRange(content: string, start: number, end: number): string {
 
 function removeCommandPlanFromDisplay(content: string, candidate: CommandPlanCandidate): string {
   const after = content.slice(candidate.endIndex);
-  const trailingOnlyPunctuation = after.match(/^\s*[。.!！]*\s*$/);
+  const trailingOnlyPunctuation = after.match(/^\s*["'}\]\)]*[。.!！]*\s*$/);
   const endIndex = trailingOnlyPunctuation ? content.length : candidate.endIndex;
   return removeRange(content, candidate.startIndex, endIndex);
 }

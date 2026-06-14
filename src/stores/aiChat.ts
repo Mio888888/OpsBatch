@@ -625,8 +625,9 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
 
         if (chunk.done) {
           flushStreamDelta(sid, set);
-          const targetMessageId = session.streamingMessageId;
-          const targetMsg = session.messages.find((m) => m.id === targetMessageId);
+          const flushedSession = getSession(get().sessions, sid);
+          const targetMessageId = flushedSession.streamingMessageId;
+          const targetMsg = flushedSession.messages.find((m) => m.id === targetMessageId);
           const rawContent = targetMsg?.content ?? '';
 
           set((prev) => {

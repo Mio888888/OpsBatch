@@ -36,12 +36,14 @@ https://mio888888.github.io/OpsBatch/
 
 ## 下载链接
 
-当前下载按钮指向：
+页面会自动识别访问者系统，并优先读取 GitHub Releases 最新版本中的：
 
 ```text
-https://github.com/Mio888888/OpsBatch/releases/latest
+https://github.com/Mio888888/OpsBatch/releases/latest/download/latest.json
 ```
 
-如果后续更换仓库或发布地址，请同步修改 `index.html` 中的下载链接。静态页不会硬编码具体安装包文件名，避免 Release 产物命名变化导致链接失效。
+读取成功后，页面会同步更新当前版本号、主下载按钮和 macOS / Windows /
+Linux 下载卡片。读取失败时会回退到 GitHub Releases 最新发布页，并保留页面内的
+保底版本显示。
 
 页面中的产品版本、功能范围和合规说明应随 `README.md`、`README_CN.md` 与 `README_EN.md` 一起维护，避免官网与实际桌面端能力脱节。

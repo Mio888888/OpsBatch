@@ -15,6 +15,17 @@ test('redacts sensitive values from frontend log messages', () => {
   );
 });
 
+test('keeps long parser diagnostics in frontend log messages', () => {
+  const sanitizeLogMessage = (logger as {
+    sanitizeLogMessage?: (message: string) => string;
+  }).sanitizeLogMessage;
+
+  assert.equal(typeof sanitizeLogMessage, 'function');
+  const longDiagnostic = `rdp.ai.parse\n${'x'.repeat(6000)}\nend-marker`;
+
+  assert.match(sanitizeLogMessage(longDiagnostic), /end-marker$/);
+});
+
 test('serializes unknown log arguments without dropping errors', () => {
   const formatLogArguments = (logger as {
     formatLogArguments?: (args: unknown[]) => string;

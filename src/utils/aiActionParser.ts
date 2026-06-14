@@ -7,7 +7,8 @@ export type RdpOperation =
   | { type: 'drag'; fromX: number; fromY: number; toX: number; toY: number; button?: number }
   | { type: 'scroll'; x: number; y: number; delta: number; vertical?: boolean }
   | { type: 'type'; text: string }
-  | { type: 'key'; keys: string[] };
+  | { type: 'key'; keys: string[] }
+  | { type: 'wait'; ms: number };
 
 export interface ParsedPendingAction {
   id: string;
@@ -36,6 +37,7 @@ export interface ParsedAiActionsResult {
   actions: ParsedPendingAction[];
   commandPlanNotice?: ParsedCommandPlanNotice;
   rdpParseError?: string;
+  rdpParseDiagnostic?: string;
 }
 
 export interface AiActionAssessment {
@@ -166,6 +168,7 @@ export async function parseAiPendingActionsAsync(
         displayContent: rdpResult.displayContent,
         actions: rdpResult.actions,
         rdpParseError: rdpResult.parseError,
+        rdpParseDiagnostic: rdpResult.parseDiagnostic,
       };
     }
   }
@@ -484,6 +487,14 @@ interface RawRdpPlan {
   version?: unknown;
   summary?: unknown;
   steps?: unknown;
+  description?: unknown;
+  operations?: unknown;
+  operation?: unknown;
+  actions?: unknown;
+  ops?: unknown;
+  intent?: unknown;
+  expected_outcome?: unknown;
+  expectedOutcome?: unknown;
 }
 
 interface RawRdpPlanStep {
@@ -509,6 +520,20 @@ interface ValidatedRdpPlanStep {
 
 const RDP_PLAN_MAX_STEPS = 12;
 const RDP_PLAN_MAX_OPS_PER_STEP = 30;
+const RDP_PARSE_DIAGNOSTIC_PREVIEW_CHARS = 800;
+const RDP_DEFAULT_WAIT_MS = 1_500;
+const RDP_MIN_WAIT_MS = 250;
+const RDP_MAX_WAIT_MS = 30_000;
+type RdpPlanCandidateSource = 'tag' | 'open-tag-balanced-json' | 'fence';
+
+interface RdpPlanCandidate {
+  rawPlan: string;
+  startIndex: number;
+  endIndex: number;
+  source: RdpPlanCandidateSource;
+  extractError?: string;
+}
+
 const RDP_ALLOWED_INTENTS = new Set([
   'click',
   'type',
@@ -535,9 +560,19 @@ const RDP_SUPPORTED_KEY_NAMES = new Set([
   'Win', 'Windows', 'Ctrl', 'AltGr',
 ]);
 
+function normalizeWaitMs(value: unknown): number {
+  const n = Math.floor(Number(value ?? RDP_DEFAULT_WAIT_MS));
+  if (!Number.isFinite(n)) throw new Error('RDP wait ms 必须是数字');
+  return Math.min(RDP_MAX_WAIT_MS, Math.max(RDP_MIN_WAIT_MS, n));
+}
+
+function isWaitKeyName(value: unknown): boolean {
+  return String(value ?? '').trim().toLowerCase() === 'wait';
+}
+
 // 尝试从可能被截断/不规范的 RDP_PLAN 标签块中提取 JSON 文本。
 // 流式输出或模型截断时，闭合标签可能是 </RDP_PLAN>、</RDP、或不完整。
-function extractRdpPlanCandidate(content: string): { rawPlan: string; startIndex: number; endIndex: number; extractError?: string } | null {
+function extractRdpPlanCandidate(content: string): RdpPlanCandidate | null {
   // 1. 完整闭合标签（标准情况）
   const tagged = content.match(/<RDP_PLAN>\s*([\s\S]*?)\s*<\/RDP_PLAN>/i);
   if (tagged && typeof tagged.index === 'number') {
@@ -545,6 +580,7 @@ function extractRdpPlanCandidate(content: string): { rawPlan: string; startIndex
       rawPlan: tagged[1].trim(),
       startIndex: tagged.index,
       endIndex: tagged.index + tagged[0].length,
+      source: 'tag',
     };
   }
 
@@ -565,6 +601,7 @@ function extractRdpPlanCandidate(content: string): { rawPlan: string; startIndex
         rawPlan: jsonText.text.trim(),
         startIndex: openMatch.index,
         endIndex,
+        source: 'open-tag-balanced-json',
       };
     }
     // JSON 提取失败但确实有开标签：返回错误诊断
@@ -572,6 +609,7 @@ function extractRdpPlanCandidate(content: string): { rawPlan: string; startIndex
       rawPlan: '',
       startIndex: openMatch.index,
       endIndex: content.length,
+      source: 'open-tag-balanced-json',
       extractError: '检测到 <RDP_PLAN> 标签但无法提取有效 JSON（可能格式错误或被截断）',
     };
   }
@@ -584,6 +622,7 @@ function extractRdpPlanCandidate(content: string): { rawPlan: string; startIndex
       rawPlan: block.code.trim(),
       startIndex: block.startIndex,
       endIndex: findFenceEnd(content, block.startIndex),
+      source: 'fence',
     };
   }
 
@@ -675,15 +714,86 @@ function looksLikeRdpPlanJson(raw: string): boolean {
   }
 }
 
+const RDP_OPERATION_WRAPPER_KEYS = ['operations', 'operation', 'actions', 'ops', 'items', 'events'] as const;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function parseJsonLikeRdpOperations(value: string): unknown | null {
+  const trimmed = value.trim();
+  if (!trimmed || !/^[{[]/.test(trimmed)) return null;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+}
+
+function unwrapRdpOperations(rawOps: unknown, depth = 0): unknown[] | null {
+  if (Array.isArray(rawOps)) return rawOps;
+  if (depth > 4) return null;
+  if (typeof rawOps === 'string') {
+    const parsed = parseJsonLikeRdpOperations(rawOps);
+    return parsed === null ? null : unwrapRdpOperations(parsed, depth + 1);
+  }
+  if (!isRecord(rawOps)) return null;
+  if (typeof rawOps.type === 'string') return [rawOps];
+
+  for (const key of RDP_OPERATION_WRAPPER_KEYS) {
+    if (!(key in rawOps)) continue;
+    const unwrapped = unwrapRdpOperations(rawOps[key], depth + 1);
+    if (unwrapped) return unwrapped;
+  }
+
+  const indexedEntries = Object.entries(rawOps)
+    .filter(([key]) => /^\d+$/.test(key))
+    .sort(([a], [b]) => Number(a) - Number(b));
+  if (indexedEntries.length > 0) return indexedEntries.map(([, value]) => value);
+
+  const values = Object.values(rawOps);
+  if (values.length > 0 && values.every((value) => isRecord(value) && typeof value.type === 'string')) {
+    return values;
+  }
+  return null;
+}
+
+function normalizeRdpOperationsInput(rawOps: unknown): unknown[] {
+  const operations = unwrapRdpOperations(rawOps);
+  if (!operations) throw new Error('RDP operations 必须是数组或单个操作对象');
+  return operations;
+}
+
+function getRawRdpStepOperations(rawStep: RawRdpPlanStep): unknown {
+  const step = rawStep as RawRdpPlanStep & Record<string, unknown>;
+  return rawStep.operations ?? step.operation ?? step.actions ?? step.ops;
+}
+
+function getTopLevelRdpOperations(plan: RawRdpPlan): unknown {
+  return plan.operations ?? plan.operation ?? plan.actions ?? plan.ops;
+}
+
+function normalizeRawRdpPlanSteps(plan: RawRdpPlan, summary: string): RawRdpPlanStep[] {
+  if (Array.isArray(plan.steps)) return plan.steps as RawRdpPlanStep[];
+  const topLevelOperations = getTopLevelRdpOperations(plan);
+  if (topLevelOperations === undefined) return [];
+  return [{
+    description: plan.description ?? (summary || 'RDP 操作'),
+    operations: topLevelOperations,
+    intent: plan.intent ?? 'operate',
+    expected_outcome: plan.expected_outcome ?? plan.expectedOutcome,
+  }];
+}
+
 function validateRdpOperations(rawOps: unknown, maxCoords: { width: number; height: number }): RdpOperation[] {
-  if (!Array.isArray(rawOps)) throw new Error('RDP operations 必须是数组');
-  if (rawOps.length === 0) throw new Error('RDP operations 不能为空');
-  if (rawOps.length > RDP_PLAN_MAX_OPS_PER_STEP) {
+  const normalizedOps = normalizeRdpOperationsInput(rawOps);
+  if (normalizedOps.length === 0) throw new Error('RDP operations 不能为空');
+  if (normalizedOps.length > RDP_PLAN_MAX_OPS_PER_STEP) {
     throw new Error(`RDP operations 单步不能超过 ${RDP_PLAN_MAX_OPS_PER_STEP} 个操作`);
   }
 
   const result: RdpOperation[] = [];
-  for (const raw of rawOps) {
+  for (const raw of normalizedOps) {
     if (!raw || typeof raw !== 'object') throw new Error('RDP operation 必须是对象');
     const op = raw as Record<string, unknown>;
     const type = op.type;
@@ -691,8 +801,7 @@ function validateRdpOperations(rawOps: unknown, maxCoords: { width: number; heig
     const clampCoord = (v: unknown, max: number): number => {
       const n = Math.floor(Number(v));
       if (!Number.isFinite(n)) throw new Error('RDP 坐标必须是数字');
-      if (n < 0 || n >= max) throw new Error(`RDP 坐标超出范围: ${n} (允许 0..${max - 1})`);
-      return n;
+      return Math.min(max - 1, Math.max(0, n));
     };
 
     switch (type) {
@@ -738,10 +847,20 @@ function validateRdpOperations(rawOps: unknown, maxCoords: { width: number; heig
         result.push({ type: 'type', text });
         break;
       }
+      case 'wait':
+      case 'pause':
+      case 'sleep': {
+        result.push({ type: 'wait', ms: normalizeWaitMs(op.ms ?? op.durationMs ?? op.duration) });
+        break;
+      }
       case 'key': {
         const rawKeys = Array.isArray(op.keys) ? op.keys : (typeof op.keys === 'string' ? [op.keys] : []);
         if (rawKeys.length === 0) throw new Error('RDP key keys 不能为空');
         if (rawKeys.length > 6) throw new Error('RDP key 组合键不能超过 6 个');
+        if (rawKeys.length === 1 && isWaitKeyName(rawKeys[0])) {
+          result.push({ type: 'wait', ms: normalizeWaitMs(op.ms ?? op.durationMs ?? op.duration) });
+          break;
+        }
         const keys: string[] = [];
         for (const k of rawKeys) {
           const keyName = String(k);
@@ -764,25 +883,297 @@ function validateRdpOperations(rawOps: unknown, maxCoords: { width: number; heig
   return result;
 }
 
+function getPlanJsonCandidates(raw: string): string[] {
+  const candidates = [raw.trim()];
+  const balanced = sliceBalancedJson(raw, 0);
+  if (balanced?.text.trim()) candidates.unshift(balanced.text.trim());
+  return Array.from(new Set(candidates.filter(Boolean)));
+}
+
+function diagnosticPreview(value: string): string {
+  const normalized = value
+    .replace(/\r\n/g, '\n')
+    .replace(/\t/g, '  ')
+    .trim();
+  if (normalized.length <= RDP_PARSE_DIAGNOSTIC_PREVIEW_CHARS) return normalized;
+  return `${normalized.slice(0, RDP_PARSE_DIAGNOSTIC_PREVIEW_CHARS)}...`;
+}
+
+function buildRdpPlanJsonDiagnostic(raw: string): string {
+  const lines = [
+    `rawLength=${raw.length}`,
+    `rawPreview=${diagnosticPreview(raw)}`,
+  ];
+
+  const candidates = getPlanJsonCandidates(raw);
+  lines.push(`candidateCount=${candidates.length}`);
+  candidates.forEach((candidate, idx) => {
+    lines.push(`candidate[${idx}].length=${candidate.length}`);
+    lines.push(`candidate[${idx}].preview=${diagnosticPreview(candidate)}`);
+    try {
+      JSON.parse(candidate);
+      lines.push(`candidate[${idx}].JSON.parse=ok`);
+    } catch (error) {
+      lines.push(`candidate[${idx}].JSON.parse=${error instanceof Error ? error.message : String(error)}`);
+    }
+    const repaired = rebuildJsonStructure(candidate);
+    if (!repaired) {
+      lines.push(`candidate[${idx}].repair=unavailable`);
+      return;
+    }
+    try {
+      JSON.parse(repaired);
+      lines.push(`candidate[${idx}].repair.JSON.parse=ok`);
+    } catch (error) {
+      lines.push(`candidate[${idx}].repair.JSON.parse=${error instanceof Error ? error.message : String(error)}`);
+      lines.push(`candidate[${idx}].repair.preview=${diagnosticPreview(repaired)}`);
+    }
+    const normalized = normalizeLooseJson(candidate);
+    if (normalized !== candidate) {
+      try {
+        JSON.parse(normalized);
+        lines.push(`candidate[${idx}].normalized.JSON.parse=ok`);
+      } catch (error) {
+        lines.push(`candidate[${idx}].normalized.JSON.parse=${error instanceof Error ? error.message : String(error)}`);
+        lines.push(`candidate[${idx}].normalized.preview=${diagnosticPreview(normalized)}`);
+      }
+    }
+  });
+  return lines.join('\n');
+}
+
+function buildRdpParseContextDiagnostic(
+  content: string,
+  candidate: RdpPlanCandidate,
+  maxCoords: { width: number; height: number },
+): string {
+  return [
+    `contentLength=${content.length}`,
+    `candidateSource=${candidate.source}`,
+    `candidateRange=${candidate.startIndex}..${candidate.endIndex}`,
+    `maxCoords=${maxCoords.width}x${maxCoords.height}`,
+    `candidatePreview=${diagnosticPreview(content.slice(candidate.startIndex, candidate.endIndex))}`,
+  ].join('\n');
+}
+
+function normalizeLooseJson(raw: string): string {
+  let result = raw
+    .replace(/[\u201c\u201d]/g, '"')
+    .replace(/[\u2018\u2019]/g, "'");
+
+  result = stripJsonLikeComments(result);
+  result = quoteUnquotedJsonObjectKeys(result);
+  result = normalizeSingleQuotedJsonStrings(result);
+
+  let previous = '';
+  while (previous !== result) {
+    previous = result;
+    result = result.replace(/,\s*([}\]])/g, '$1');
+  }
+  return result;
+}
+
+function stripJsonLikeComments(raw: string): string {
+  let result = '';
+  let inString: '"' | "'" | null = null;
+  let escape = false;
+
+  for (let idx = 0; idx < raw.length; idx += 1) {
+    const ch = raw[idx];
+    const next = raw[idx + 1];
+
+    if (inString) {
+      result += ch;
+      if (escape) {
+        escape = false;
+      } else if (ch === '\\') {
+        escape = true;
+      } else if (ch === inString) {
+        inString = null;
+      }
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      inString = ch;
+      result += ch;
+      continue;
+    }
+
+    if (ch === '/' && next === '/') {
+      while (idx < raw.length && !/[\r\n]/.test(raw[idx])) idx += 1;
+      result += raw[idx] ?? '';
+      continue;
+    }
+
+    if (ch === '/' && next === '*') {
+      idx += 2;
+      while (idx < raw.length && !(raw[idx] === '*' && raw[idx + 1] === '/')) idx += 1;
+      idx += 1;
+      continue;
+    }
+
+    result += ch;
+  }
+
+  return result;
+}
+
+function normalizeSingleQuotedJsonStrings(raw: string): string {
+  let result = '';
+  let idx = 0;
+  let inDoubleString = false;
+  let escape = false;
+
+  while (idx < raw.length) {
+    const ch = raw[idx];
+
+    if (inDoubleString) {
+      result += ch;
+      if (escape) {
+        escape = false;
+      } else if (ch === '\\') {
+        escape = true;
+      } else if (ch === '"') {
+        inDoubleString = false;
+      }
+      idx += 1;
+      continue;
+    }
+
+    if (ch === '"') {
+      inDoubleString = true;
+      result += ch;
+      idx += 1;
+      continue;
+    }
+
+    if (ch !== "'") {
+      result += ch;
+      idx += 1;
+      continue;
+    }
+
+    idx += 1;
+    let value = '';
+    let closed = false;
+    while (idx < raw.length) {
+      const inner = raw[idx];
+      if (inner === '\\' && idx + 1 < raw.length) {
+        value += raw[idx + 1];
+        idx += 2;
+        continue;
+      }
+      if (inner === "'") {
+        closed = true;
+        idx += 1;
+        break;
+      }
+      value += inner;
+      idx += 1;
+    }
+    result += JSON.stringify(value);
+    if (!closed) break;
+  }
+
+  return result;
+}
+
+function quoteUnquotedJsonObjectKeys(raw: string): string {
+  let result = '';
+  let idx = 0;
+  let inString: '"' | "'" | null = null;
+  let escape = false;
+  let expectingKey = false;
+
+  while (idx < raw.length) {
+    const ch = raw[idx];
+
+    if (inString) {
+      result += ch;
+      if (escape) {
+        escape = false;
+      } else if (ch === '\\') {
+        escape = true;
+      } else if (ch === inString) {
+        inString = null;
+      }
+      idx += 1;
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      inString = ch;
+      result += ch;
+      idx += 1;
+      continue;
+    }
+
+    if (ch === '{' || ch === ',') {
+      expectingKey = true;
+      result += ch;
+      idx += 1;
+      continue;
+    }
+
+    if (ch === '}' || ch === '[' || ch === ']') {
+      expectingKey = false;
+      result += ch;
+      idx += 1;
+      continue;
+    }
+
+    if (expectingKey && /\s/.test(ch)) {
+      result += ch;
+      idx += 1;
+      continue;
+    }
+
+    if (expectingKey && /[A-Za-z_$]/.test(ch)) {
+      const keyMatch = raw.slice(idx).match(/^([A-Za-z_$][\w$-]*)(\s*:)/);
+      if (keyMatch) {
+        result += `${JSON.stringify(keyMatch[1])}${keyMatch[2]}`;
+        idx += keyMatch[0].length;
+        expectingKey = false;
+        continue;
+      }
+    }
+
+    expectingKey = false;
+    result += ch;
+    idx += 1;
+  }
+
+  return result;
+}
+
 // 宽松解析：先尝试严格 JSON.parse，失败则尝试规范化常见 AI 输出问题。
 // 主要处理：summary/description 等字符串值里未转义的 ASCII 双引号，
 // 以及被截断的 JSON（补全花括号/引号）。
 function parsePlanJsonLoose(raw: string): RawRdpPlan | null {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    // 尝试逐字符扫描，重建合法 JSON：识别字符串边界时，
-    // 用「下一个结构字符前是否有引号」来判断字符串是否闭合。
-    const repaired = rebuildJsonStructure(raw);
-    if (repaired) {
+  for (const candidate of getPlanJsonCandidates(raw)) {
+    const parseCandidates = Array.from(new Set([candidate, normalizeLooseJson(candidate)]));
+    for (const parseCandidate of parseCandidates) {
       try {
-        return JSON.parse(repaired);
+        return JSON.parse(parseCandidate);
       } catch {
-        return null;
+        // 尝试逐字符扫描，重建合法 JSON：识别字符串边界时，
+        // 用「下一个结构字符前是否有引号」来判断字符串是否闭合。
+        const repaired = rebuildJsonStructure(parseCandidate);
+        if (repaired) {
+          const repairedCandidates = Array.from(new Set([repaired, normalizeLooseJson(repaired)]));
+          for (const repairedCandidate of repairedCandidates) {
+            try {
+              return JSON.parse(repairedCandidate);
+            } catch {
+              // 尝试下一个候选
+            }
+          }
+        }
       }
     }
-    return null;
   }
+  return null;
 }
 
 // 通过状态机重建 JSON：当遇到疑似字符串内部的未转义引号时，
@@ -848,27 +1239,28 @@ export function validateRdpPlan(
   if (versionNum !== 1) throw new Error(`RdpPlan version 必须为 1，实际为 ${String(plan.version)}`);
 
   let summary = String(plan.summary ?? '').trim();
-  // summary 宽容处理：为空时尝试从 steps 推导，而非直接拒绝
-  if (!summary && Array.isArray(plan.steps) && plan.steps.length > 0) {
-    summary = String(plan.steps[0]?.description ?? '').trim().slice(0, 120) || 'RDP 操作';
+  const rawSteps = normalizeRawRdpPlanSteps(plan, summary);
+  // summary 宽容处理：为空时尝试从 steps 或顶层 description 推导，而非直接拒绝
+  if (!summary && rawSteps.length > 0) {
+    summary = String(rawSteps[0]?.description ?? plan.description ?? '').trim().slice(0, 120) || 'RDP 操作';
   }
   if (!summary) throw new Error('RdpPlan summary 和 steps 均为空，无法解析操作计划');
   if (summary.length > 200) throw new Error('RdpPlan summary 不能超过 200 字符');
 
-  if (!Array.isArray(plan.steps) || plan.steps.length === 0) {
+  if (rawSteps.length === 0) {
     throw new Error('RdpPlan steps 必须包含 1 到 12 个步骤');
   }
-  if (plan.steps.length > RDP_PLAN_MAX_STEPS) {
+  if (rawSteps.length > RDP_PLAN_MAX_STEPS) {
     throw new Error(`RdpPlan steps 不能超过 ${RDP_PLAN_MAX_STEPS} 个步骤`);
   }
 
   const steps: ValidatedRdpPlanStep[] = [];
-  for (const rawStep of plan.steps as RawRdpPlanStep[]) {
+  for (const rawStep of rawSteps) {
     const description = String(rawStep.description ?? '').trim();
     if (!description) throw new Error('RdpPlan step description 不能为空');
     if (description.length > 120) throw new Error('RdpPlan step description 不能超过 120 字符');
 
-    const operations = validateRdpOperations(rawStep.operations, maxCoords);
+    const operations = validateRdpOperations(getRawRdpStepOperations(rawStep), maxCoords);
 
     const intent = String(rawStep.intent ?? 'operate')
       .trim()
@@ -893,6 +1285,7 @@ export interface ParsedRdpActionsResult {
   displayContent: string;
   actions: ParsedPendingAction[];
   parseError?: string;
+  parseDiagnostic?: string;
 }
 
 export function parseRdpActions(
@@ -905,7 +1298,15 @@ export function parseRdpActions(
   // 开标签存在但 JSON 提取失败的诊断
   if (candidate.extractError) {
     const displayContentErr = removeRange(content, candidate.startIndex, candidate.endIndex).replace(/^\s+|\s+$/g, '');
-    return { displayContent: displayContentErr, actions: [], parseError: candidate.extractError };
+    return {
+      displayContent: displayContentErr,
+      actions: [],
+      parseError: candidate.extractError,
+      parseDiagnostic: [
+        buildRdpParseContextDiagnostic(content, candidate, maxCoords),
+        `extractError=${candidate.extractError}`,
+      ].join('\n'),
+    };
   }
 
   let plan: ValidatedRdpPlan;
@@ -915,7 +1316,17 @@ export function parseRdpActions(
   } catch (e) {
     parseError = e instanceof Error ? e.message : String(e);
     const displayContentErr = removeRange(content, candidate.startIndex, candidate.endIndex).replace(/^\s+|\s+$/g, '');
-    return { displayContent: displayContentErr, actions: [], parseError };
+    return {
+      displayContent: displayContentErr,
+      actions: [],
+      parseError,
+      parseDiagnostic: [
+        buildRdpParseContextDiagnostic(content, candidate, maxCoords),
+        parseError === 'RdpPlan JSON 解析失败'
+          ? buildRdpPlanJsonDiagnostic(candidate.rawPlan)
+          : `validationError=${parseError}\nrawPlanLength=${candidate.rawPlan.length}\nrawPlanPreview=${diagnosticPreview(candidate.rawPlan)}`,
+      ].join('\n'),
+    };
   }
 
   const displayContent = removeRange(content, candidate.startIndex, candidate.endIndex).replace(/^\s+|\s+$/g, '');

@@ -14,6 +14,10 @@ import { executeRdpOperations } from '../../utils/rdpAgentExecutor';
 import type { RdpOperation } from '../../utils/aiActionParser';
 import { BotOutlined } from '../../components/ui/icons';
 
+const RDP_AI_SCREENSHOT_MAX_WIDTH = 1280;
+const RDP_AI_SCREENSHOT_MAX_HEIGHT = 720;
+const RDP_AI_SCREENSHOT_QUALITY = 0.72;
+
 export default function RdpPage() {
   const { t, tText } = useTranslation();
   const location = useLocation();
@@ -68,11 +72,46 @@ export default function RdpPage() {
 
   const handleExecuteRdpOperations = useCallback(
     async (ops: RdpOperation[]) => {
-      if (!rdpSessionId) return;
+      if (!rdpSessionId) {
+        throw new Error('RDP 会话未连接，无法执行 AI 操作');
+      }
       await executeRdpOperations(ops, { sessionId: rdpSessionId });
     },
     [rdpSessionId],
   );
+
+  const captureRdpScreenshot = useCallback((): string | null => {
+    const source = renderMode === 'h264Direct' ? videoRef.current : canvasRef.current;
+    if (!source) return null;
+
+    const sourceWidth = source instanceof HTMLVideoElement
+      ? source.videoWidth
+      : source.width;
+    const sourceHeight = source instanceof HTMLVideoElement
+      ? source.videoHeight
+      : source.height;
+    if (sourceWidth <= 0 || sourceHeight <= 0) return null;
+
+    const scale = Math.min(
+      1,
+      RDP_AI_SCREENSHOT_MAX_WIDTH / sourceWidth,
+      RDP_AI_SCREENSHOT_MAX_HEIGHT / sourceHeight,
+    );
+    const width = Math.max(1, Math.round(sourceWidth * scale));
+    const height = Math.max(1, Math.round(sourceHeight * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d');
+    if (!context) return null;
+
+    try {
+      context.drawImage(source, 0, 0, width, height);
+      return canvas.toDataURL('image/jpeg', RDP_AI_SCREENSHOT_QUALITY);
+    } catch {
+      return null;
+    }
+  }, [renderMode]);
 
   useEffect(() => {
     if (!stateHostRequest && queryHostId && hosts.length === 0) {
@@ -311,6 +350,7 @@ export default function RdpPage() {
             desktopWidth={desktopWidth}
             desktopHeight={desktopHeight}
             executeRdpOperations={handleExecuteRdpOperations}
+            getRdpScreenshot={captureRdpScreenshot}
             onClose={() => setAiPanelOpen(false)}
           />
         </aside>

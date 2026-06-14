@@ -620,12 +620,68 @@ async fn process_input_event(
     metrics: &mut RdpMetrics,
     event: super::types::RdpInputEvent,
 ) -> Result<bool, String> {
-    let operations = input_operations(event, session.width, session.height)?;
+    let event_summary = super::input::input_event_summary(&event);
+    crate::commands::app_log::emit_log(
+        app,
+        "info",
+        "rdp.input",
+        &format!(
+            "stage=protocol_received sessionId={session_id} size={}x{} event={event_summary}",
+            session.width, session.height
+        ),
+        "backend",
+    );
+
+    let operations = input_operations(event, session.width, session.height).map_err(|error| {
+        crate::commands::app_log::emit_log(
+            app,
+            "warn",
+            "rdp.input",
+            &format!(
+                "stage=input_operations_failed sessionId={session_id} event={event_summary} error={error}"
+            ),
+            "backend",
+        );
+        error
+    })?;
+    let operation_count = operations.len();
+    let operation_preview = format!("{operations:?}");
     let events = session.input.apply(operations);
+    let fastpath_event_count = events.len();
+    crate::commands::app_log::emit_log(
+        app,
+        "info",
+        "rdp.input",
+        &format!(
+            "stage=fastpath_encode_start sessionId={session_id} event={event_summary} operationCount={operation_count} fastpathEventCount={fastpath_event_count} operations={operation_preview}"
+        ),
+        "backend",
+    );
+
     let outputs = session
         .active_stage
         .process_fastpath_input(&mut session.image, events.as_slice())
-        .map_err(|e| format!("编码 RDP 输入失败: {e}"))?;
+        .map_err(|e| {
+            let error = format!("编码 RDP 输入失败: {e}");
+            crate::commands::app_log::emit_log(
+                app,
+                "warn",
+                "rdp.input",
+                &format!("stage=fastpath_encode_failed sessionId={session_id} event={event_summary} error={error}"),
+                "backend",
+            );
+            error
+        })?;
+    let output_count = outputs.len();
+    crate::commands::app_log::emit_log(
+        app,
+        "info",
+        "rdp.input",
+        &format!(
+            "stage=fastpath_encode_done sessionId={session_id} event={event_summary} outputCount={output_count}"
+        ),
+        "backend",
+    );
     handle_stage_outputs(
         app,
         session_id,

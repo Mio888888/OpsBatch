@@ -2,6 +2,29 @@ use ironrdp::input::{MouseButton, MousePosition, Operation, Scancode, WheelRotat
 
 use super::types::{RdpInputEvent, RdpMouseButton};
 
+pub(super) fn input_event_summary(event: &RdpInputEvent) -> String {
+    match event {
+        RdpInputEvent::MouseMove { x, y } => format!("mouse_move x={x} y={y}"),
+        RdpInputEvent::MouseButton { x, y, button, down } => {
+            format!("mouse_button x={x} y={y} button={button} down={down}")
+        }
+        RdpInputEvent::Wheel {
+            x,
+            y,
+            delta,
+            vertical,
+        } => format!("wheel x={x} y={y} delta={delta} vertical={vertical}"),
+        RdpInputEvent::KeyScancode {
+            code,
+            extended,
+            down,
+        } => format!("key_scancode code={code} extended={extended} down={down}"),
+        RdpInputEvent::Unicode { character, down } => {
+            format!("unicode char={character} down={down}")
+        }
+    }
+}
+
 pub(super) fn input_operations(
     event: RdpInputEvent,
     width: u16,

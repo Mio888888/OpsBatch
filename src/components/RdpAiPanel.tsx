@@ -7,6 +7,7 @@ import {
   selectStreamingMessageId,
   selectActiveConversationId,
   type ChatMessage,
+  type ChatMessageImage,
   type PendingAction,
 } from '../stores/aiChat';
 import type { RdpOperation } from '../utils/aiActionParser';
@@ -19,6 +20,7 @@ interface RdpAiPanelProps {
   desktopWidth: number;
   desktopHeight: number;
   executeRdpOperations: (ops: RdpOperation[]) => Promise<void>;
+  getRdpScreenshot?: () => string | null;
   onClose?: () => void;
 }
 
@@ -38,6 +40,8 @@ function describeOperation(op: RdpOperation): string {
       return `输入文本: ${op.text.length > 40 ? `${op.text.slice(0, 37)}...` : op.text}`;
     case 'key':
       return `按键: ${op.keys.join(' + ')}`;
+    case 'wait':
+      return `等待 ${Math.round(op.ms / 100) / 10} 秒`;
     default:
       return '未知操作';
   }
@@ -75,7 +79,8 @@ function buildRdpAgentContext(width: number, height: number): string {
     '        {"type": "key", "keys": ["Enter"]},',
     '        {"type": "key", "keys": ["Control", "s"]},',
     '        {"type": "scroll", "x": 400, "y": 300, "delta": -3},',
-    '        {"type": "drag", "fromX": 10, "fromY": 10, "toX": 500, "toY": 500}',
+    '        {"type": "drag", "fromX": 10, "fromY": 10, "toX": 500, "toY": 500},',
+    '        {"type": "wait", "ms": 1500}',
     '      ],',
     '      "expected_outcome": "预期结果"',
     '    }',
@@ -89,7 +94,9 @@ function buildRdpAgentContext(width: number, height: number): string {
     '- scroll: 在(x,y)滚动，delta正数向上、负数向下',
     '- type: 输入文本',
     '- key: 按键，单键如 ["Enter"]，组合键如 ["Control","c"]',
+    '- wait: 等待指定毫秒数，如 {"type":"wait","ms":1500}；不要把 Wait 写成 key',
     '支持按键：Enter, Tab, Escape, Backspace, Delete, Insert, Home, End, PageUp, PageDown, ArrowUp/Down/Left/Right, Space, Shift, Control, Alt, Meta, Win, F1-F12 等。',
+    '启动或打开应用（例如 Microsoft Edge、cmd、notepad）时，优先使用键盘路径：按 Win/Meta 打开开始菜单，搜索或 type 输入应用名/命令，再按 Enter；也可用 Win+R 运行框。不要优先依赖桌面图标坐标双击，除非用户明确要求点击当前屏幕上的某个图标。',
     '普通字符直接用 type 输入。坐标必须基于实际分辨率，不要超出范围。',
     '如果当前目标需要多步完成，只给出下一步可执行操作；执行后会继续检查。',
     '每个 step 必须包含非空 operations，不能只描述不操作。',
@@ -139,7 +146,7 @@ RdpMessageContent.displayName = 'RdpMessageContent';
 
 const RdpActionCard: FC<{
   action: PendingAction;
-  onApprove: (id: string) => void;
+  onApprove: (id: string) => Promise<void>;
   onReject: (id: string) => void;
   disabled: boolean;
   batchExecutingId?: string | null;
@@ -152,7 +159,7 @@ const RdpActionCard: FC<{
   const handleApprove = useCallback(() => {
     if (disabled || executing || inBatchQueue) return;
     setExecuting(true);
-    onApprove(action.id);
+    void onApprove(action.id).finally(() => setExecuting(false));
   }, [action.id, disabled, executing, inBatchQueue, onApprove]);
 
   const ops = action.rdpOperations ?? [];
@@ -206,6 +213,7 @@ const RdpAiPanel: FC<RdpAiPanelProps> = ({
   desktopWidth,
   desktopHeight,
   executeRdpOperations,
+  getRdpScreenshot,
   onClose,
 }) => {
   const { t, tText } = useTranslation();
@@ -295,15 +303,20 @@ const RdpAiPanel: FC<RdpAiPanelProps> = ({
     [allActions],
   );
 
+  const getScreenshotImages = useCallback((): ChatMessageImage[] | undefined => {
+    const dataUrl = getRdpScreenshot?.();
+    return dataUrl ? [{ dataUrl }] : undefined;
+  }, [getRdpScreenshot]);
+
   const handleSend = useCallback(() => {
     if (streaming || !inputText.trim()) return;
     const context = buildRdpAgentContext(desktopWidth, desktopHeight);
-    void sendMessage(context);
-  }, [desktopHeight, desktopWidth, inputText, sendMessage, streaming]);
+    void sendMessage(context, getScreenshotImages());
+  }, [desktopHeight, desktopWidth, getScreenshotImages, inputText, sendMessage, streaming]);
 
   const handleApproveAction = useCallback(
     (actionId: string) => {
-      void approveAction(actionId, rdpSessionId ?? undefined);
+      return approveAction(actionId, rdpSessionId ?? undefined);
     },
     [approveAction, rdpSessionId],
   );
@@ -325,10 +338,10 @@ const RdpAiPanel: FC<RdpAiPanelProps> = ({
 
   const sendGoalContextMessage = useCallback(async (target: string, round: number, check: boolean) => {
     const prompt = check
-      ? `目标：${target}\n刚才执行了第 ${round} 轮操作。请判断目标是否已经完成。如果已完成，直接回复"目标已完成"并简要说明；如果未完成，请输出下一步完整 <RDP_PLAN>。`
-      : `目标：${target}\n请给出实现该目标的第一步操作计划。必须输出完整 <RDP_PLAN> JSON，steps 和 operations 不能为空。步骤要精确，坐标基于 ${desktopWidth}x${desktopHeight} 分辨率。`;
-    void sendDirectMessage(prompt, buildRdpAgentContext(desktopWidth, desktopHeight));
-  }, [desktopHeight, desktopWidth, sendDirectMessage]);
+      ? `目标：${target}\n刚才执行了第 ${round} 轮操作，并已附加当前 RDP 截图。请先根据截图判断目标是否已经完成。如果已完成，直接回复"目标已完成"并简要说明；如果未完成，请输出下一步完整 <RDP_PLAN>。`
+      : `目标：${target}\n已附加当前 RDP 截图。请根据截图给出实现该目标的第一步操作计划。必须输出完整 <RDP_PLAN> JSON，steps 和 operations 不能为空。步骤要精确，坐标基于 ${desktopWidth}x${desktopHeight} 分辨率。`;
+    void sendDirectMessage(prompt, buildRdpAgentContext(desktopWidth, desktopHeight), getScreenshotImages());
+  }, [desktopHeight, desktopWidth, getScreenshotImages, sendDirectMessage]);
 
   const handleStartGoal = useCallback(() => {
     const target = goalText.trim();

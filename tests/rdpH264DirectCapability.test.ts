@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import * as protocol from '../src/pages/Rdp/rdpProtocol.ts';
 import {
@@ -257,4 +258,20 @@ test('describes legacy bitmap sessions without implying H.264 video frames', () 
 
   assert.equal(overlay.title, '正在等待远程画面');
   assert.equal(overlay.subtitle, 'RDP 已连接，正在等待 bitmap/ClearCodec 首帧。');
+});
+
+test('RDP AI execution does not silently succeed without an active session', () => {
+  const rdpPageSource = readFileSync('src/pages/Rdp/RdpPage.tsx', 'utf8');
+  const aiChatSource = readFileSync('src/stores/aiChat.ts', 'utf8');
+  const executorSource = readFileSync('src/utils/rdpAgentExecutor.ts', 'utf8');
+
+  assert.doesNotMatch(rdpPageSource, /if \(!rdpSessionId\) return;/);
+  assert.match(rdpPageSource, /RDP 会话未连接，无法执行 AI 操作/);
+  assert.match(aiChatSource, /logHandledError\(\s*'rdp\.ai\.execute'/);
+  assert.match(aiChatSource, /emitFrontendGlobalLog\(\s*'info',\s*'rdp\.ai\.execute'/);
+  assert.match(aiChatSource, /stage=approve_start/);
+  assert.match(aiChatSource, /stage=no_executor/);
+  assert.match(aiChatSource, /stage=executor_done/);
+  assert.match(executorSource, /emitFrontendGlobalLog\(\s*'info',\s*'rdp\.ai\.execute'/);
+  assert.match(executorSource, /batchEvents=/);
 });

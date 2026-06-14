@@ -93,10 +93,7 @@ fn build_chat_body(
 ) -> serde_json::Value {
     let mut body = serde_json::json!({
         "model": model,
-        "messages": messages.iter().map(|m| serde_json::json!({
-            "role": m.role,
-            "content": m.content,
-        })).collect::<Vec<_>>(),
+        "messages": messages.iter().map(build_chat_message_json).collect::<Vec<_>>(),
         "temperature": temperature.unwrap_or(0.7),
         "max_tokens": max_tokens.unwrap_or(2048),
     });
@@ -104,6 +101,34 @@ fn build_chat_body(
         body["stream"] = serde_json::Value::Bool(true);
     }
     body
+}
+
+fn build_chat_message_json(message: &ChatMessage) -> serde_json::Value {
+    let images = message.images.as_deref().unwrap_or(&[]);
+    if images.is_empty() {
+        return serde_json::json!({
+            "role": &message.role,
+            "content": &message.content,
+        });
+    }
+
+    let mut content = vec![serde_json::json!({
+        "type": "text",
+        "text": &message.content,
+    })];
+    for image in images {
+        content.push(serde_json::json!({
+            "type": "image_url",
+            "image_url": {
+                "url": &image.data_url,
+            },
+        }));
+    }
+
+    serde_json::json!({
+        "role": &message.role,
+        "content": content,
+    })
 }
 
 fn load_ai_config_raw(db: &Database) -> Result<AiConfig, String> {
@@ -201,9 +226,17 @@ pub async fn save_ai_config(
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChatMessageImage {
+    pub data_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    #[serde(default)]
+    pub images: Option<Vec<ChatMessageImage>>,
 }
 
 #[derive(Deserialize)]
@@ -1126,6 +1159,7 @@ pub fn ai_generate_script(
             messages: vec![ChatMessage {
                 role: "user".into(),
                 content: prompt,
+                images: None,
             }],
             model: None,
             temperature: Some(0.7),
@@ -1154,6 +1188,7 @@ pub fn ai_analyze_results(
             messages: vec![ChatMessage {
                 role: "user".into(),
                 content: prompt,
+                images: None,
             }],
             model: None,
             temperature: Some(0.5),
@@ -1182,6 +1217,7 @@ pub fn ai_diagnose_error(
             messages: vec![ChatMessage {
                 role: "user".into(),
                 content: prompt,
+                images: None,
             }],
             model: None,
             temperature: Some(0.5),
@@ -1216,6 +1252,7 @@ pub fn ai_risk_assessment(
             messages: vec![ChatMessage {
                 role: "user".into(),
                 content: prompt,
+                images: None,
             }],
             model: None,
             temperature: Some(0.3),
@@ -1326,8 +1363,8 @@ pub fn ai_keychain_delete(provider: String) -> Result<(), String> {
 #[cfg(test)]
 mod ai_action_tests {
     use super::{
-        assess_ai_action, ensure_conversation_record, validate_command_plan, AiActionDecision,
-        AiActionRiskLevel,
+        assess_ai_action, build_chat_body, ensure_conversation_record, validate_command_plan,
+        AiActionDecision, AiActionRiskLevel, ChatMessage, ChatMessageImage,
     };
     use rusqlite::Connection;
 
@@ -1373,6 +1410,31 @@ mod ai_action_tests {
 
         assert_eq!(AiActionDecision::Block, result.decision);
         assert_eq!("CUSTOM_DANGER_RULE", result.matched_rule);
+    }
+
+    #[test]
+    fn chat_body_sends_images_as_openai_compatible_content_parts() {
+        let body = build_chat_body(
+            "gpt-vision",
+            &[ChatMessage {
+                role: "user".to_string(),
+                content: "请判断当前 RDP 画面".to_string(),
+                images: Some(vec![ChatMessageImage {
+                    data_url: "data:image/jpeg;base64,abc".to_string(),
+                }]),
+            }],
+            None,
+            None,
+            false,
+        );
+
+        let content = body["messages"][0]["content"]
+            .as_array()
+            .expect("content parts");
+        assert_eq!("text", content[0]["type"]);
+        assert_eq!("请判断当前 RDP 画面", content[0]["text"]);
+        assert_eq!("image_url", content[1]["type"]);
+        assert_eq!("data:image/jpeg;base64,abc", content[1]["image_url"]["url"]);
     }
 
     #[test]

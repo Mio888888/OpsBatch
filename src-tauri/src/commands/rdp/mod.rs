@@ -200,11 +200,44 @@ pub async fn rdp_connect(
 
 #[tauri::command]
 pub async fn rdp_send_input(
+    app: tauri::AppHandle,
     manager: tauri::State<'_, RdpManager>,
     session_id: String,
     event: RdpInputEvent,
 ) -> Result<(), String> {
-    manager.send_input(&session_id, event).await
+    let event_summary = input::input_event_summary(&event);
+    crate::commands::app_log::emit_log(
+        &app,
+        "info",
+        "rdp.input",
+        &format!("stage=command_received sessionId={session_id} event={event_summary}"),
+        "backend",
+    );
+
+    match manager.send_input(&session_id, event).await {
+        Ok(()) => {
+            crate::commands::app_log::emit_log(
+                &app,
+                "info",
+                "rdp.input",
+                &format!("stage=queued sessionId={session_id} event={event_summary}"),
+                "backend",
+            );
+            Ok(())
+        }
+        Err(error) => {
+            crate::commands::app_log::emit_log(
+                &app,
+                "warn",
+                "rdp.input",
+                &format!(
+                    "stage=queue_failed sessionId={session_id} event={event_summary} error={error}"
+                ),
+                "backend",
+            );
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]

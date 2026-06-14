@@ -3,18 +3,26 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { parseAiPendingActionsAsync } from '../utils/aiActionParser';
 import type { AiActionAssessment, ParsedCommandPlanNotice, ParsedPendingAction } from '../utils/aiActionParser';
-import { logHandledError } from '../utils/globalLogger';
+import { emitFrontendGlobalLog, logHandledError } from '../utils/globalLogger';
 
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
+  images?: ChatMessageImage[];
   model?: string;
   streaming?: boolean;
   pendingActions?: PendingAction[];
   commandPlanNotice?: ParsedCommandPlanNotice;
   rdpParseError?: string;
+  rdpParseDiagnostic?: string;
 }
+
+export interface ChatMessageImage {
+  dataUrl: string;
+}
+
+type ApiChatMessage = Pick<ChatMessage, 'role' | 'content' | 'images'>;
 
 export interface PendingAction extends ParsedPendingAction {}
 
@@ -72,8 +80,8 @@ interface AiChatState {
   openConversation: (id: string) => Promise<void>;
   newConversation: () => void;
   deleteConversation: (id: string) => Promise<void>;
-  sendMessage: (context?: string) => Promise<void>;
-  sendDirectMessage: (text: string, context?: string) => Promise<void>;
+  sendMessage: (context?: string, images?: ChatMessageImage[]) => Promise<void>;
+  sendDirectMessage: (text: string, context?: string, images?: ChatMessageImage[]) => Promise<void>;
   sendMessageInline: () => Promise<void>;
   initStreamListener: () => Promise<void>;
   destroyStreamListener: () => void;
@@ -128,7 +136,7 @@ function sameScope(a: AiChatScope, conversation: Conversation): boolean {
 
 function buildScopedRequest(
   session: SessionState,
-  messages: Pick<ChatMessage, 'role' | 'content'>[],
+  messages: ApiChatMessage[],
   clientRequestId: string,
 ) {
   return {
@@ -399,7 +407,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
     }
   },
 
-  sendMessage: async (context?: string) => {
+  sendMessage: async (context?: string, images?: ChatMessageImage[]) => {
     const state = get();
     const sid = state.activeSessionId;
     if (!sid) return;
@@ -413,6 +421,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
       id: crypto.randomUUID(),
       role: 'user',
       content: text,
+      images,
     };
 
     const assistantMsgId = crypto.randomUUID();
@@ -439,9 +448,10 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
       },
     }));
 
-    const apiMessages = [...prevMessages, userMsg].map((m) => ({
+    const apiMessages: ApiChatMessage[] = [...prevMessages, userMsg].map((m) => ({
       role: m.role,
       content: m.content,
+      images: m.images,
     }));
 
     if (context) {
@@ -471,7 +481,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
     }
   },
 
-  sendDirectMessage: async (text: string, context?: string) => {
+  sendDirectMessage: async (text: string, context?: string, images?: ChatMessageImage[]) => {
     const state = get();
     const sid = state.activeSessionId;
     if (!sid) return;
@@ -483,6 +493,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
       id: crypto.randomUUID(),
       role: 'user',
       content: text,
+      images,
     };
 
     const assistantMsgId = crypto.randomUUID();
@@ -507,9 +518,10 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
       },
     }));
 
-    const apiMessages = [...session.messages, userMsg].map((m) => ({
+    const apiMessages: ApiChatMessage[] = [...session.messages, userMsg].map((m) => ({
       role: m.role,
       content: m.content,
+      images: m.images,
     }));
 
     if (context) {
@@ -648,7 +660,19 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
             };
           });
           const rdpCtx = getSession(get().sessions, sid).rdpContext;
-          void parseAiPendingActionsAsync(rawContent, rdpCtx).then(({ displayContent, actions, commandPlanNotice, rdpParseError }) => {
+          void parseAiPendingActionsAsync(rawContent, rdpCtx).then(({ displayContent, actions, commandPlanNotice, rdpParseError, rdpParseDiagnostic }) => {
+            if (rdpParseError) {
+              void logHandledError(
+                'rdp.ai.parse',
+                [
+                  `messageId=${targetMessageId}`,
+                  `conversationId=${chunk.conversation_id}`,
+                  `error=${rdpParseError}`,
+                  rdpParseDiagnostic ? `diagnostic:\n${rdpParseDiagnostic}` : 'diagnostic=<empty>',
+                ].join('\n'),
+                'warn',
+              );
+            }
             const initialActions = actions.map((action) => ({
               ...action,
               assessmentLoading: action.type === 'command',
@@ -668,6 +692,7 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
                           pendingActions: initialActions.length > 0 ? initialActions : undefined,
                           commandPlanNotice,
                           rdpParseError: rdpParseError ?? undefined,
+                          rdpParseDiagnostic: rdpParseDiagnostic ?? undefined,
                         }
                         : m,
                     ),
@@ -738,11 +763,60 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
     }
 
     if (action.type === 'rdp_action' && action.rdpOperations && action.rdpOperations.length > 0) {
+      void emitFrontendGlobalLog(
+        'info',
+        'rdp.ai.execute',
+        [
+          'stage=approve_start',
+          `actionId=${action.id}`,
+          `conversationId=${session.activeConversationId ?? ''}`,
+          `sessionId=${sessionId ?? ''}`,
+          `description=${action.description}`,
+          `operationCount=${action.rdpOperations.length}`,
+          `operations=${JSON.stringify(action.rdpOperations)}`,
+        ].join('\n'),
+      );
       const executor = session.rdpExecutor;
-      if (!executor) return;
+      if (!executor) {
+        void emitFrontendGlobalLog(
+          'warn',
+          'rdp.ai.execute',
+          [
+            'stage=no_executor',
+            `actionId=${action.id}`,
+            `conversationId=${session.activeConversationId ?? ''}`,
+            `sessionId=${sessionId ?? ''}`,
+            `description=${action.description}`,
+          ].join('\n'),
+        );
+        return;
+      }
       try {
         await executor(action.rdpOperations);
-      } catch {
+        void emitFrontendGlobalLog(
+          'info',
+          'rdp.ai.execute',
+          [
+            'stage=executor_done',
+            `actionId=${action.id}`,
+            `conversationId=${session.activeConversationId ?? ''}`,
+            `sessionId=${sessionId ?? ''}`,
+            `description=${action.description}`,
+          ].join('\n'),
+        );
+      } catch (error) {
+        void logHandledError(
+          'rdp.ai.execute',
+          [
+            `actionId=${action.id}`,
+            `conversationId=${session.activeConversationId ?? ''}`,
+            `sessionId=${sessionId ?? ''}`,
+            `description=${action.description}`,
+            `operations=${JSON.stringify(action.rdpOperations)}`,
+            `error=${error instanceof Error ? error.message : String(error)}`,
+          ].join('\n'),
+          'warn',
+        );
         return;
       }
     }

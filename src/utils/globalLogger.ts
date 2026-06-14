@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 type ConsoleMethod = 'log' | 'info' | 'warn' | 'error';
 
 const INSTALLED_FLAG = '__opsbatchGlobalLogHandlerInstalled';
-const MAX_LOG_MESSAGE_LENGTH = 4000;
+const MAX_LOG_MESSAGE_LENGTH = 12000;
 const CONSOLE_METHODS: ConsoleMethod[] = ['log', 'info', 'warn', 'error'];
 
 declare global {

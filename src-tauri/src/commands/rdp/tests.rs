@@ -23,7 +23,7 @@ use tokio::sync::mpsc;
 
 use super::dynamic_channels::WINDOWS_H264_DIRECT_DVC_NAMES;
 use super::egfx::{egfx_capability_diagnostics, RdpEgfxBridge};
-use super::input::mouse_button_from_web;
+use super::input::{input_event_summary, mouse_button_from_web};
 use super::protocol::{
     build_client_connector, build_h264_direct_drdynvc_for_tests,
     h264_direct_encoded_video_receiver_count_for_tests, negotiation_response_flags_diagnostics,
@@ -576,6 +576,26 @@ fn pointer_button_mapping_uses_web_button_order() {
     assert_eq!(mouse_button_from_web(1).unwrap(), RdpMouseButton::Middle);
     assert_eq!(mouse_button_from_web(2).unwrap(), RdpMouseButton::Right);
     assert!(mouse_button_from_web(9).is_err());
+}
+
+#[test]
+fn rdp_input_event_summary_includes_action_coordinates_and_state() {
+    assert_eq!(
+        input_event_summary(&RdpInputEvent::MouseButton {
+            x: 28,
+            y: 213,
+            button: 0,
+            down: true,
+        }),
+        "mouse_button x=28 y=213 button=0 down=true"
+    );
+    assert_eq!(
+        input_event_summary(&RdpInputEvent::Unicode {
+            character: "你".to_string(),
+            down: true,
+        }),
+        "unicode char=你 down=true"
+    );
 }
 
 fn dynamic_channel_create_status(

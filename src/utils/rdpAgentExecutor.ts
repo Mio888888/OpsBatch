@@ -1,7 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { RdpOperation } from './aiActionParser';
-import { getScancodeForKey } from '../pages/Rdp/rdpProtocol';
-import type { RdpInputEvent } from '../pages/Rdp/rdpProtocol';
+import { getScancodeForKey } from '../pages/Rdp/rdpProtocol.ts';
+import type { RdpInputEvent } from '../pages/Rdp/rdpProtocol.ts';
+import { emitFrontendGlobalLog } from './globalLogger.ts';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -85,18 +86,13 @@ export function rdpOperationsToInputEvents(ops: RdpOperation[]): RdpInputEvent[]
         const button = op.button ?? 0;
         // 先移动到目标位置
         batches.push([{ type: 'mouse_move', x: op.x, y: op.y }]);
-        // 按下+释放合并为同一批次（原子执行，避免按下保持过久变成拖拽）
-        const pressBatch: RdpInputEvent[] = [
-          { type: 'mouse_button', x: op.x, y: op.y, button, down: true },
-          { type: 'mouse_button', x: op.x, y: op.y, button, down: false },
-        ];
+        // 远端 Windows 对瞬间 down/up 不一定识别稳定，按下与释放要分开发送。
+        batches.push([{ type: 'mouse_button', x: op.x, y: op.y, button, down: true }]);
+        batches.push([{ type: 'mouse_button', x: op.x, y: op.y, button, down: false }]);
         if (op.doubleClick) {
-          pressBatch.push(
-            { type: 'mouse_button', x: op.x, y: op.y, button, down: true },
-            { type: 'mouse_button', x: op.x, y: op.y, button, down: false },
-          );
+          batches.push([{ type: 'mouse_button', x: op.x, y: op.y, button, down: true }]);
+          batches.push([{ type: 'mouse_button', x: op.x, y: op.y, button, down: false }]);
         }
-        batches.push(pressBatch);
         break;
       }
       case 'drag': {
@@ -140,6 +136,8 @@ export function rdpOperationsToInputEvents(ops: RdpOperation[]): RdpInputEvent[]
         }
         break;
       }
+      case 'wait':
+        break;
       default:
         break;
     }
@@ -185,6 +183,18 @@ function delayForKind(kind: BatchKind): number {
   }
 }
 
+function delayAfterBatch(op: RdpOperation, kind: BatchKind, batchIdx: number, batch: RdpInputEvent[]): number {
+  if (op.type === 'click' && kind === 'click') {
+    if (isMouseButtonDownBatch(batch)) return 70;
+    if (op.doubleClick && batchIdx === 2) return 140;
+  }
+  return delayForKind(kind);
+}
+
+function isMouseButtonDownBatch(batch: RdpInputEvent[] | undefined): boolean {
+  return Boolean(batch?.some((event) => event.type === 'mouse_button' && event.down));
+}
+
 export interface RdpExecutorOptions {
   sessionId: string;
   /** 步骤执行完成后的尾延迟，让远程 UI 稳定后再进入下一步（默认 800ms） */
@@ -196,19 +206,55 @@ export async function executeRdpOperations(
   options: RdpExecutorOptions,
 ): Promise<void> {
   const { sessionId, settleDelayMs = 800 } = options;
-  const batches = rdpOperationsToInputEvents(ops);
+  if (!sessionId.trim()) {
+    throw new Error('RDP 会话未连接，无法执行 AI 操作');
+  }
 
-  for (let batchIdx = 0; batchIdx < batches.length; batchIdx += 1) {
-    const batch = batches[batchIdx];
-    for (const event of batch) {
-      await invoke('rdp_send_input', { sessionId, event });
+  const plannedBatches = ops.flatMap((op) => (op.type === 'wait' ? [] : rdpOperationsToInputEvents([op])));
+  const plannedEventCount = plannedBatches.reduce((count, batch) => count + batch.length, 0);
+  void emitFrontendGlobalLog(
+    'info',
+    'rdp.ai.execute',
+    [
+      `sessionId=${sessionId}`,
+      `operationCount=${ops.length}`,
+      `eventCount=${plannedEventCount}`,
+      `operations=${JSON.stringify(ops)}`,
+    ].join('\n'),
+  );
+
+  for (const op of ops) {
+    if (op.type === 'wait') {
+      await sleep(op.ms);
+      continue;
     }
-    const kind = classifyBatch(batch);
-    // 批次内事件本身是原子的（如 click 的 down+up），无需额外间隔；
-    // 批次间按操作类型等待，让远程桌面有时间响应。
-    await sleep(delayForKind(kind));
+
+    const batches = rdpOperationsToInputEvents([op]);
+    for (let batchIdx = 0; batchIdx < batches.length; batchIdx += 1) {
+      const batch = batches[batchIdx];
+      for (const event of batch) {
+        await invoke('rdp_send_input', { sessionId, event });
+      }
+      const kind = classifyBatch(batch);
+      void emitFrontendGlobalLog(
+        'info',
+        'rdp.ai.execute',
+        [
+          `sessionId=${sessionId}`,
+          `opType=${op.type}`,
+          `batchIndex=${batchIdx}`,
+          `batchKind=${kind}`,
+          `buttonDown=${isMouseButtonDownBatch(batch)}`,
+          `delayAfterMs=${delayAfterBatch(op, kind, batchIdx, batch)}`,
+          `batchEvents=${JSON.stringify(batch)}`,
+        ].join('\n'),
+      );
+      // 批次内事件本身是原子的；批次间按操作类型等待，让远程桌面有时间响应。
+      await sleep(delayAfterBatch(op, kind, batchIdx, batch));
+    }
   }
 
   // 步骤尾部缓冲：等待远程窗口/应用启动完成，避免下一步操作打在错误的焦点上
   await sleep(settleDelayMs);
+  void emitFrontendGlobalLog('info', 'rdp.ai.execute', `sessionId=${sessionId}\nstatus=done`);
 }

@@ -3,6 +3,8 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::db::Database;
 
+const MAX_FRONTEND_LOG_MESSAGE_CHARS: usize = 12_000;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppLogEntry {
     pub timestamp: String,
@@ -119,9 +121,16 @@ pub fn ping_log(app: AppHandle, message: String) {
 pub fn emit_frontend_log(app: AppHandle, level: String, source: String, message: String) {
     let level = normalize_level(&level);
     let source = normalize_source(&source);
-    let message = message.chars().take(4000).collect::<String>();
+    let message = truncate_frontend_log_message(&message);
 
     emit_log(&app, &level, &source, &message, "frontend");
+}
+
+fn truncate_frontend_log_message(message: &str) -> String {
+    message
+        .chars()
+        .take(MAX_FRONTEND_LOG_MESSAGE_CHARS)
+        .collect::<String>()
 }
 
 fn normalize_level(level: &str) -> String {
@@ -163,5 +172,14 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM app_logs", [], |row| row.get(0))
             .expect("count app logs");
         assert_eq!(0, count);
+    }
+
+    #[test]
+    fn frontend_log_truncation_keeps_long_parser_diagnostics() {
+        let message = format!("rdp.ai.parse\n{}\nend-marker", "x".repeat(6000));
+
+        let truncated = truncate_frontend_log_message(&message);
+
+        assert!(truncated.ends_with("end-marker"));
     }
 }

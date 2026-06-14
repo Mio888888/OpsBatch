@@ -1,5 +1,5 @@
-use std::fs;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use dashmap::DashMap;
@@ -186,7 +186,9 @@ pub async fn local_read_file(
         ));
     }
 
-    fs::read(file).map(|bytes| BASE64.encode(&bytes)).map_err(|e| format!("read failed: {}", e))
+    fs::read(file)
+        .map(|bytes| BASE64.encode(&bytes))
+        .map_err(|e| format!("read failed: {}", e))
 }
 
 #[tauri::command]

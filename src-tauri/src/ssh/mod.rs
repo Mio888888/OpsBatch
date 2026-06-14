@@ -19,7 +19,6 @@ use tokio::runtime::Runtime;
 
 use host_key::HostKeyVerifier;
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SshConfig {
     pub host: String,
@@ -364,8 +363,6 @@ impl client::Handler for ClientHandler {
     }
 }
 
-
-
 struct SharedSshConnectionInner {
     runtime: Arc<Runtime>,
     handle: tokio::sync::Mutex<client::Handle<ClientHandler>>,
@@ -412,11 +409,11 @@ impl SharedSshConnection {
     }
 
     pub fn is_closed(&self) -> bool {
-       match self.inner.handle.try_lock() {
-           Ok(handle) => handle.is_closed(),
-           Err(_) => false,
-       }
-   }
+        match self.inner.handle.try_lock() {
+            Ok(handle) => handle.is_closed(),
+            Err(_) => false,
+        }
+    }
 
     /// 检查连接是否已死（含锁超时场景）。
     /// 当 try_lock 拿不到锁时说明另一个操作正在长时间占用 handle，
@@ -430,7 +427,9 @@ impl SharedSshConnection {
                 match self.inner.handle.try_lock() {
                     Ok(handle) => handle.is_closed(),
                     Err(_) => {
-                        eprintln!("[SSH] is_dead: handle lock contention, treating as potentially dead");
+                        eprintln!(
+                            "[SSH] is_dead: handle lock contention, treating as potentially dead"
+                        );
                         false
                     }
                 }
@@ -650,7 +649,11 @@ fn connect_via_jump_handle_on_runtime(
 
     for (i, hop_config) in hops.iter().enumerate() {
         let is_target = i == hops.len() - 1;
-        let label = if is_target { "目标主机" } else { "跳板机" };
+        let label = if is_target {
+            "目标主机"
+        } else {
+            "跳板机"
+        };
         let hop = (*hop_config).clone();
 
         current_handle = runtime.block_on(async move {
@@ -682,8 +685,6 @@ fn connect_via_jump_handle_on_runtime(
 
     Ok(current_handle)
 }
-
-
 
 /// Authenticate an SSH handle using the given config.
 async fn authenticate_handle(
@@ -776,8 +777,6 @@ async fn read_command_output(
     })
 }
 
-
-
 pub struct PooledSftpSession {
     pub sftp: russh_sftp::client::SftpSession,
     pub lease: SharedSshChannelLease,
@@ -842,9 +841,7 @@ impl SshConnectionRegistry {
             app_handle: std::sync::OnceLock::new(),
             idle_timeout: Duration::from_secs(15 * 60),
             config_cache_ttl: Duration::from_secs(120),
-            shared_runtime: Arc::new(
-                Runtime::new().expect("shared tokio runtime init failed"),
-            ),
+            shared_runtime: Arc::new(Runtime::new().expect("shared tokio runtime init failed")),
         }
     }
 
@@ -857,9 +854,7 @@ impl SshConnectionRegistry {
             app_handle: std::sync::OnceLock::new(),
             idle_timeout: Duration::from_secs(15 * 60),
             config_cache_ttl,
-            shared_runtime: Arc::new(
-                Runtime::new().expect("shared tokio runtime init failed"),
-            ),
+            shared_runtime: Arc::new(Runtime::new().expect("shared tokio runtime init failed")),
         }
     }
 

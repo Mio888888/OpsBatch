@@ -1,10 +1,10 @@
 use crate::db::Database;
 use crate::security::clamp_rag_limit;
 use regex::Regex;
-use std::sync::LazyLock;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
 static WORD_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[a-zA-Z0-9]+").unwrap());
 static HEADING_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^(#{1,6})\s+(.+)$").unwrap());
@@ -21,7 +21,6 @@ fn tokenize(text: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let chars: Vec<char> = text.chars().collect();
     let mut i = 0;
-
 
     // Extract latin/digit words first
     for mat in WORD_RE.find_iter(text) {

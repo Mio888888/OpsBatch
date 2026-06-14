@@ -1,5 +1,5 @@
-use std::fs;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -690,7 +690,10 @@ fn download_file_blocking(
                 .map_err(|e| format!("write local: {}", e))?;
         }
 
-        local_file.flush().await.map_err(|e| format!("flush local: {}", e))?;
+        local_file
+            .flush()
+            .await
+            .map_err(|e| format!("flush local: {}", e))?;
         Ok(())
     });
 

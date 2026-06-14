@@ -85,7 +85,9 @@ fn upload_file_via_pool(
 
     let sftp_session = pool.open_sftp_session(host_id, config, timeout_secs)?;
     sftp_session.lease.block_on(async move {
-        sftp_session.sftp.write(remote_path, &data)
+        sftp_session
+            .sftp
+            .write(remote_path, &data)
             .await
             .map_err(|e| format!("write failed: {}", e))?;
 
@@ -113,13 +115,15 @@ fn download_file_via_pool(
 
     let sftp_session = pool.open_sftp_session(host_id, config, timeout_secs)?;
     sftp_session.lease.block_on(async {
-        let metadata = sftp_session.sftp
+        let metadata = sftp_session
+            .sftp
             .metadata(remote_path)
             .await
             .map_err(|e| format!("stat remote file failed: {}", e))?;
         let file_size = metadata.len();
 
-        let data = sftp_session.sftp
+        let data = sftp_session
+            .sftp
             .read(remote_path)
             .await
             .map_err(|e| format!("read failed: {}", e))?;
@@ -197,7 +201,14 @@ pub fn file_transfer(
             let resolved_remote = match remote_paths.as_ref().and_then(|m| m.get(&hid)) {
                 Some(p) => p.clone(),
                 None => {
-                    match resolve_remote_path_template(&pool, &hid, &remote_path, &host_name, &config, timeout) {
+                    match resolve_remote_path_template(
+                        &pool,
+                        &hid,
+                        &remote_path,
+                        &host_name,
+                        &config,
+                        timeout,
+                    ) {
                         Ok(p) => p,
                         Err(e) => {
                             let record = serde_json::json!({

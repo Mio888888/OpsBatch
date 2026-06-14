@@ -1110,3 +1110,101 @@
 [data-theme-tone="dark"] .rdp-ai-action-done {
   background: linear-gradient(135deg, rgba(53, 183, 121, 0.1), rgba(255, 255, 255, 0.03));
 }
+
+/* ---------------------------------------------------------------------------
+   文件拖拽上传 overlay
+   --------------------------------------------------------------------------- */
+.rdp-drop-zone {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(53, 183, 121, 0.08);
+  border: 3px dashed #35b779;
+  z-index: 5;
+  pointer-events: none;
+  animation: rdp-drop-fade-in 0.15s ease;
+}
+
+@keyframes rdp-drop-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.rdp-drop-zone-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 48px;
+  background: var(--color-surface);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(28, 40, 36, 0.12);
+  color: var(--color-text);
+}
+
+.rdp-drop-zone-inner svg {
+  width: 36px;
+  height: 36px;
+  color: #35b779;
+}
+
+.rdp-drop-zone-inner strong {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-bold);
+}
+
+.rdp-drop-zone-inner span {
+  font-size: var(--font-size-small);
+  color: var(--color-text-secondary);
+}
+
+[data-theme-tone="dark"] .rdp-drop-zone {
+  background: rgba(53, 183, 121, 0.1);
+  border-color: #2a9d63;
+}
+
+[data-theme-tone="dark"] .rdp-drop-zone-inner {
+  background: var(--color-settings-card-bg);
+}
+
+/* ---------------------------------------------------------------------------
+   文件传输 toast 通知
+   --------------------------------------------------------------------------- */
+.rdp-transfer-toast {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 80%;
+  padding: 8px 16px;
+  font-size: var(--font-size-small);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(28, 40, 36, 0.12);
+  z-index: 6;
+  pointer-events: none;
+  animation: rdp-toast-slide-up 0.2s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes rdp-toast-slide-up {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+[data-theme-tone="dark"] .rdp-transfer-toast {
+  background: var(--color-settings-card-bg);
+  border-color: var(--color-settings-border);
+}

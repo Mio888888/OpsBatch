@@ -1,5 +1,7 @@
 mod audio;
 mod clipboard;
+mod clipboard_files;
+mod file_transfer;
 mod config;
 mod dynamic_channels;
 mod egfx;
@@ -60,6 +62,7 @@ struct HostRdpFields {
 pub(super) enum RdpSessionCommand {
     Input(RdpInputEvent),
     Disconnect,
+    UploadFiles(Vec<String>, Option<(u16, u16)>),
 }
 
 struct RdpSessionHandle {
@@ -103,6 +106,7 @@ impl RdpManager {
             app,
             options,
             credentials,
+            command_tx.clone(),
             command_rx,
             ready_tx,
             frame_channel,
@@ -165,6 +169,15 @@ impl RdpManager {
         } else {
             Err(format!("RDP 会话不存在: {}", session_id))
         }
+    }
+
+    async fn upload_files(&self, session_id: &str, paths: Vec<String>, position: Option<(u16, u16)>) -> Result<(), String> {
+        self.sessions
+            .get(session_id)
+            .map(|entry| entry.sender.clone())
+            .ok_or_else(|| format!("RDP 会话不存在: {}", session_id))?
+            .send(RdpSessionCommand::UploadFiles(paths, position))
+            .map_err(|_| format!("RDP 会话已断开: {}", session_id))
     }
 }
 
@@ -246,6 +259,15 @@ pub async fn rdp_disconnect(
     session_id: String,
 ) -> Result<(), String> {
     manager.disconnect(&session_id).await
+}
+
+#[tauri::command]
+pub async fn rdp_upload_files(
+    manager: tauri::State<'_, RdpManager>,
+    session_id: String,
+    paths: Vec<String>, position: Option<(u16, u16)>,
+) -> Result<(), String> {
+    manager.upload_files(&session_id, paths, position).await
 }
 
 fn load_host_rdp_fields(app: &tauri::AppHandle, host_id: &str) -> Result<HostRdpFields, String> {

@@ -239,6 +239,7 @@ pub fn run() {
             commands::rdp::rdp_connect,
             commands::rdp::rdp_send_input,
             commands::rdp::rdp_disconnect,
+            commands::rdp::rdp_upload_files,
             commands::rdp::webrtc::rdp_webrtc_create_offer,
             commands::rdp::webrtc::rdp_webrtc_set_answer,
             commands::rdp::webrtc::rdp_webrtc_close,

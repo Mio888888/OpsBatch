@@ -22,6 +22,10 @@ use super::audio::{PcmAudioHandler, WebRtcAudioHandler};
 use super::clipboard::{
     text_clipboard_formats, ClipboardAction, ClipboardBridge, TextClipboardBackend,
 };
+use super::file_transfer::{
+    build_file_descriptors, collect_upload_files, read_upload_file_chunk, DownloadProgress,
+    FileTransferState,
+};
 use super::config::build_ironrdp_config;
 use super::dynamic_channels::{display_control_client, geometry_sink, input_sink};
 use super::egfx::RdpEgfxBridge;
@@ -48,12 +52,14 @@ struct ConnectedRdpSession {
     image: DecodedImage,
     input: InputDatabase,
     clipboard: Option<ClipboardBridge>,
+    command_tx: mpsc::UnboundedSender<RdpSessionCommand>,
     encoded_video_rx: Vec<mpsc::UnboundedReceiver<RdpEncodedVideoFrame>>,
     bitmap_rx: Vec<mpsc::UnboundedReceiver<RdpBitmapFrame>>,
     status_rx: Vec<mpsc::UnboundedReceiver<RdpStatusDetail>>,
     encoded_audio_rx: Option<mpsc::UnboundedReceiver<RdpEncodedAudioFrame>>,
     width: u16,
     height: u16,
+    file_transfer: Option<FileTransferState>,
 }
 
 struct ConnectorBundle {
@@ -143,6 +149,7 @@ pub(super) async fn run_rdp_session(
     app: tauri::AppHandle,
     options: RdpConnectionOptions,
     credentials: RdpCredentials,
+    command_tx: mpsc::UnboundedSender<RdpSessionCommand>,
     command_rx: mpsc::UnboundedReceiver<RdpSessionCommand>,
     ready: oneshot::Sender<Result<RdpConnectResponse, String>>,
     frame_channel: Channel<Response>,
@@ -161,7 +168,7 @@ pub(super) async fn run_rdp_session(
         Some(connecting_message.to_string()),
     );
 
-    let mut session = match connect_rdp_session(&options, &credentials).await {
+    let mut session = match connect_rdp_session(&options, &credentials, command_tx.clone()).await {
         Ok(session) => session,
         Err(error) => {
             eprintln!(
@@ -207,6 +214,7 @@ pub(super) async fn run_rdp_session(
 async fn connect_rdp_session(
     options: &RdpConnectionOptions,
     credentials: &RdpCredentials,
+    command_tx: mpsc::UnboundedSender<RdpSessionCommand>,
 ) -> Result<ConnectedRdpSession, String> {
     let addr = format!("{}:{}", options.host, options.port);
     let std_tcp = tokio::task::spawn_blocking({
@@ -230,6 +238,11 @@ async fn connect_rdp_session(
         .map_err(|e| format!("获取本地 RDP 地址失败: {e}"))?;
     let config = build_ironrdp_config(options, credentials)?;
     let clipboard = options.enable_clipboard.then(ClipboardBridge::new);
+    let download_dir = std::env::temp_dir().join("opsbatch-rdp-downloads");
+    let _ = std::fs::create_dir_all(&download_dir);
+    let file_transfer = options
+        .enable_clipboard
+        .then(|| FileTransferState::new(download_dir));
     let mut framed = TokioFramed::new(tcp);
     let ConnectorBundle {
         mut connector,
@@ -293,6 +306,8 @@ async fn connect_rdp_session(
         encoded_audio_rx,
         width,
         height,
+        file_transfer,
+        command_tx,
     })
 }
 
@@ -416,6 +431,10 @@ async fn run_active_session(
                             return Ok(());
                         }
                     }
+                    Some(RdpSessionCommand::UploadFiles(paths, position)) => {
+                        process_upload_files(session, paths, position);
+                        flush_clipboard_actions(app, session_id, session).await?;
+                    }
                     Some(RdpSessionCommand::Disconnect) => {
                         flush_pending_graphics_update(&frame_channel, session, &mut frame_pacer, &mut metrics)?;
                         return Ok(());
@@ -435,13 +454,15 @@ async fn run_active_session(
                 if !handle_stage_outputs(app, session_id, session, &frame_channel, &mut frame_pacer, &mut metrics, outputs).await? {
                     return Ok(());
                 }
-                flush_clipboard_actions(session).await?;
+                flush_clipboard_actions(app, session_id, session).await?;
             }
             _ = sleep_until_deadline(frame_deadline), if frame_deadline.is_some() => {
                 flush_due_graphics_update(&frame_channel, session, &mut frame_pacer, &mut metrics)?;
             }
             _ = clipboard_interval.tick(), if session.clipboard.is_some() => {
-                poll_local_clipboard(session).await?;
+                poll_local_clipboard(app, session_id, session).await?;
+                flush_clipboard_timeouts(session).await?;
+                try_trigger_auto_paste(session).await?;
             }
         }
         metrics.emit_if_due(app, session_id, tokio::time::Instant::now());
@@ -566,19 +587,28 @@ async fn sleep_until_deadline(deadline: Option<tokio::time::Instant>) {
     }
 }
 
-async fn poll_local_clipboard(session: &mut ConnectedRdpSession) -> Result<(), String> {
+async fn poll_local_clipboard(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    session: &mut ConnectedRdpSession,
+) -> Result<(), String> {
     if let Some(clipboard) = session.clipboard.clone() {
         clipboard.poll_local_clipboard();
     }
-    flush_clipboard_actions(session).await
+    flush_clipboard_actions(app, session_id, session).await
 }
 
-async fn flush_clipboard_actions(session: &mut ConnectedRdpSession) -> Result<(), String> {
-    let Some(clipboard) = session.clipboard.as_ref() else {
-        return Ok(());
+async fn flush_clipboard_actions(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    session: &mut ConnectedRdpSession,
+) -> Result<(), String> {
+    let actions = match session.clipboard.as_ref() {
+        Some(clipboard) => clipboard.drain_actions(),
+        None => return Ok(()),
     };
 
-    for action in clipboard.drain_actions() {
+    for action in actions {
         let messages = {
             let cliprdr = session
                 .active_stage
@@ -594,6 +624,81 @@ async fn flush_clipboard_actions(session: &mut ConnectedRdpSession) -> Result<()
                 ClipboardAction::SendTextResponse(response) => cliprdr
                     .submit_format_data(response)
                     .map_err(|e| format!("生成 RDP 剪贴板文本响应失败: {e}"))?,
+                ClipboardAction::InitiateFileCopy(descriptors) => cliprdr
+                    .initiate_file_copy(descriptors)
+                    .map_err(|e| format!("生成 RDP 文件剪贴板格式列表失败: {e}"))?,
+                ClipboardAction::AdvertiseLocalFiles(paths) => {
+                    let path_bufs: Vec<std::path::PathBuf> =
+                        paths.into_iter().map(std::path::PathBuf::from).collect();
+                    let upload_files = collect_upload_files(&path_bufs);
+                    if upload_files.is_empty() {
+                        continue;
+                    }
+                    let descriptors = build_file_descriptors(&upload_files);
+                    if let Some(ft) = session.file_transfer.as_mut() {
+                        ft.upload_files = upload_files;
+                    }
+                    cliprdr
+                        .initiate_file_copy(descriptors)
+                        .map_err(|e| format!("生成 RDP 本地文件剪贴板广告失败: {e}"))?
+                }
+                ClipboardAction::ServeFileContentsRequest(request) => {
+                    let upload_files = session
+                        .file_transfer
+                        .as_ref()
+                        .map(|ft| ft.upload_files.as_slice())
+                        .unwrap_or(&[]);
+                    let response = read_upload_file_chunk(&request, upload_files);
+                    cliprdr
+                        .submit_file_contents(response)
+                        .map_err(|e| format!("生成 RDP 文件内容响应失败: {e}"))?
+                }
+                ClipboardAction::RequestRemoteFileList(format) => cliprdr
+                    .initiate_paste(format)
+                    .map_err(|e| format!("生成 RDP 远程文件列表请求失败: {e}"))?,
+                ClipboardAction::StartFileDownload { files, clip_data_id } => {
+                    if let Some(ft) = session.file_transfer.as_mut() {
+                        ft.download_progress = Some(DownloadProgress::new(files, clip_data_id));
+                        if let Some(dp) = ft.download_progress.as_mut() {
+                            let nsid = &mut ft.next_stream_id;
+                            if let Some(req) = dp.build_size_request(nsid) {
+                                cliprdr
+                                    .request_file_contents(req)
+                                    .map_err(|e| format!("生成 RDP 文件下载请求失败: {e}"))?
+                            } else {
+                                Vec::new().into()
+                            }
+                        } else {
+                            Vec::new().into()
+                        }
+                    } else {
+                        Vec::new().into()
+                    }
+                }
+                ClipboardAction::ProcessFileContentsResponse(response) => {
+                    let Some(ft) = session.file_transfer.as_mut() else {
+                        continue;
+                    };
+                    let Some(dp) = ft.download_progress.as_mut() else {
+                        continue;
+                    };
+                    let ddir = ft.download_dir.clone();
+                    let nsid = &mut ft.next_stream_id;
+                    match dp.handle_response(&response, &ddir, nsid) {
+                        Ok(Some(req)) => cliprdr
+                            .request_file_contents(req)
+                            .map_err(|e| format!("生成 RDP 文件下载续传请求失败: {e}"))?,
+                        Ok(None) => {
+                            emit_download_complete(app, session_id, ft);
+                            Vec::new().into()
+                        }
+                        Err(e) => {
+                            eprintln!("[RDP][backend][{session_id}] file_download_error error={e}");
+                            emit_download_complete(app, session_id, ft);
+                            return Err(e);
+                        }
+                    }
+                }
             }
         };
 
@@ -609,6 +714,138 @@ async fn flush_clipboard_actions(session: &mut ConnectedRdpSession) -> Result<()
     }
 
     Ok(())
+}
+
+/// 处理前端拖拽上传：收集文件元数据，广告到远程剪贴板
+fn process_upload_files(
+    session: &mut ConnectedRdpSession,
+    paths: Vec<String>,
+    position: Option<(u16, u16)>,
+) {
+    let path_bufs: Vec<std::path::PathBuf> =
+        paths.into_iter().map(std::path::PathBuf::from).collect();
+    let upload_files = collect_upload_files(&path_bufs);
+    let descriptors = build_file_descriptors(&upload_files);
+    if let Some(ft) = session.file_transfer.as_mut() {
+        ft.upload_files = upload_files;
+        ft.auto_paste_position = position;
+    }
+    if let Some(clipboard) = session.clipboard.as_ref() {
+        clipboard.advertise_files(descriptors);
+    }
+}
+
+/// 定期清理 CLIPRDR 超时锁和过期请求
+async fn flush_clipboard_timeouts(session: &mut ConnectedRdpSession) -> Result<(), String> {
+    if session.clipboard.is_none() {
+        return Ok(());
+    }
+    let messages = {
+        let cliprdr = session
+            .active_stage
+            .get_svc_processor_mut::<CliprdrClient>()
+            .ok_or_else(|| "RDP 剪贴板通道不可用".to_string())?;
+        cliprdr
+            .drive_timeouts()
+            .map_err(|e| format!("清理 RDP 剪贴板超时失败: {e}"))?
+    };
+    let frame = session
+        .active_stage
+        .process_svc_processor_messages(messages)
+        .map_err(|e| format!("编码 RDP 剪贴板超时帧失败: {e}"))?;
+    session
+        .framed
+        .write_all(&frame)
+        .await
+        .map_err(|e| format!("发送 RDP 剪贴板超时帧失败: {e}"))?;
+    Ok(())
+}
+
+/// 下载完成时发送事件到前端
+/// 检查是否可以触发自动粘贴：远程已确认 FormatList + 有待粘贴位置
+async fn try_trigger_auto_paste(session: &mut ConnectedRdpSession) -> Result<(), String> {
+    // 检查条件：format list accepted + 有 position
+    let accepted = session
+        .clipboard
+        .as_ref()
+        .is_some_and(|cb| cb.take_format_list_accepted());
+
+    let position = session
+        .file_transfer
+        .as_ref()
+        .and_then(|ft| ft.auto_paste_position);
+
+    if !accepted || position.is_none() {
+        return Ok(());
+    }
+
+    let pos = position.unwrap();
+    // 清除待粘贴标记，防止重复触发
+    if let Some(ft) = session.file_transfer.as_mut() {
+        ft.auto_paste_position = None;
+    }
+
+    // 通过 command channel 排定时输入事件：先点击定位，再 Ctrl+V
+    let tx = session.command_tx.clone();
+    tokio::spawn(async move {
+        // 移动到释放位置
+        let _ = tx.send(RdpSessionCommand::Input(
+            super::types::RdpInputEvent::MouseMove { x: pos.0, y: pos.1 },
+        ));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        // 左键点击：让该位置窗口获得焦点
+        let _ = tx.send(RdpSessionCommand::Input(
+            super::types::RdpInputEvent::MouseButton {
+                x: pos.0, y: pos.1, button: 0, down: true,
+            },
+        ));
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        let _ = tx.send(RdpSessionCommand::Input(
+            super::types::RdpInputEvent::MouseButton {
+                x: pos.0, y: pos.1, button: 0, down: false,
+            },
+        ));
+        // 等待窗口焦点切换完成
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        // Ctrl+V
+        let _ = tx.send(RdpSessionCommand::Input(
+            super::types::RdpInputEvent::KeyScancode { code: 0x1d, extended: false, down: true },
+        ));
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        let _ = tx.send(RdpSessionCommand::Input(
+            super::types::RdpInputEvent::KeyScancode { code: 0x2f, extended: false, down: true },
+        ));
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        let _ = tx.send(RdpSessionCommand::Input(
+            super::types::RdpInputEvent::KeyScancode { code: 0x2f, extended: false, down: false },
+        ));
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        let _ = tx.send(RdpSessionCommand::Input(
+            super::types::RdpInputEvent::KeyScancode { code: 0x1d, extended: false, down: false },
+        ));
+    });
+
+    Ok(())
+}
+
+fn emit_download_complete(
+    app: &tauri::AppHandle,
+    session_id: &str,
+    ft: &FileTransferState,
+) {
+    let Some(dp) = &ft.download_progress else {
+        return;
+    };
+    if !dp.is_finished() {
+        return;
+    }
+    let payload = serde_json::json!({
+        "sessionId": session_id,
+        "completed": dp.completed.clone(),
+        "failed": dp.failed.clone(),
+        "downloadDir": ft.download_dir.to_string_lossy(),
+    });
+    let _ = app.emit(&format!("rdp-file-transfer-{session_id}"), payload);
 }
 
 async fn process_input_event(

@@ -56,6 +56,7 @@ r2d2_sqlite = "0.24"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 security-framework = "3"
+objc = "0.2"
 
 [patch.crates-io]
 ironrdp-egfx = { path = "vendor/ironrdp-egfx-0.1.0" }

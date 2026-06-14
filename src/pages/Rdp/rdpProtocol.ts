@@ -459,6 +459,16 @@ export async function disconnectRdpSession(sessionId: string) {
   }
 }
 
+export async function uploadFilesToRdp(
+  sessionId: string,
+  paths: string[],
+  position?: { x: number; y: number } | null,
+): Promise<void> {
+  // 后端 Rust 元组 (u16, u16) 需要 JSON 数组 [x, y]，不是对象
+  const posTuple = position ? [position.x, position.y] : null;
+  await invoke('rdp_upload_files', { sessionId, paths, position: posTuple });
+}
+
 export async function closeRdpWebRtcSession(sessionId: string) {
   try {
     await invoke('rdp_webrtc_close', { sessionId });

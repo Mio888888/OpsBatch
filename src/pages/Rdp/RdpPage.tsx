@@ -2,12 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, WheelEvent as ReactWheelEvent } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { Button, Empty, Spin } from '../../components/ui';
-import { CloseOutlined, ReloadOutlined } from '../../components/ui/icons';
+import { CloseOutlined, ReloadOutlined, UploadOutlined } from '../../components/ui/icons';
 import WindowControls from '../../components/WindowControls';
 import { useAssetsStore } from '../../stores/assets';
 import { useTranslation } from '../../i18n';
-import { clamp, getOpenHostRequest, getRdpKeyboardInputEvents, getRdpOverlayText, type OpenHostRequest } from './rdpProtocol';
+import { clamp, getOpenHostRequest, getRdpKeyboardInputEvents, getRdpOverlayText, uploadFilesToRdp, type OpenHostRequest } from './rdpProtocol';
 import { useRdpConnection } from './useRdpConnection';
 import RdpAiPanel from '../../components/RdpAiPanel';
 import { executeRdpOperations } from '../../utils/rdpAgentExecutor';
@@ -41,6 +43,8 @@ export default function RdpPage() {
   }, [hosts, queryHostId, stateHostRequest]);
   const [connectNonce, setConnectNonce] = useState(0);
   const [aiPanelOpen, setAiPanelOpen] = useState(true);
+  const [isDragOver, setIsDragOver] = useState(false);
+  const [transferToast, setTransferToast] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
@@ -118,6 +122,92 @@ export default function RdpPage() {
       void loadHosts();
     }
   }, [hosts.length, loadHosts, queryHostId, stateHostRequest]);
+
+  // ===== 文件拖拽上传 =====
+  useEffect(() => {
+    if (!rdpSessionId) return;
+
+    let dragUnlisten: UnlistenFn | undefined;
+    let transferUnlisten: UnlistenFn | undefined;
+
+    const setup = async () => {
+      dragUnlisten = await getCurrentWebview().onDragDropEvent((event) => {
+        const payload = event.payload as { type: string; paths?: string[]; position?: { x: number; y: number } | null };
+        if (payload.type === 'enter' || payload.type === 'over') {
+          if (payload.paths && payload.paths.length > 0) {
+            setIsDragOver(true);
+          }
+        } else if (payload.type === 'leave') {
+          setIsDragOver(false);
+        } else if (payload.type === 'drop') {
+          setIsDragOver(false);
+          const paths = payload.paths ?? [];
+          if (paths.length === 0 || !rdpSessionId) return;
+          void handleFileDrop(paths, payload.position ?? null);
+        }
+      });
+
+      transferUnlisten = await listen<{
+        completed: string[];
+        failed: string[];
+        downloadDir: string;
+      }>(`rdp-file-transfer-${rdpSessionId}`, (event) => {
+        const { completed, failed, downloadDir } = event.payload;
+        const parts: string[] = [];
+        if (completed.length > 0) {
+          parts.push(`已下载 ${completed.length} 个文件到 ${downloadDir}`);
+        }
+        if (failed.length > 0) {
+          parts.push(`${failed.length} 个文件下载失败`);
+        }
+        if (parts.length > 0) {
+          setTransferToast(parts.join('，'));
+          setTimeout(() => setTransferToast(null), 5000);
+        }
+      });
+    };
+
+    void setup();
+
+    return () => {
+      dragUnlisten?.();
+      transferUnlisten?.();
+    };
+  }, [rdpSessionId]);
+
+  const handleFileDrop = useCallback(
+    async (paths: string[], position: { x: number; y: number } | null) => {
+      if (!rdpSessionId) return;
+      setTransferToast(`正在上传 ${paths.length} 个文件...`);
+      try {
+        // 将 Tauri 物理像素坐标映射为远程桌面坐标
+        let remotePos: { x: number; y: number } | null = null;
+        const target = renderMode === 'h264Direct' ? videoRef.current : canvasRef.current;
+        if (position && target) {
+          const dpr = window.devicePixelRatio || 1;
+          const cssX = position.x / dpr;
+          const cssY = position.y / dpr;
+          const rect = target.getBoundingClientRect();
+          const remoteWidth = connection?.width ?? 0;
+          const remoteHeight = connection?.height ?? 0;
+          if (rect.width > 0 && rect.height > 0 && remoteWidth > 0 && remoteHeight > 0) {
+            remotePos = {
+              x: clamp(Math.floor((cssX - rect.left) * (remoteWidth / rect.width)), 0, remoteWidth - 1),
+              y: clamp(Math.floor((cssY - rect.top) * (remoteHeight / rect.height)), 0, remoteHeight - 1),
+            };
+          }
+        }
+        // 传给后端：后端等 CLIPRDR 确认后自动点击定位 + Ctrl+V
+        await uploadFilesToRdp(rdpSessionId, paths, remotePos);
+        setTransferToast(`正在粘贴 ${paths.length} 个文件到远程桌面...`);
+        setTimeout(() => setTransferToast(null), 4000);
+      } catch (error) {
+        setTransferToast(`上传失败: ${error instanceof Error ? error.message : String(error)}`);
+        setTimeout(() => setTransferToast(null), 5000);
+      }
+    },
+    [rdpSessionId, renderMode, connection?.width, connection?.height],
+  );
 
   const getRemotePoint = useCallback((event: { clientX: number; clientY: number }) => {
     const target = renderMode === 'h264Direct' ? videoRef.current : canvasRef.current;
@@ -338,6 +428,20 @@ export default function RdpPage() {
             <Button type="primary" icon={<ReloadOutlined />} onClick={() => setConnectNonce((value) => value + 1)}>
               {t('rdp.reconnect')}
             </Button>
+          </div>
+        )}
+        {isDragOver && (
+          <div className="rdp-drop-zone">
+            <div className="rdp-drop-zone-inner">
+              <UploadOutlined />
+              <strong>松开以上传文件到远程桌面</strong>
+              <span>文件将通过剪贴板粘贴到远程</span>
+            </div>
+          </div>
+        )}
+        {transferToast && (
+          <div className="rdp-transfer-toast">
+            {transferToast}
           </div>
         )}
       </div>

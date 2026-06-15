@@ -9,6 +9,9 @@ edition = "2021"
 name = "opsbatch_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(feature, values("cargo-clippy"))'] }
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

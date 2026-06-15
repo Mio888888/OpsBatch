@@ -17,6 +17,7 @@ export interface HostRdpSettingsFormValues {
   vncPort?: number;
   vncUsername?: string;
   vncPassword?: string;
+  vncAuthMethod?: 'vnc' | 'ard';
   vncViewOnly?: boolean;
   vncShared?: boolean;
 }
@@ -41,6 +42,7 @@ export function buildRdpSettings(
     if (values.vncPassword?.trim()) {
       settings.vncPassword = values.vncPassword.trim();
     }
+    settings.vncAuthMethod = values.vncAuthMethod === 'ard' ? 'ard' : 'vnc';
     settings.vncViewOnly = values.vncViewOnly ?? false;
     settings.vncShared = values.vncShared ?? true;
     return settings;

@@ -53,6 +53,7 @@ export interface HostFormValues {
   vncPort?: number;
   vncUsername?: string;
   vncPassword?: string;
+  vncAuthMethod?: 'vnc' | 'ard';
   vncViewOnly?: boolean;
   vncShared?: boolean;
   proxyEnabled?: boolean;

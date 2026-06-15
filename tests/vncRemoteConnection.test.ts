@@ -11,24 +11,33 @@ import {
   vncPresentationSize,
   vncResolutionLimit,
 } from '../src/pages/Vnc/vncProtocol.ts';
+import {
+  createVncClipboardBridge,
+  describeVncClipboardCapabilities,
+  isSyncableVncClipboardText,
+} from '../src/pages/Vnc/vncClipboard.ts';
 import type { Host } from '../src/types/index.ts';
 
 function readVncBackendSource() {
   const rootSource = readFileSync('src-tauri/src/commands/vnc.rs', 'utf8');
+  const clipboardSource = existsSync('src-tauri/src/commands/clipboard.rs')
+    ? readFileSync('src-tauri/src/commands/clipboard.rs', 'utf8')
+    : '';
   const moduleSources = existsSync('src-tauri/src/commands/vnc')
     ? readdirSync('src-tauri/src/commands/vnc')
       .filter((entry) => entry.endsWith('.rs'))
       .map((entry) => readFileSync(`src-tauri/src/commands/vnc/${entry}`, 'utf8'))
       .join('\n')
     : '';
-  return `${rootSource}\n${moduleSources}`;
+  return `${rootSource}\n${clipboardSource}\n${moduleSources}`;
 }
 
 function readVncFrontendSource() {
   return [
     'src/pages/Vnc/VncPage.tsx',
+    'src/pages/Vnc/vncClipboard.ts',
     'src/pages/Vnc/vncProtocol.ts',
-  ].map((path) => readFileSync(path, 'utf8')).join('\n');
+  ].filter((path) => existsSync(path)).map((path) => readFileSync(path, 'utf8')).join('\n');
 }
 
 test('builds VNC settings when VNC is selected as the host system', () => {
@@ -36,6 +45,7 @@ test('builds VNC settings when VNC is selected as the host system', () => {
     vncPort: 5901,
     vncUsername: '  alice  ',
     vncPassword: '  secret  ',
+    vncAuthMethod: 'ard',
     vncViewOnly: true,
     vncShared: false,
   }, 'vnc');
@@ -45,8 +55,23 @@ test('builds VNC settings when VNC is selected as the host system', () => {
     vncPort: 5901,
     vncUsername: 'alice',
     vncPassword: 'secret',
+    vncAuthMethod: 'ard',
     vncViewOnly: true,
     vncShared: false,
+  });
+});
+
+test('defaults VNC authentication to standard VNC Auth', () => {
+  const settings = buildRdpSettings({
+    vncPort: 5901,
+  }, 'vnc');
+
+  assert.deepEqual(settings, {
+    protocol: 'vnc',
+    vncPort: 5901,
+    vncAuthMethod: 'vnc',
+    vncViewOnly: false,
+    vncShared: true,
   });
 });
 
@@ -76,6 +101,7 @@ test('selects VNC from the system field instead of a remote access field', () =>
   assert.match(source, /\{\s*value:\s*'vnc',\s*label:\s*t\('assets\.vncHost'\)\s*\}/);
   assert.doesNotMatch(source, /remoteDesktopProtocol/);
   assert.match(source, /vncPort/);
+  assert.match(source, /vncAuthMethod/);
   assert.match(source, /kind:\s*'vnc'/);
 });
 
@@ -141,8 +167,9 @@ test('backend exposes a local WebSocket TCP bridge for noVNC instead of decoding
   assert.match(source, /VNC_BRIDGE_READ_BUFFER_BYTES:\s*usize\s*=\s*128\s*\*\s*1024/);
   assert.match(source, /websocket_url/);
   assert.match(source, /passwordSet=/);
+  assert.match(source, /authMethod=/);
   assert.match(source, /rfb security types/);
-  assert.match(source, /prefer_vnc_auth_security_types/);
+  assert.match(source, /order_vnc_security_types/);
   assert.doesNotMatch(source, /tauri::ipc::\{Channel,\s*Response\}/);
   assert.doesNotMatch(source, /Channel<Response>/);
   assert.doesNotMatch(source, /build_vnc_frame_message/);
@@ -191,6 +218,122 @@ test('frontend uses noVNC RFB directly and does not keep the legacy pixel pipeli
   assert.doesNotMatch(source, /send_vnc_pointer_event/);
   assert.doesNotMatch(source, /send_vnc_key_event/);
   assert.doesNotMatch(source, /texSubImage2D/);
+});
+
+test('VNC clipboard sync uses noVNC events with local clipboard commands', () => {
+  const frontendSource = readVncFrontendSource();
+  const backendSource = readVncBackendSource();
+  const libSource = readFileSync('src-tauri/src/lib.rs', 'utf8');
+
+  assert.match(frontendSource, /createVncClipboardBridge/);
+  assert.match(frontendSource, /clipboardPasteFrom/);
+  assert.match(frontendSource, /read_local_clipboard_text/);
+  assert.match(frontendSource, /write_local_clipboard_text/);
+  assert.match(frontendSource, /addEventListener\('clipboard'/);
+  assert.match(frontendSource, /clipboardBridge\?\.dispose\(\)/);
+  assert.match(backendSource, /read_local_clipboard_text/);
+  assert.match(backendSource, /write_local_clipboard_text/);
+  assert.match(libSource, /commands::clipboard::read_local_clipboard_text/);
+  assert.match(libSource, /commands::clipboard::write_local_clipboard_text/);
+});
+
+test('VNC clipboard bridge forwards remote text and deduplicates local polling', async () => {
+  const listeners = new Map<string, Set<(event: Event) => void>>();
+  const rfb = {
+    viewOnly: false,
+    clipboardPasteFrom(text: string) {
+      forwarded.push(text);
+    },
+    addEventListener(type: string, listener: (event: Event) => void) {
+      if (!listeners.has(type)) listeners.set(type, new Set());
+      listeners.get(type)?.add(listener);
+    },
+    removeEventListener(type: string, listener: (event: Event) => void) {
+      listeners.get(type)?.delete(listener);
+    },
+  };
+  const forwarded: string[] = [];
+  const localWrites: string[] = [];
+  let localText = 'alpha';
+  let intervalHandler: (() => void) | undefined;
+
+  const bridge = createVncClipboardBridge(rfb, {
+    hostId: 'host-1',
+    sessionId: 'vnc-1',
+    readLocalClipboardText: async () => localText,
+    writeLocalClipboardText: async (text) => {
+      localWrites.push(text);
+      localText = text;
+    },
+    setIntervalFn: (handler) => {
+      intervalHandler = handler;
+      return 1 as unknown as number;
+    },
+    clearIntervalFn: () => undefined,
+  });
+
+  await bridge.syncLocalToRemote();
+  assert.deepEqual(forwarded, ['alpha']);
+
+  localText = 'alpha';
+  intervalHandler?.();
+  await Promise.resolve();
+  assert.deepEqual(forwarded, ['alpha']);
+
+  listeners.get('clipboard')?.forEach((listener) => {
+    listener(new CustomEvent('clipboard', { detail: { text: 'beta' } }));
+  });
+  await Promise.resolve();
+  assert.deepEqual(localWrites, ['beta']);
+  assert.equal(isSyncableVncClipboardText('ok'), true);
+
+  bridge.dispose();
+});
+
+test('VNC clipboard bridge does not mark local text synced before remote is ready', async () => {
+  let remoteReady = false;
+  const forwarded: string[] = [];
+  const rfb = {
+    viewOnly: false,
+    clipboardPasteFrom(text: string) {
+      forwarded.push(text);
+    },
+    addEventListener() {},
+    removeEventListener() {},
+  };
+
+  const bridge = createVncClipboardBridge(rfb, {
+    hostId: 'host-1',
+    sessionId: 'vnc-1',
+    readLocalClipboardText: async () => 'alpha',
+    writeLocalClipboardText: async () => undefined,
+    canSendLocalClipboard: () => remoteReady,
+    setIntervalFn: () => 1 as unknown as number,
+    clearIntervalFn: () => undefined,
+  });
+
+  await bridge.syncLocalToRemote();
+  assert.deepEqual(forwarded, []);
+
+  remoteReady = true;
+  await bridge.syncLocalToRemote();
+  assert.deepEqual(forwarded, ['alpha']);
+
+  bridge.dispose();
+});
+
+test('VNC clipboard diagnostics describe noVNC extended clipboard capabilities', () => {
+  assert.equal(
+    describeVncClipboardCapabilities({
+      _clipboardServerCapabilitiesFormats: { 1: true },
+      _clipboardServerCapabilitiesActions: {
+        [1 << 25]: true,
+        [1 << 27]: true,
+        [1 << 28]: false,
+      },
+    }),
+    'extendedText=true request=true notify=true provide=false',
+  );
 });
 
 test('frontend requests 1920x1080 VNC sessions and scales without scrollbars', () => {

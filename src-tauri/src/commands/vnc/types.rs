@@ -1,7 +1,55 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use std::fmt;
 use tokio::sync::oneshot;
 
 pub const DEFAULT_VNC_PORT: u16 = 5900;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum VncAuthMethod {
+    #[serde(rename = "vnc")]
+    VncAuth,
+    #[serde(rename = "ard")]
+    AppleRemoteDesktop,
+}
+
+impl VncAuthMethod {
+    pub fn from_value(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "ard" | "appleRemoteDesktop" | "apple_remote_desktop" => Self::AppleRemoteDesktop,
+            _ => Self::VncAuth,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::VncAuth => "vnc",
+            Self::AppleRemoteDesktop => "ard",
+        }
+    }
+}
+
+impl Default for VncAuthMethod {
+    fn default() -> Self {
+        Self::VncAuth
+    }
+}
+
+impl<'de> Deserialize<'de> for VncAuthMethod {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = Option::<String>::deserialize(deserializer)?;
+        Ok(value.as_deref().map(Self::from_value).unwrap_or_default())
+    }
+}
+
+impl fmt::Display for VncAuthMethod {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
 
 pub struct VncBridgeSession {
     pub stop: Option<oneshot::Sender<()>>,
@@ -20,6 +68,8 @@ pub struct VncSettings {
     pub vnc_username: Option<String>,
     #[serde(default, rename = "vncPassword")]
     pub vnc_password: Option<String>,
+    #[serde(default, rename = "vncAuthMethod")]
+    pub vnc_auth_method: VncAuthMethod,
     #[serde(default, rename = "vncShared")]
     pub vnc_shared: Option<bool>,
     #[serde(default, rename = "vncViewOnly")]
@@ -32,6 +82,7 @@ pub struct VncHostConfig {
     pub port: u16,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub auth_method: VncAuthMethod,
     pub options: VncSessionOptions,
     pub proxy: Option<crate::ssh::ProxySettings>,
 }
@@ -46,6 +97,8 @@ pub struct StartVncSessionRequest {
     pub username: Option<String>,
     pub secret_owner_id: Option<String>,
     pub password: Option<String>,
+    #[serde(default)]
+    pub auth_method: VncAuthMethod,
     pub options: Option<VncSessionOptions>,
 }
 
@@ -66,6 +119,7 @@ pub struct VncConnectResponse {
     pub websocket_url: String,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub auth_method: VncAuthMethod,
     pub shared: bool,
     pub view_only: bool,
 }
@@ -79,6 +133,7 @@ pub struct VncSessionStarted {
     pub websocket_url: String,
     pub username: Option<String>,
     pub password: Option<String>,
+    pub auth_method: VncAuthMethod,
     pub shared: bool,
     pub view_only: bool,
 }
@@ -135,6 +190,7 @@ impl StartVncSessionRequest {
             username: config.username,
             secret_owner_id: None,
             password: config.password,
+            auth_method: config.auth_method,
             options: Some(config.options),
         }
     }

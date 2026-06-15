@@ -15,6 +15,7 @@ import {
   type VncSessionStatus,
   vncDefaultResolution,
 } from './vncProtocol';
+import { createVncClipboardBridge } from './vncClipboard';
 
 interface VncConnectResponse {
   sessionId: string;
@@ -22,11 +23,13 @@ interface VncConnectResponse {
   websocketUrl: string;
   username?: string | null;
   password?: string | null;
+  authMethod?: 'vnc' | 'ard';
   shared: boolean;
   viewOnly: boolean;
 }
 
 type RfbEvent<TDetail = unknown> = Event & { detail?: TDetail };
+type VncClipboardBridgeHandle = ReturnType<typeof createVncClipboardBridge>;
 
 const VNC_INTERACTIVE_QUALITY_LEVEL = 2;
 const VNC_INTERACTIVE_COMPRESSION_LEVEL = 2;
@@ -402,6 +405,7 @@ export default function VncPage() {
     let disposePerformanceDiagnostics: (() => void) | undefined;
     let disposeInputDiagnostics: (() => void) | undefined;
     let disposeEncodingPreferences: (() => void) | undefined;
+    let clipboardBridge: VncClipboardBridgeHandle | undefined;
     const connectWatchdog = window.setTimeout(() => {
       if (disposed || sessionIdRef.current !== nextSessionId || statusRef.current !== 'connecting') return;
       disposed = true;
@@ -427,7 +431,7 @@ export default function VncPage() {
         sessionId: nextSessionId,
       });
       writeVncDiagnosticLog(
-        `invoke vnc_connect completed hostId=${activeHostId} sessionId=${nextSessionId} websocketUrl=${response.websocketUrl} usernameSet=${Boolean(response.username)} passwordSet=${Boolean(response.password)} shared=${response.shared} viewOnly=${response.viewOnly}`,
+        `invoke vnc_connect completed hostId=${activeHostId} sessionId=${nextSessionId} websocketUrl=${response.websocketUrl} usernameSet=${Boolean(response.username)} passwordSet=${Boolean(response.password)} authMethod=${response.authMethod ?? 'vnc'} shared=${response.shared} viewOnly=${response.viewOnly}`,
       );
       if (disposed) {
         closeVncSession(nextSessionId, false);
@@ -451,6 +455,16 @@ export default function VncPage() {
       rfb.compressionLevel = VNC_INTERACTIVE_COMPRESSION_LEVEL;
       rfb.background = '#101417';
       rfb.showDotCursor = true;
+      const readLocalClipboardText = () => invoke<string | null>('read_local_clipboard_text');
+      const writeLocalClipboardText = (text: string) => invoke<void>('write_local_clipboard_text', { text });
+      clipboardBridge = createVncClipboardBridge(rfb, {
+        hostId: activeHostId,
+        sessionId: nextSessionId,
+        readLocalClipboardText,
+        writeLocalClipboardText,
+        canSendLocalClipboard: () => statusRef.current === 'connected',
+        writeDiagnosticLog: writeVncDiagnosticLog,
+      });
       writeVncDiagnosticLog(
         `novnc preferences hostId=${activeHostId} sessionId=${nextSessionId} cursor=local-dot encodingPreference=copyrect,rre,hextile,zrle,tight,tightpng,jpeg,zlib,raw`,
       );
@@ -466,6 +480,7 @@ export default function VncPage() {
         updateStatus('connected');
         setStatusMessage(tTextRef.current('vnc.state.connected'));
         rfb.focus({ preventScroll: true });
+        void clipboardBridge?.syncLocalToRemote();
       });
       rfb.addEventListener('disconnect', (event: Event) => {
         const clean = (event as RfbEvent<{ clean?: boolean }>).detail?.clean;
@@ -506,12 +521,6 @@ export default function VncPage() {
         writeVncDiagnosticLog(`novnc desktopname hostId=${activeHostId} sessionId=${nextSessionId} name=${name} ${describeRfbRuntime(rfb)}`);
         if (name) setStatusMessage(name);
       });
-      rfb.addEventListener('clipboard', (event: Event) => {
-        const text = (event as RfbEvent<{ text?: string }>).detail?.text ?? '';
-        writeVncDiagnosticLog(
-          `novnc clipboard hostId=${activeHostId} sessionId=${nextSessionId} chars=${text.length}`,
-        );
-      });
     };
 
     void start().catch((error: unknown) => {
@@ -542,6 +551,7 @@ export default function VncPage() {
     return () => {
       writeVncDiagnosticLog(`effect cleanup hostId=${activeHostId} sessionId=${nextSessionId} status=${statusRef.current}`);
       disposed = true;
+      clipboardBridge?.dispose();
       disposePerformanceDiagnostics?.();
       disposeInputDiagnostics?.();
       disposeEncodingPreferences?.();

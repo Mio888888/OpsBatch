@@ -10,6 +10,7 @@ export interface RdpSettings {
   vncPort?: number;
   vncUsername?: string;
   vncPassword?: string;
+  vncAuthMethod?: 'vnc' | 'ard';
   vncViewOnly?: boolean;
   vncShared?: boolean;
 }

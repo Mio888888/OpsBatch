@@ -1,6 +1,8 @@
 use rusqlite::params;
 
-use super::types::{VncHostConfig, VncSessionOptions, VncSettings, DEFAULT_VNC_PORT};
+use super::types::{
+    VncAuthMethod, VncHostConfig, VncSessionOptions, VncSettings, DEFAULT_VNC_PORT,
+};
 use crate::db::Database;
 
 pub fn parse_vnc_settings(value: &str) -> VncSettings {
@@ -9,6 +11,7 @@ pub fn parse_vnc_settings(value: &str) -> VncSettings {
         vnc_port: None,
         vnc_username: None,
         vnc_password: None,
+        vnc_auth_method: VncAuthMethod::default(),
         vnc_shared: None,
         vnc_view_only: None,
     })
@@ -42,6 +45,7 @@ pub fn load_vnc_host_config(db: &Database, host_id: &str) -> Result<VncHostConfi
         port: vnc_port_from_settings(&rdp_settings, port),
         username: settings.vnc_username.and_then(non_empty_trimmed),
         password: settings.vnc_password.and_then(non_empty_trimmed),
+        auth_method: settings.vnc_auth_method,
         options: VncSessionOptions {
             shared_session: settings.vnc_shared.unwrap_or(true),
             view_only: settings.vnc_view_only.unwrap_or(false),

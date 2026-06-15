@@ -233,6 +233,9 @@ pub fn run() {
             commands::settings::save_general_settings,
             commands::settings::list_system_font_families,
             commands::settings::export_database_backup,
+            // Clipboard
+            commands::clipboard::read_local_clipboard_text,
+            commands::clipboard::write_local_clipboard_text,
             // System
             commands::system::get_local_performance_snapshot,
             // RDP

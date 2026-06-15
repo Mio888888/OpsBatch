@@ -44,13 +44,14 @@ pub fn vnc_connect(
     append_vnc_diagnostic_log(
         &app,
         &format!(
-            "config loaded hostId={} sessionId={} host={} port={} usernameSet={} passwordSet={} shared={} viewOnly={} proxySet={}",
+            "config loaded hostId={} sessionId={} host={} port={} usernameSet={} passwordSet={} authMethod={} shared={} viewOnly={} proxySet={}",
             host_id,
             session_id,
             config.host,
             config.port,
             config.username.is_some(),
             config.password.as_ref().is_some_and(|value| !value.is_empty()),
+            config.auth_method,
             config.options.shared_session,
             config.options.view_only,
             config.proxy.is_some(),
@@ -72,6 +73,7 @@ pub fn vnc_connect(
         websocket_url: started.websocket_url,
         username: started.username,
         password: started.password,
+        auth_method: started.auth_method,
         shared: started.shared,
         view_only: started.view_only,
     })
@@ -179,7 +181,7 @@ pub fn send_vnc_ctrl_alt_delete(
 
 #[cfg(test)]
 mod tests {
-    use super::types::DEFAULT_VNC_PORT;
+    use super::types::{VncAuthMethod, DEFAULT_VNC_PORT};
     use super::*;
 
     #[test]
@@ -209,11 +211,24 @@ mod tests {
     }
 
     #[test]
+    fn vnc_auth_method_defaults_to_vnc_auth_and_accepts_ard() {
+        let default_settings = parse_vnc_settings(r#"{"protocol":"vnc"}"#);
+        let ard_settings = parse_vnc_settings(r#"{"protocol":"vnc","vncAuthMethod":"ard"}"#);
+
+        assert_eq!(default_settings.vnc_auth_method, VncAuthMethod::VncAuth);
+        assert_eq!(
+            ard_settings.vnc_auth_method,
+            VncAuthMethod::AppleRemoteDesktop
+        );
+    }
+
+    #[test]
     fn start_request_accepts_optional_username() {
-        let json = r#"{"sessionId":"vnc-1","host":"mac.local","username":"bob","password":"pw"}"#;
+        let json = r#"{"sessionId":"vnc-1","host":"mac.local","username":"bob","password":"pw","authMethod":"ard"}"#;
         let request: StartVncSessionRequest =
             serde_json::from_str(json).expect("request deserializes");
         assert_eq!(request.username.as_deref(), Some("bob"));
+        assert_eq!(request.auth_method, VncAuthMethod::AppleRemoteDesktop);
     }
 
     #[test]
@@ -222,5 +237,6 @@ mod tests {
         let request: StartVncSessionRequest =
             serde_json::from_str(json).expect("request deserializes");
         assert!(request.username.is_none());
+        assert_eq!(request.auth_method, VncAuthMethod::VncAuth);
     }
 }

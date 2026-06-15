@@ -373,6 +373,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       vncPort: DEFAULT_VNC_PORT,
       vncUsername: '',
       vncPassword: '',
+      vncAuthMethod: 'vnc',
       vncViewOnly: false,
       vncShared: true,
       proxyEnabled: false,
@@ -419,6 +420,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       vncPort: host.rdpSettings?.vncPort ?? DEFAULT_VNC_PORT,
       vncUsername: host.rdpSettings?.vncUsername,
       vncPassword: host.rdpSettings?.vncPassword,
+      vncAuthMethod: host.rdpSettings?.vncAuthMethod ?? 'vnc',
       vncViewOnly: host.rdpSettings?.vncViewOnly,
       vncShared: host.rdpSettings?.vncShared ?? true,
       proxyEnabled: host.proxySettings?.enabled,
@@ -468,6 +470,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       hostForm.setFieldValue('rdpDomain', '');
       hostForm.setFieldValue('rdpDiskPath', '');
       if (!hostForm.getFieldValue('vncPort')) hostForm.setFieldValue('vncPort', DEFAULT_VNC_PORT);
+      if (!hostForm.getFieldValue('vncAuthMethod')) hostForm.setFieldValue('vncAuthMethod', 'vnc');
       if (hostForm.getFieldValue('vncShared') === undefined) hostForm.setFieldValue('vncShared', true);
       if (hostForm.getFieldValue('vncViewOnly') === undefined) hostForm.setFieldValue('vncViewOnly', false);
       setHostModalTab('basic');
@@ -1156,6 +1159,12 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                         <div className="asset-host-tab-pane">
                           <div className="asset-host-form-grid asset-host-form-grid-vnc">
                             <Form.Item name="vncPort" label={t('assets.vncPort')}><InputNumber min={1} max={65535} /></Form.Item>
+                            <Form.Item name="vncAuthMethod" label={t('assets.vncAuthMethod')}>
+                              <Select options={[
+                                { value: 'vnc', label: t('assets.vncAuthMethodVnc') },
+                                { value: 'ard', label: t('assets.vncAuthMethodArd') },
+                              ]} />
+                            </Form.Item>
                             <Form.Item name="vncUsername" label={t('assets.vncUsername')}><Input placeholder={tText('assets.vncUsernamePlaceholder')} /></Form.Item>
                             <Form.Item name="vncPassword" label={t('assets.vncPassword')}><Input.Password placeholder={tText('assets.vncPasswordPlaceholder')} /></Form.Item>
                             <div className="asset-host-vnc-options">

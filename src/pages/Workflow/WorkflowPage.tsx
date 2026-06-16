@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from '../../i18n';
 import { useWorkflowStore } from '../../stores/workflow';
 import type { WorkflowRecord, CanvasNode, Connection } from '../../stores/workflow';
+import { parseWorkflowNodesPayload } from '../../stores/workflow';
 import WorkflowList from './WorkflowList';
 import WorkflowEditor from './WorkflowEditor';
 import TemplateManager, { type WorkflowTemplate } from './TemplateManager';
@@ -105,10 +106,11 @@ export default function WorkflowPage() {
   const handleCreateFromTemplate = async (template: WorkflowTemplate) => {
     try {
       const wf = await createWorkflow(template.name, template.description);
-      const nodes = JSON.parse(template.nodes || '[]') as CanvasNode[];
+      const payload = parseWorkflowNodesPayload(template.nodes);
+      const nodes = payload.nodes as CanvasNode[];
       const connections = JSON.parse(template.connections || '[]') as Connection[];
-      await saveWorkflow(wf.id, wf.name, wf.description, nodes, connections, 'draft');
-      setEditingWf({ ...wf, nodes, connections, status: 'ready', selectedHostIds: [] });
+      await saveWorkflow(wf.id, wf.name, wf.description, nodes, connections, 'draft', payload.settings);
+      setEditingWf({ ...wf, nodes, connections, settings: { ...wf.settings, ...payload.settings }, status: 'ready', selectedHostIds: [] });
       setCreateFromTemplateModalOpen(false);
       message.success(tText('workflow.createdFromTemplate'));
     } catch (error) {
@@ -178,6 +180,7 @@ export default function WorkflowPage() {
             setExecutionLogs((prev) => [...prev, logEntry]);
           }
         },
+        workflow.settings.defaultNodeIntervalSeconds,
       );
       message.success(tText('wfList.executeCompleted'));
     } catch (error) {

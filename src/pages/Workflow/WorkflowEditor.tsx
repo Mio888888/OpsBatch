@@ -16,7 +16,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
-import { Button, Space, Tag, Modal, Input, message } from '../../components/ui';
+import { Button, Space, Tag, Modal, Input, InputNumber, message } from '../../components/ui';
 import { SaveOutlined, PlayCircleOutlined } from '../../components/ui/icons';
 import { useTranslation } from '../../i18n';
 import { useWorkflowStore } from '../../stores/workflow';
@@ -115,11 +115,16 @@ function WorkflowEditorInner({ workflow, onBack }: Props) {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logCollapsed, setLogCollapsed] = useState(false);
   const [executing, setExecuting] = useState(false);
+  const [defaultNodeIntervalSeconds, setDefaultNodeIntervalSeconds] = useState(workflow.settings.defaultNodeIntervalSeconds);
 
   const [xyNodes, setXyNodes, onNodesChange] = useNodesState(toXyNodes(workflow.nodes));
   const [xyEdges, setXyEdges, onEdgesChange] = useEdgesState(toXyEdges(workflow.connections));
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+
+  useEffect(() => {
+    setDefaultNodeIntervalSeconds(workflow.settings.defaultNodeIntervalSeconds);
+  }, [workflow.id, workflow.settings.defaultNodeIntervalSeconds]);
 
   useEffect(() => {
     setXyNodes((nds) =>
@@ -235,9 +240,11 @@ function WorkflowEditorInner({ workflow, onBack }: Props) {
   const handleSave = useCallback(async () => {
     const nodes = fromXyNodes(xyNodes);
     const connections = fromXyEdges(xyEdges);
-    await saveWorkflow(workflow.id, workflow.name, workflow.description, nodes, connections, 'ready');
+    await saveWorkflow(workflow.id, workflow.name, workflow.description, nodes, connections, 'ready', {
+      defaultNodeIntervalSeconds,
+    });
     message.success(tText('wfEditor.saved'));
-  }, [xyNodes, xyEdges, workflow, saveWorkflow, tText]);
+  }, [xyNodes, xyEdges, workflow, saveWorkflow, tText, defaultNodeIntervalSeconds]);
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [confirmName, setConfirmName] = useState('');
@@ -316,8 +323,9 @@ function WorkflowEditorInner({ workflow, onBack }: Props) {
           setLogs((prev) => [...prev, logEntry]);
         }
       },
+      defaultNodeIntervalSeconds,
     );
-  }, [xyNodes, xyEdges, waitForConfirmation, tText]);
+  }, [xyNodes, xyEdges, waitForConfirmation, tText, defaultNodeIntervalSeconds]);
 
   const handleBack = useCallback(() => {
     onBack();
@@ -336,6 +344,16 @@ function WorkflowEditorInner({ workflow, onBack }: Props) {
           {executing && <Tag color="orange">{tText('wfEditor.executing')}</Tag>}
         </Space>
         <Space>
+          <div className="wf-editor-interval-control" title={tText('wfEditor.defaultNodeIntervalHint')}>
+            <span>{tText('wfEditor.defaultNodeInterval')}</span>
+            <InputNumber
+              min={0}
+              value={defaultNodeIntervalSeconds}
+              onChange={(value) => setDefaultNodeIntervalSeconds(Math.max(0, value ?? 0))}
+              disabled={executing}
+              addonAfter="s"
+            />
+          </div>
           <Button icon={<SaveOutlined />} onClick={handleSave} disabled={executing}>{tText('wfEditor.save')}</Button>
           <Button type="primary" icon={<PlayCircleOutlined />}
             disabled={xyNodes.length === 0 || executing}

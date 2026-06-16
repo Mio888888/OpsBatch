@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Modal, Input, Select, Tag } from '../../../components/ui';
-import { CloudServerFilled } from '../../../components/ui/icons';
+import { open as openDialog } from '@tauri-apps/plugin-dialog';
+import { Button, Modal, Input, Select, Tag } from '../../../components/ui';
+import { ClearOutlined, CloudServerFilled, FileOutlined, FolderOpenOutlined } from '../../../components/ui/icons';
 import { useAssetsStore } from '../../../stores/assets';
 import { NODE_TYPES } from './nodeTypes';
 import { useTranslation } from '../../../i18n';
@@ -26,8 +27,33 @@ export function useNodeTypeOptions() {
 
 interface TransferConfig {
   localPath: string;
+  localPaths?: string[];
   remotePath: string;
   direction: 'upload' | 'download';
+}
+
+const REMOTE_PATH_QUICK_FILLS = [
+  { label: '主机名', value: '/home/{host}/' },
+  { label: '第一个目录', value: '/home/{firstdir:/home}/' },
+  { label: '/tmp/', value: '/tmp/' },
+  { label: '/opt/', value: '/opt/' },
+  { label: '/home/', value: '/home/' },
+  { label: '/var/log/', value: '/var/log/' },
+  { label: '/usr/local/bin/', value: '/usr/local/bin/' },
+  { label: '/etc/', value: '/etc/' },
+  { label: '/data/', value: '/data/' },
+  { label: '/www/wwwroot/', value: '/www/wwwroot/' },
+  { label: '/var/www/', value: '/var/www/' },
+  { label: '/usr/local/src/', value: '/usr/local/src/' },
+];
+
+function normalizeLocalPaths(cfg: TransferConfig) {
+  if (Array.isArray(cfg.localPaths) && cfg.localPaths.length > 0) return cfg.localPaths.filter(Boolean);
+  return cfg.localPath ? [cfg.localPath] : [];
+}
+
+function getPathName(path: string) {
+  return path.split(/[\\/]/).filter(Boolean).pop() || path;
 }
 
 interface SelectHostConfig {
@@ -205,11 +231,28 @@ export function ConfigForm({ type, config, onChange }: {
 
   if (type === 'transfer') {
     const cfg = parseConfig<TransferConfig>(config, { localPath: '', remotePath: '', direction: 'upload' });
+    const localPaths = normalizeLocalPaths(cfg);
     const update = (partial: Partial<TransferConfig>) => {
       onChange(JSON.stringify({ ...cfg, ...partial }));
     };
+    const updateLocalPaths = (paths: string[]) => {
+      update({ localPath: paths[0] ?? '', localPaths: paths });
+    };
+    const selectLocalFiles = async () => {
+      const selected = await openDialog({ multiple: true, title: tText('nodeEdit.selectLocalFiles') });
+      if (!selected) return;
+      updateLocalPaths(Array.isArray(selected) ? selected : [selected]);
+    };
+    const selectLocalDirectory = async () => {
+      const selected = await openDialog({ directory: true, multiple: false, title: tText('nodeEdit.selectLocalFolder') });
+      if (!selected || Array.isArray(selected)) return;
+      updateLocalPaths([selected]);
+    };
+    const removeLocalPath = (path: string) => {
+      updateLocalPaths(localPaths.filter((item) => item !== path));
+    };
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div className="wf-transfer-config">
         <Select
           value={cfg.direction}
           onChange={(v) => update({ direction: v as 'upload' | 'download' })}
@@ -219,18 +262,57 @@ export function ConfigForm({ type, config, onChange }: {
           ]}
           style={{ width: '100%' }}
         />
-        <SnippetInput
-          nodeType="transfer"
-          value={cfg.localPath}
-          placeholder={tText('nodeEdit.localFilePath')}
-          onChange={(v) => update({ localPath: v })}
-        />
+        <div className="wf-transfer-local">
+          <div className="wf-transfer-picker-row">
+            <Button className="wf-transfer-picker-button" size="small" icon={<FileOutlined />} onClick={selectLocalFiles} title={tText('nodeEdit.selectLocalFiles')}>
+              {tText('nodeEdit.selectFileButton')}
+            </Button>
+            <Button className="wf-transfer-picker-button" size="small" icon={<FolderOpenOutlined />} onClick={selectLocalDirectory} title={tText('nodeEdit.selectLocalFolder')}>
+              {tText('nodeEdit.selectFolderButton')}
+            </Button>
+          </div>
+          {localPaths.length > 0 && (
+            <div className="wf-transfer-path-list">
+              {localPaths.map((path) => (
+                <div key={path} className="wf-transfer-path-item" title={path}>
+                  <span className="wf-transfer-path-icon"><FileOutlined /></span>
+                  <span className="wf-transfer-path-text">
+                    <strong>{getPathName(path)}</strong>
+                    <span>{path}</span>
+                  </span>
+                  <button
+                    type="button"
+                    className="wf-transfer-path-remove"
+                    onClick={() => removeLocalPath(path)}
+                    aria-label={tText('common.delete')}
+                    title={tText('common.delete')}
+                  >
+                    <ClearOutlined />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <SnippetInput
           nodeType="transfer"
           value={cfg.remotePath}
           placeholder={tText('nodeEdit.remoteFilePath')}
           onChange={(v) => update({ remotePath: v })}
         />
+        <div className="wf-transfer-remote-presets" aria-label={tText('nodeEdit.remotePathQuickFill')}>
+          {REMOTE_PATH_QUICK_FILLS.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              className="wf-transfer-remote-preset"
+              onClick={() => update({ remotePath: item.value })}
+              title={item.value}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       </div>
     );
   }

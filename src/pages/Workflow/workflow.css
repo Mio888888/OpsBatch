@@ -16,6 +16,25 @@
   align-items: center;
 }
 
+.wf-editor-interval-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.wf-editor-interval-control .ui-input-addon {
+  width: 86px;
+}
+
+.wf-editor-interval-control .ui-input {
+  height: 30px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .workflow-editor-body {
   flex: 1;
   display: flex;
@@ -595,7 +614,7 @@
 
 .wf-snippet-chip {
   border: none;
-  background: #f0f0f0;
+  background: color-mix(in srgb, var(--color-surface-soft) 78%, var(--color-text) 6%);
   border-radius: 3px;
   padding: 0 5px;
   font-size: 10px;
@@ -608,8 +627,144 @@
 }
 
 .wf-snippet-chip:hover {
-  background: #e0e0e0;
+  background: color-mix(in srgb, var(--color-primary) 16%, var(--color-surface-soft));
   color: var(--color-text);
+}
+
+/* Transfer node editor */
+.wf-transfer-config {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.wf-transfer-local {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.wf-transfer-picker-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  align-items: center;
+}
+
+.wf-transfer-picker-button {
+  justify-content: center;
+  white-space: nowrap;
+  border-radius: 8px;
+}
+
+.wf-transfer-path-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 132px;
+  overflow: auto;
+  padding: 2px;
+}
+
+.wf-transfer-path-item {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--color-border) 82%, transparent);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-surface-soft) 72%, transparent);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.wf-transfer-path-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-primary) 11%, transparent);
+}
+
+.wf-transfer-path-icon svg,
+.wf-transfer-path-remove svg {
+  width: 14px;
+  height: 14px;
+}
+
+.wf-transfer-path-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.wf-transfer-path-text strong,
+.wf-transfer-path-text span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wf-transfer-path-text strong {
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.wf-transfer-path-text span {
+  color: var(--color-text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+}
+
+.wf-transfer-path-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--color-text-muted);
+  background: transparent;
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+}
+
+.wf-transfer-path-remove:hover {
+  color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.1);
+}
+
+.wf-transfer-remote-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: -4px;
+}
+
+.wf-transfer-remote-preset {
+  border: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--color-text-secondary);
+  background: color-mix(in srgb, var(--color-surface-soft) 82%, transparent);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 10px;
+  line-height: 16px;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.wf-transfer-remote-preset:hover {
+  color: var(--color-primary);
+  border-color: color-mix(in srgb, var(--color-primary) 42%, var(--color-border));
+  background: color-mix(in srgb, var(--color-primary) 12%, var(--color-surface-soft));
 }
 
 /* Right edit panel */

@@ -3,6 +3,7 @@ import { ApartmentOutlined, PlusOutlined, PlayCircleOutlined, DeleteOutlined, Ed
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from '../../i18n';
 import type { WorkflowRecord } from '../../stores/workflow';
+import { stringifyWorkflowNodesPayload } from '../../stores/workflow';
 import { collectWorkflowHostIds } from './workflowExecutionLogs';
 
 interface Props {
@@ -92,7 +93,7 @@ export default function WorkflowList({ workflows, executingWorkflowIds = [], onE
                   await invoke('save_workflow_template', {
                     name: workflow.name + ' ' + tText('workflow.templateTab'),
                     description: workflow.description,
-                    nodes: JSON.stringify(workflow.nodes),
+                    nodes: stringifyWorkflowNodesPayload(workflow.nodes, workflow.settings),
                     connections: JSON.stringify(workflow.connections),
                   });
                   message.success(tText('wfList.savedAsTemplate'));

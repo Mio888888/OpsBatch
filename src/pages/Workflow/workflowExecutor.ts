@@ -126,6 +126,7 @@ export async function executeWorkflow(
   invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>,
   waitForConfirmation: (nodeName: string, description: string) => Promise<boolean>,
   onProgress: (event: ProgressEvent) => void,
+  defaultNodeIntervalSeconds = 0,
 ): Promise<void> {
   const enabledNodes = nodes.filter((n) => n.enabled);
   if (enabledNodes.length === 0) {
@@ -168,6 +169,7 @@ export async function executeWorkflow(
   // Nodes with no incoming edges are initially ready
   let readyNodes = enabledNodes.filter((n) => (inDegree.get(n.id) || 0) === 0);
   const processed = new Set<string>();
+  let executedCount = 0;
   let level = 0;
   const totalLevels = enabledNodes.length; // upper bound
 
@@ -178,7 +180,13 @@ export async function executeWorkflow(
     const nextReady: CanvasNode[] = [];
 
     for (const step of readyNodes) {
+      if (executedCount > 0 && defaultNodeIntervalSeconds > 0) {
+        onProgress({ type: 'log', message: `等待 ${defaultNodeIntervalSeconds}s 后执行下一个节点` });
+        await new Promise((resolve) => setTimeout(resolve, defaultNodeIntervalSeconds * 1000));
+      }
+
       processed.add(step.id);
+      executedCount++;
       onProgress({ type: 'node_start', nodeId: step.id, nodeName: step.name });
 
       const r = await executeNode(step, hostIds, invoke, waitForConfirmation, lastResult, resultsMap);
@@ -451,22 +459,33 @@ async function executeNode(
     if (!step.config) return { ...noop, msg: '跳过(无配置)' };
     const resolvedConfig = resolveTemplates(step.config, lastResult, resultsMap);
     try {
-      const { localPath, remotePath, direction } = JSON.parse(resolvedConfig);
-      await invoke<string>('file_transfer', {
-        request: {
-          direction: direction || 'upload',
-          host_ids: hostIds,
-          local_path: localPath,
-          remote_path: remotePath,
-          timeout: 120,
-        },
-      });
+      const { localPath, localPaths, remotePath, direction } = JSON.parse(resolvedConfig);
+      const selectedPaths = Array.isArray(localPaths) && localPaths.length > 0
+        ? localPaths.filter(Boolean)
+        : [localPath].filter(Boolean);
+      const paths = direction === 'download' ? selectedPaths.slice(0, 1) : selectedPaths;
+
+      if (paths.length === 0) {
+        throw new Error('本地路径为空');
+      }
+
+      for (const path of paths) {
+        await invoke<string>('file_transfer', {
+          request: {
+            direction: direction || 'upload',
+            host_ids: hostIds,
+            local_path: path,
+            remote_path: remotePath,
+            timeout: 120,
+          },
+        });
+      }
       return {
         name: step.name,
         ok: true,
-        msg: '传输成功',
+        msg: paths.length > 1 ? `传输成功(${paths.length}项)` : '传输成功',
         nodeId: step.id,
-        nodeResult: { success: true, output: '传输成功', exitCode: 0 },
+        nodeResult: { success: true, output: paths.length > 1 ? `传输成功(${paths.length}项)` : '传输成功', exitCode: 0 },
       };
     } catch (e: unknown) {
       return {

@@ -13,6 +13,10 @@ export interface CanvasNode {
   height: number;
 }
 
+export interface WorkflowSettings {
+  defaultNodeIntervalSeconds: number;
+}
+
 export interface Connection {
   id: string;
   fromId: string;
@@ -26,10 +30,44 @@ export interface WorkflowRecord {
   description: string;
   nodes: CanvasNode[];
   connections: Connection[];
+  settings: WorkflowSettings;
   status: 'draft' | 'ready';
   createdAt: string;
   updatedAt: string;
   selectedHostIds: string[];
+}
+
+interface WorkflowNodesPayload {
+  nodes: CanvasNode[];
+  settings: WorkflowSettings;
+}
+
+const DEFAULT_WORKFLOW_SETTINGS: WorkflowSettings = {
+  defaultNodeIntervalSeconds: 0,
+};
+
+function normalizeWorkflowSettings(raw: unknown): WorkflowSettings {
+  if (!raw || typeof raw !== 'object') return DEFAULT_WORKFLOW_SETTINGS;
+  const settings = raw as Partial<WorkflowSettings>;
+  const interval = Number(settings.defaultNodeIntervalSeconds);
+  return {
+    defaultNodeIntervalSeconds: Number.isFinite(interval) && interval > 0 ? interval : 0,
+  };
+}
+
+export function parseWorkflowNodesPayload(raw: string): WorkflowNodesPayload {
+  const parsed = JSON.parse(raw || '[]') as CanvasNode[] | WorkflowNodesPayload;
+  if (Array.isArray(parsed)) {
+    return { nodes: parsed, settings: DEFAULT_WORKFLOW_SETTINGS };
+  }
+  return {
+    nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
+    settings: normalizeWorkflowSettings(parsed.settings),
+  };
+}
+
+export function stringifyWorkflowNodesPayload(nodes: CanvasNode[], settings: WorkflowSettings): string {
+  return JSON.stringify({ nodes: nodes || [], settings: normalizeWorkflowSettings(settings) });
 }
 
 interface BackendWorkflow {
@@ -44,12 +82,14 @@ interface BackendWorkflow {
 }
 
 function fromBackend(w: BackendWorkflow): WorkflowRecord {
+  const payload = parseWorkflowNodesPayload(w.nodes);
   return {
     id: w.id,
     name: w.name,
     description: w.description,
-    nodes: JSON.parse(w.nodes || '[]'),
+    nodes: payload.nodes,
     connections: JSON.parse(w.connections || '[]'),
+    settings: normalizeWorkflowSettings(payload.settings),
     status: w.status as 'draft' | 'ready',
     createdAt: w.created_at,
     updatedAt: w.updated_at,
@@ -63,7 +103,7 @@ interface WorkflowState {
 
   loadWorkflows: () => Promise<void>;
   createWorkflow: (name: string, description: string) => Promise<WorkflowRecord>;
-  saveWorkflow: (id: string, name: string, description: string, nodes: CanvasNode[], connections: Connection[], status: string) => Promise<void>;
+  saveWorkflow: (id: string, name: string, description: string, nodes: CanvasNode[], connections: Connection[], status: string, settings?: WorkflowSettings) => Promise<void>;
   updateWorkflowHosts: (id: string, hostIds: string[]) => Promise<void>;
   deleteWorkflow: (id: string) => Promise<void>;
 }
@@ -93,12 +133,12 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     return workflow;
   },
 
-  saveWorkflow: async (id, name, description, nodes, connections, status) => {
+  saveWorkflow: async (id, name, description, nodes, connections, status, settings = DEFAULT_WORKFLOW_SETTINGS) => {
     const backend = {
       id,
       name,
       description,
-      nodes: JSON.stringify(nodes || []),
+      nodes: stringifyWorkflowNodesPayload(nodes, settings),
       connections: JSON.stringify(connections || []),
       status,
       created_at: '',

@@ -22,13 +22,13 @@ use super::audio::{PcmAudioHandler, WebRtcAudioHandler};
 use super::clipboard::{
     text_clipboard_formats, ClipboardAction, ClipboardBridge, TextClipboardBackend,
 };
+use super::config::build_ironrdp_config;
+use super::dynamic_channels::{display_control_client, geometry_sink, input_sink};
+use super::egfx::RdpEgfxBridge;
 use super::file_transfer::{
     build_file_descriptors, collect_upload_files, read_upload_file_chunk, DownloadProgress,
     FileTransferState,
 };
-use super::config::build_ironrdp_config;
-use super::dynamic_channels::{display_control_client, geometry_sink, input_sink};
-use super::egfx::RdpEgfxBridge;
 use super::frame::{build_frame_message, build_region_frame_message, FramePacer, QueuedFrame};
 use super::input::input_operations;
 use super::rdpevor::{video_control_channel, video_data_channel};
@@ -656,7 +656,10 @@ async fn flush_clipboard_actions(
                 ClipboardAction::RequestRemoteFileList(format) => cliprdr
                     .initiate_paste(format)
                     .map_err(|e| format!("生成 RDP 远程文件列表请求失败: {e}"))?,
-                ClipboardAction::StartFileDownload { files, clip_data_id } => {
+                ClipboardAction::StartFileDownload {
+                    files,
+                    clip_data_id,
+                } => {
                     if let Some(ft) = session.file_transfer.as_mut() {
                         ft.download_progress = Some(DownloadProgress::new(files, clip_data_id));
                         if let Some(dp) = ft.download_progress.as_mut() {
@@ -796,43 +799,61 @@ async fn try_trigger_auto_paste(session: &mut ConnectedRdpSession) -> Result<(),
         // 左键点击：让该位置窗口获得焦点
         let _ = tx.send(RdpSessionCommand::Input(
             super::types::RdpInputEvent::MouseButton {
-                x: pos.0, y: pos.1, button: 0, down: true,
+                x: pos.0,
+                y: pos.1,
+                button: 0,
+                down: true,
             },
         ));
         tokio::time::sleep(Duration::from_millis(40)).await;
         let _ = tx.send(RdpSessionCommand::Input(
             super::types::RdpInputEvent::MouseButton {
-                x: pos.0, y: pos.1, button: 0, down: false,
+                x: pos.0,
+                y: pos.1,
+                button: 0,
+                down: false,
             },
         ));
         // 等待窗口焦点切换完成
         tokio::time::sleep(Duration::from_millis(300)).await;
         // Ctrl+V
         let _ = tx.send(RdpSessionCommand::Input(
-            super::types::RdpInputEvent::KeyScancode { code: 0x1d, extended: false, down: true },
+            super::types::RdpInputEvent::KeyScancode {
+                code: 0x1d,
+                extended: false,
+                down: true,
+            },
         ));
         tokio::time::sleep(Duration::from_millis(60)).await;
         let _ = tx.send(RdpSessionCommand::Input(
-            super::types::RdpInputEvent::KeyScancode { code: 0x2f, extended: false, down: true },
+            super::types::RdpInputEvent::KeyScancode {
+                code: 0x2f,
+                extended: false,
+                down: true,
+            },
         ));
         tokio::time::sleep(Duration::from_millis(60)).await;
         let _ = tx.send(RdpSessionCommand::Input(
-            super::types::RdpInputEvent::KeyScancode { code: 0x2f, extended: false, down: false },
+            super::types::RdpInputEvent::KeyScancode {
+                code: 0x2f,
+                extended: false,
+                down: false,
+            },
         ));
         tokio::time::sleep(Duration::from_millis(60)).await;
         let _ = tx.send(RdpSessionCommand::Input(
-            super::types::RdpInputEvent::KeyScancode { code: 0x1d, extended: false, down: false },
+            super::types::RdpInputEvent::KeyScancode {
+                code: 0x1d,
+                extended: false,
+                down: false,
+            },
         ));
     });
 
     Ok(())
 }
 
-fn emit_download_complete(
-    app: &tauri::AppHandle,
-    session_id: &str,
-    ft: &FileTransferState,
-) {
+fn emit_download_complete(app: &tauri::AppHandle, session_id: &str, ft: &FileTransferState) {
     let Some(dp) = &ft.download_progress else {
         return;
     };

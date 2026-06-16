@@ -17,8 +17,8 @@ pub(super) fn read_clipboard_file_paths() -> Vec<PathBuf> {
 /// macOS: 通过 objc runtime 调用 NSPasteboard 读取文件 URL
 #[cfg(target_os = "macos")]
 fn read_macos_clipboard_files() -> Vec<PathBuf> {
-    use objc::{class, msg_send, sel, sel_impl};
     use objc::runtime::{BOOL, NO};
+    use objc::{class, msg_send, sel, sel_impl};
     use std::ptr::null_mut;
 
     type ObjId = *mut objc::runtime::Object;

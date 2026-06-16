@@ -187,12 +187,10 @@ impl ClipboardBridge {
         let Ok(mut state) = self.inner.lock() else {
             return;
         };
-        state
-            .actions
-            .push_back(ClipboardAction::StartFileDownload {
-                files,
-                clip_data_id,
-            });
+        state.actions.push_back(ClipboardAction::StartFileDownload {
+            files,
+            clip_data_id,
+        });
     }
 
     /// 远端请求上传方向的文件内容（本地 → 远程）
@@ -212,7 +210,9 @@ impl ClipboardBridge {
         };
         state
             .actions
-            .push_back(ClipboardAction::ProcessFileContentsResponse(response.into_owned()));
+            .push_back(ClipboardAction::ProcessFileContentsResponse(
+                response.into_owned(),
+            ));
     }
 }
 
@@ -302,7 +302,8 @@ impl CliprdrBackend for TextClipboardBackend {
     }
 
     fn on_remote_file_list(&mut self, files: &[FileDescriptor], clip_data_id: Option<u32>) {
-        self.bridge.start_file_download(files.to_vec(), clip_data_id);
+        self.bridge
+            .start_file_download(files.to_vec(), clip_data_id);
     }
 
     fn on_lock(&mut self, _data_id: LockDataId) {}

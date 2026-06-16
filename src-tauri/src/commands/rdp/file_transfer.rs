@@ -64,7 +64,6 @@ impl FileTransferState {
             auto_paste_position: None,
         }
     }
-
 }
 
 impl DownloadProgress {

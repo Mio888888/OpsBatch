@@ -40,6 +40,8 @@ pub fn run() {
                 .app_data_dir()
                 .expect("failed to get app data dir");
             std::fs::create_dir_all(&app_data_dir).ok();
+            keychain::init_local_vault_dir(app_data_dir.clone())
+                .expect("failed to init local secret vault");
             let db_path = app_data_dir.join("opsbatch.db");
             let database = db::Database::new(&db_path).expect("failed to open database");
             database.init_tables().expect("failed to init tables");

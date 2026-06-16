@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useRef, memo, useMemo, startTransition, useDeferredValue, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Tabs, Empty, Button, Spin } from '../../components/ui';
-import { PlusOutlined } from '../../components/ui/icons';
+import { PlayCircleOutlined, PlusOutlined } from '../../components/ui/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import TerminalView, { type TerminalController } from '../../components/TerminalView';
@@ -9,6 +9,7 @@ import { useAssetsStore } from '../../stores/assets';
 import { useAiChatStore } from '../../stores/aiChat';
 import { useTranslation } from '../../i18n';
 import type { HostMonitorNetwork, HostMonitorSnapshot } from '../../types';
+import { isHostMonitorIdle, shouldPollHostMonitor } from '../../utils/hostMonitor';
 import { getTerminalTabCloseTargets, type TerminalTabCloseMode } from '../../utils/terminalTabs';
 import { logHandledError } from '../../utils/globalLogger';
 import BottomPanel from './BottomPanel';
@@ -169,28 +170,32 @@ function clampMonitorPanelWidth(nextWidth: number, containerWidth?: number) {
 interface HostMonitorPanelProps {
   hostId: string;
   hostIp: string;
-  initialSnapshot?: HostMonitorSnapshot;
   width: number;
   onResizePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
 }
 
-const HostMonitorPanel = memo(function HostMonitorPanel({ hostId, hostIp, initialSnapshot, width, onResizePointerDown }: HostMonitorPanelProps) {
+const HostMonitorPanel = memo(function HostMonitorPanel({ hostId, hostIp, width, onResizePointerDown }: HostMonitorPanelProps) {
   const { t, tText } = useTranslation();
   const getHostMonitorSnapshot = useAssetsStore((state) => state.getHostMonitorSnapshot);
-  const [snapshot, setSnapshot] = useState<HostMonitorSnapshot | null>(initialSnapshot ?? null);
-  const [history, setHistory] = useState<HostMonitorSnapshot[]>(initialSnapshot ? [initialSnapshot] : []);
+  const [snapshot, setSnapshot] = useState<HostMonitorSnapshot | null>(null);
+  const [history, setHistory] = useState<HostMonitorSnapshot[]>([]);
   const [selectedInterface, setSelectedInterface] = useState('');
   const [error, setError] = useState('');
+  const [realtimeEnabled, setRealtimeEnabled] = useState(false);
+
+  useEffect(() => {
+    setSnapshot(null);
+    setHistory([]);
+    setSelectedInterface('');
+    setError('');
+    setRealtimeEnabled(false);
+  }, [hostId]);
 
   useEffect(() => {
     let disposed = false;
     let requestSequence = 0;
     let inFlight = false;
-
-    setSnapshot(initialSnapshot ?? null);
-    setHistory(initialSnapshot ? [initialSnapshot] : []);
-    setSelectedInterface('');
-    setError('');
+    let timer: number | undefined;
 
     const loadSnapshot = async () => {
       if (inFlight) return;
@@ -212,19 +217,19 @@ const HostMonitorPanel = memo(function HostMonitorPanel({ hostId, hostIp, initia
       }
     };
 
-    if (!initialSnapshot) {
+    if (shouldPollHostMonitor({ realtimeEnabled, hasSnapshot: false })) {
       void loadSnapshot();
+      timer = window.setInterval(() => {
+        void loadSnapshot();
+      }, 3000);
     }
-    const timer = window.setInterval(() => {
-      void loadSnapshot();
-    }, 3000);
 
     return () => {
       disposed = true;
       requestSequence += 1;
-      window.clearInterval(timer);
+      if (timer !== undefined) window.clearInterval(timer);
     };
-  }, [getHostMonitorSnapshot, hostId, initialSnapshot]);
+  }, [getHostMonitorSnapshot, hostId, realtimeEnabled]);
 
   useEffect(() => {
     const nextInterface = getSelectedNetwork(snapshot ?? undefined, selectedInterface)?.interface || '';
@@ -236,6 +241,7 @@ const HostMonitorPanel = memo(function HostMonitorPanel({ hostId, hostIp, initia
   const previousSnapshot = history.length > 1 ? history[history.length - 2] : undefined;
   const isLoadingSnapshot = !snapshot && !error;
   const networkOptions = getSnapshotNetworks(snapshot);
+  const isIdle = isHostMonitorIdle({ realtimeEnabled, hasSnapshot: Boolean(snapshot) });
   const selectedNetwork = getSelectedNetwork(snapshot ?? undefined, selectedInterface);
   const activeInterface = selectedNetwork?.interface || '';
   const previousNetwork = getNetworkByInterface(previousSnapshot, activeInterface);
@@ -292,26 +298,42 @@ const HostMonitorPanel = memo(function HostMonitorPanel({ hostId, hostIp, initia
 
         <section className="terminal-monitor-section">
         <div className="terminal-monitor-title">{'─'} {t('terminal.systemInfo')} {'─'}</div>
-        {isLoadingSnapshot ? (
+        {isIdle ? (
+          <div className="terminal-monitor-idle">
+            <button
+              type="button"
+              className="terminal-monitor-start-button"
+              onClick={() => setRealtimeEnabled(true)}
+              title={tText('terminal.startRealtimeMonitor')}
+            >
+              <PlayCircleOutlined />
+              <span>{t('terminal.startRealtimeMonitor')}</span>
+            </button>
+            <div className="terminal-monitor-idle-text">{t('terminal.monitorIdleHint')}</div>
+          </div>
+        ) : null}
+        {isIdle ? null : isLoadingSnapshot ? (
           <div className="terminal-monitor-skeleton-block" aria-label={tText('terminal.loadingSystemInfo')}>
             <span className="terminal-skeleton-line terminal-skeleton-line-wide" />
             <span className="terminal-skeleton-line terminal-skeleton-line-medium" />
             <span className="terminal-skeleton-line terminal-skeleton-line-full" />
             <span className="terminal-skeleton-line terminal-skeleton-line-narrow" />
           </div>
-        ) : (
+        ) : !isIdle ? (
           <>
             <div className="terminal-monitor-line">{t('terminal.uptime', { value: snapshot?.uptime || '--' })}</div>
             <div className="terminal-monitor-line">{t('terminal.loadAverage', { value: snapshot?.loadAverage || '--' })}</div>
             <div className="terminal-monitor-muted">{snapshot?.os || t('common.noData')}</div>
             <div className="terminal-monitor-muted">{t('terminal.kernel', { value: snapshot?.kernel || '--' })}</div>
           </>
-        )}
+        ) : null}
         {error ? <div className="terminal-monitor-error">{error}</div> : null}
       </section>
 
       <section className="terminal-monitor-section terminal-monitor-bars">
-        {isLoadingSnapshot ? (
+        {isIdle ? (
+          <div className="terminal-monitor-empty">{t('terminal.monitorNotStarted')}</div>
+        ) : isLoadingSnapshot ? (
           <div className="terminal-monitor-resource-skeleton" aria-label={tText('terminal.loadingResources')}>
             <span />
             <i />
@@ -333,7 +355,9 @@ const HostMonitorPanel = memo(function HostMonitorPanel({ hostId, hostIp, initia
         <div className="terminal-monitor-process-header">
           <span>{t('terminal.memory')}</span><span>CPU</span><span>{t('terminal.processCommand')}</span>
         </div>
-        {isLoadingSnapshot ? (
+        {isIdle ? (
+          <div className="terminal-monitor-empty">{t('terminal.monitorNotStarted')}</div>
+        ) : isLoadingSnapshot ? (
           <div className="terminal-monitor-table-skeleton" aria-label={tText('terminal.loadingProcesses')}>
             <span /><span /><span />
             <span /><span /><span />
@@ -371,7 +395,9 @@ const HostMonitorPanel = memo(function HostMonitorPanel({ hostId, hostIp, initia
             <span>--</span>
           )}
         </div>
-        {isLoadingSnapshot ? (
+        {isIdle ? (
+          <div className="terminal-monitor-chart-empty">{t('terminal.monitorNotStarted')}</div>
+        ) : isLoadingSnapshot ? (
           <div className="terminal-monitor-chart-skeleton" aria-label={tText('terminal.loadingNetworkData')}>
             {Array.from({ length: 18 }, (_, index) => <span key={index} style={{ height: `${18 + (index % 7) * 9}%` }} />)}
           </div>
@@ -394,7 +420,9 @@ const HostMonitorPanel = memo(function HostMonitorPanel({ hostId, hostIp, initia
         <div className="terminal-monitor-chart-label">
           PING {snapshot?.pingMs !== undefined ? `${snapshot.pingMs.toFixed(1)}ms` : '--'}
         </div>
-        {isLoadingSnapshot ? (
+        {isIdle ? (
+          <div className="terminal-monitor-chart-empty">{t('terminal.monitorNotStarted')}</div>
+        ) : isLoadingSnapshot ? (
           <div className="terminal-monitor-chart-skeleton terminal-monitor-chart-skeleton-blue" aria-label={tText('terminal.loadingLatencyData')}>
             {Array.from({ length: 18 }, (_, index) => <span key={index} style={{ height: `${14 + (index % 5) * 10}%` }} />)}
           </div>
@@ -411,7 +439,9 @@ const HostMonitorPanel = memo(function HostMonitorPanel({ hostId, hostIp, initia
 
         <section className="terminal-monitor-section terminal-monitor-filesystems">
           <div className="terminal-monitor-filesystem-header"><span>{t('terminal.path')}</span><span>{t('terminal.availableSize')}</span></div>
-          {isLoadingSnapshot ? (
+          {isIdle ? (
+            <div className="terminal-monitor-empty">{t('terminal.monitorNotStarted')}</div>
+          ) : isLoadingSnapshot ? (
             <div className="terminal-monitor-filesystem-skeleton" aria-label={tText('terminal.loadingDiskInfo')}>
               <span /><span />
               <span /><span />
@@ -546,7 +576,6 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
   const activeConnectionIdsRef = useRef<Map<string, string>>(new Map());
   const setInlineVisible = useAiChatStore((s) => s.setInlineVisible);
   const terminalBufferRefs = useRef<Map<string, TerminalBufferApi>>(new Map());
-  const monitorSnapshotRefs = useRef<Map<string, HostMonitorSnapshot>>(new Map());
   const setTerminalBuffer = useCallback((key: string, api: TerminalBufferApi) => {
     terminalBufferRefs.current.set(key, api);
   }, []);
@@ -554,7 +583,6 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
   const executeTerminalCommand = useCallback((key: string, command: string, options?: Parameters<TerminalController['executeCommand']>[1]) => terminalBufferRefs.current.get(key)?.executeCommand(command, options), []);
   const insertTerminalCommand = useCallback((key: string, command: string) => terminalBufferRefs.current.get(key)?.insertCommand(command), []);
   const pasteTerminalText = useCallback((key: string, text: string) => terminalBufferRefs.current.get(key)?.pasteText(text), []);
-  const getMonitorSnapshot = useCallback((key: string) => monitorSnapshotRefs.current.get(key), []);
 
   // ⌘I global shortcut for inline AI panel
   useEffect(() => {
@@ -659,16 +687,11 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
       )));
       setActiveKey(tabKey);
 
-      // SFTP warmup + monitor snapshot run independently after terminal is interactive.
+      // SFTP warmup runs independently after terminal is interactive.
       // These are best-effort and must not gate terminal/AI/port-forward readiness.
       void invoke('sftp_warmup', { hostId }).catch((error) => {
         void logHandledError('terminal.sftpWarmup', error, 'warn');
       });
-      void useAssetsStore.getState().getHostMonitorSnapshot(hostId)
-        .then((snapshot) => { monitorSnapshotRefs.current.set(tabKey, snapshot); })
-        .catch((error) => {
-          void logHandledError('terminal.monitorSnapshot', error, 'warn');
-        });
     } catch (e: unknown) {
       if (connectDisposedRef.current || activeConnectionIdsRef.current.get(tabKey) !== connectionId) {
         return;
@@ -1026,7 +1049,6 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
         activeConnectionIdsRef.current.delete(`${tab.key}:split`);
         terminalBufferRefs.current.delete(tab.key);
         terminalBufferRefs.current.delete(`${tab.key}:split`);
-        monitorSnapshotRefs.current.delete(tab.key);
       });
       tabsRef.current = nextTabs;
 
@@ -1343,10 +1365,6 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
     const key = activeKeyRef.current;
     return key ? insertTerminalCommand(key, command) : undefined;
   }, [insertTerminalCommand]);
-  const initialMonitorSnapshot = useMemo(() => (
-    deferredActiveTab?.key ? getMonitorSnapshot(deferredActiveTab.key) : undefined
-  ), [deferredActiveTab?.key, getMonitorSnapshot]);
-
   const tabItems = useMemo(() => tabs.map((tab) => ({
     key: tab.key,
     label: renderTabLabel(tab),
@@ -1442,7 +1460,6 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
         <HostMonitorPanel
           hostId={activeRemoteHostId}
           hostIp={deferredActiveTab.hostIp}
-          initialSnapshot={initialMonitorSnapshot}
           width={monitorWidth}
           onResizePointerDown={handleMonitorResizePointerDown}
         />

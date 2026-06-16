@@ -1,4 +1,5 @@
 use crate::db::Database;
+use crate::security::SECRET_PLACEHOLDER;
 use futures_util::StreamExt;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
@@ -146,7 +147,7 @@ fn load_ai_config_raw(db: &Database) -> Result<AiConfig, String> {
 
     ai_config.api_url = normalize_api_url(&ai_config.provider, &ai_config.api_url);
 
-    if ai_config.api_key == "***keychain***" {
+    if ai_config.api_key == SECRET_PLACEHOLDER {
         if let Ok(keychain_key) = crate::keychain::get_api_key(&ai_config.provider) {
             ai_config.api_key = keychain_key;
         } else {
@@ -187,7 +188,7 @@ pub async fn save_ai_config(
     // Determine the real API key
     let real_key = if config.provider == "ollama" {
         String::new()
-    } else if config.api_key.contains("****") || config.api_key == "***keychain***" {
+    } else if config.api_key.contains("****") || config.api_key == SECRET_PLACEHOLDER {
         // User didn't change the key — reload the existing one
         let existing = load_ai_config_raw(&db)?;
         if existing.api_key.contains("****") || existing.api_key.is_empty() {
@@ -198,17 +199,18 @@ pub async fn save_ai_config(
         config.api_key.clone()
     };
 
-    // Try to store in OS keychain (best-effort, not required)
-    if !real_key.is_empty() {
-        let _ = crate::keychain::store_api_key(&config.provider, &real_key);
+    let stored_api_key = if !real_key.is_empty() {
+        crate::keychain::store_api_key(&config.provider, &real_key)?;
+        SECRET_PLACEHOLDER.to_string()
     } else {
         let _ = crate::keychain::delete_api_key(&config.provider);
-    }
+        String::new()
+    };
 
-    // Save config with real API key in SQLite
+    // Save only a placeholder in SQLite; the real key lives in the local encrypted vault.
     let safe_config = AiConfig {
         api_url: normalize_api_url(&config.provider, &config.api_url),
-        api_key: real_key,
+        api_key: stored_api_key,
         ..config
     };
     let conn = db.pool.get().map_err(|e| e.to_string())?;
@@ -1349,7 +1351,7 @@ pub fn ai_keychain_store(provider: String, api_key: String) -> Result<(), String
 pub fn ai_keychain_get(provider: String) -> Result<String, String> {
     crate::keychain::get_api_key(&provider).map_err(|e| match e {
         crate::keychain::SecretError::Missing => {
-            "API Key 未在系统钥匙串中找到，请重新保存 AI 配置。".to_string()
+            "API Key 未在本地加密存储中找到，请重新保存 AI 配置。".to_string()
         }
         other => other.to_string(),
     })

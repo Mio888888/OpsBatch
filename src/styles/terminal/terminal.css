@@ -542,6 +542,45 @@ body.terminal-monitor-resizing * {
   letter-spacing: 0.02em;
 }
 
+.terminal-monitor-idle {
+  display: grid;
+  gap: 6px;
+  padding: 8px 6px 10px;
+}
+
+.terminal-monitor-start-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 9px;
+  color: var(--terminal-bg);
+  font: inherit;
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  background: var(--terminal-accent);
+  border: 1px solid var(--terminal-accent);
+  border-radius: 4px;
+}
+
+.terminal-monitor-start-button:hover {
+  color: var(--terminal-bg);
+  filter: brightness(1.08);
+}
+
+.terminal-monitor-start-button svg {
+  flex: 0 0 auto;
+}
+
+.terminal-monitor-idle-text {
+  color: var(--terminal-muted);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-compact);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
 .terminal-monitor-line,
 .terminal-monitor-muted,
 .terminal-monitor-error,

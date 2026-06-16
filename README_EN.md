@@ -90,7 +90,7 @@ React/Vite UI
   -> Zustand stores
   -> Tauri invoke() commands and Tauri events
   -> Rust command modules
-  -> SQLite / SSH / SFTP / RDP / VNC / local PTY / Git / HTTP / OS keychain
+  -> SQLite / local encrypted vault / SSH / SFTP / RDP / VNC / local PTY / Git / HTTP
 ```
 
 ### Tech Stack
@@ -230,8 +230,8 @@ OpsBatch is primarily a local desktop client. Core data is stored on the local m
 
 Please note the current security status and avoid over-assumptions:
 
-- Host passwords, private-key fields, and Git repository tokens are preferentially stored in the OS keychain, while SQLite stores the `***keychain***` placeholder; existing historical data is also migrated to the keychain on startup when possible.
-- AI API keys have best-effort logic for storing in the OS keychain, but the current configuration save path still writes the real key to local settings JSON. Do not describe all sensitive data as fully encrypted.
+- Host passwords, private-key fields, Git repository tokens, and AI API keys are stored in the local encrypted vault, while SQLite stores the `***keychain***` placeholder. Secrets written to the OS keychain by older versions are migrated to the local encrypted vault on first read.
+- The local encrypted vault uses a separate master-key file and avoids system keychain permission prompts. Its protection still depends on device login protection, file permissions, disk encryption, and backup location.
 - Cloud provider credentials and some runtime configuration may still be stored in the local database or config data. Evaluate risk according to device trust and credential scope.
 - SSH host keys use a trust-on-first-use (TOFU) fingerprint flow. Later fingerprint mismatches block the connection and ask the user to re-confirm the host. The first connection still requires a trusted network and host.
 - Tauri now has a baseline CSP that restricts script, object, and frame loading while allowing required IPC, HTTP(S), local development services, and media resources. Reassess and tighten the policy when adding new resource origins for production.
@@ -256,7 +256,7 @@ OpsBatch is intended for authorized operations workflows. It provides SSH, SFTP,
 ### Data Security and Privacy Boundaries
 
 - OpsBatch follows a local-first design. Host assets, execution history, command libraries, script libraries, workflows, AI conversations, and logs are mainly stored in the local SQLite database or local configuration.
-- Host passwords, private-key fields, and Git repository tokens are preferentially stored in the OS keychain, but some AI settings, cloud provider credentials, historical data, or runtime configuration may still be stored in the local database or config files.
+- Host passwords, private-key fields, Git repository tokens, and AI API keys are stored in the local encrypted vault, but cloud provider credentials, historical data, or some runtime configuration may still be stored in the local database or config files.
 - Before use, evaluate risk based on device trust, account permissions, disk encryption, OS login protection, backup location, and team audit requirements. Avoid storing high-privilege credentials on untrusted devices.
 
 ### Licenses and Third-Party Services

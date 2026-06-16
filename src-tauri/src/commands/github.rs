@@ -247,7 +247,7 @@ fn resolve_repo_token(repo_id: &str, stored: Option<String>) -> Result<Option<St
             .map(Some)
             .map_err(|e| match e {
                 crate::keychain::SecretError::Missing => format!(
-                    "GitHub 仓库 {} 的 token 未在系统钥匙串中找到，请重新保存仓库 token。",
+                    "GitHub 仓库 {} 的 token 未在本地加密存储中找到，请重新保存仓库 token。",
                     repo_id
                 ),
                 other => other.to_string(),

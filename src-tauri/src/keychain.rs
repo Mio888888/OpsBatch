@@ -1,7 +1,7 @@
 use aes_gcm::aead::{Aead, Payload};
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(test))]
 use keyring::{Entry, Error as KeyringError};
 #[cfg(target_os = "macos")]
 use security_framework::os::macos::keychain::{SecKeychain, SecPreferencesDomain};
@@ -16,6 +16,8 @@ use std::sync::{Mutex, OnceLock};
 
 #[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 const SERVICE_NAME: &str = "com.opsbatch.app";
 const KEY_API_KEY: &str = "ai_api_key";
@@ -23,14 +25,25 @@ const KEY_HOST_PASSWORD: &str = "host_password";
 const KEY_HOST_PRIVATE_KEY: &str = "host_private_key";
 const KEY_GITHUB_TOKEN: &str = "github_token";
 const KEY_SSH_HOST_KEY: &str = "ssh_host_key";
+#[cfg(not(test))]
+const KEY_LOCAL_VAULT_MASTER_KEY: &str = "local_vault_master_key";
 const VAULT_FILE_NAME: &str = "opsbatch-secrets.vault.json";
+const LEGACY_VAULT_KEY_EXTENSION: &str = "key";
 
 static LOCAL_VAULT_DIR: OnceLock<PathBuf> = OnceLock::new();
 static VAULT_FILE_LOCK: Mutex<()> = Mutex::new(());
+static VAULT_MASTER_KEY: Mutex<Option<[u8; 32]>> = Mutex::new(None);
+#[cfg(test)]
+static TEST_SYSTEM_KEYRING_VALUE: Mutex<Option<[u8; 32]>> = Mutex::new(None);
+#[cfg(test)]
+static TEST_SYSTEM_KEYRING_READS: AtomicUsize = AtomicUsize::new(0);
+#[cfg(test)]
+static TEST_VAULT_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SecretError {
     Missing,
+    Locked,
     Backend(String),
 }
 
@@ -38,6 +51,7 @@ impl std::fmt::Display for SecretError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Missing => write!(f, "secure storage entry is missing"),
+            Self::Locked => write!(f, "本地加密 vault 未解锁，请先完成启动解锁。"),
             Self::Backend(message) => write!(f, "{}", message),
         }
     }
@@ -77,25 +91,24 @@ struct VaultEntry {
 #[derive(Debug, Clone)]
 struct LocalSecretVault {
     path: PathBuf,
-    key_path: PathBuf,
 }
 
 impl LocalSecretVault {
     fn new(path: PathBuf) -> Self {
-        let key_path = path.with_extension("key");
-        Self { path, key_path }
+        Self { path }
     }
 
     fn store(&self, kind: &str, id: &str, value: &str) -> Result<(), String> {
         let _guard = VAULT_FILE_LOCK
             .lock()
             .map_err(|_| "本地加密存储锁已损坏".to_string())?;
+        let key = self.read_or_create_key().map_err(String::from)?;
         let account = secret_account(kind, id);
         let mut vault = self.read_vault_locked().map_err(String::from)?;
         vault.entries.insert(
             account.clone(),
             VaultEntry {
-                encrypted: self.encrypt_value(&account, value)?,
+                encrypted: self.encrypt_value(&account, value, &key)?,
             },
         );
         vault.deleted.remove(&account);
@@ -106,16 +119,18 @@ impl LocalSecretVault {
         let _guard = VAULT_FILE_LOCK
             .lock()
             .map_err(|_| SecretError::Backend("本地加密存储锁已损坏".to_string()))?;
+        let key = self.read_or_create_key()?;
         let account = secret_account(kind, id);
         let vault = self.read_vault_locked()?;
         let entry = vault.entries.get(&account).ok_or(SecretError::Missing)?;
-        self.decrypt_value(&account, &entry.encrypted)
+        decrypt_with_key(&account, &entry.encrypted, &key)
     }
 
     fn delete(&self, kind: &str, id: &str) -> Result<(), String> {
         let _guard = VAULT_FILE_LOCK
             .lock()
             .map_err(|_| "本地加密存储锁已损坏".to_string())?;
+        self.read_or_create_key().map_err(String::from)?;
         let account = secret_account(kind, id);
         let mut vault = self.read_vault_locked().map_err(String::from)?;
         vault.entries.remove(&account);
@@ -127,6 +142,7 @@ impl LocalSecretVault {
         let _guard = VAULT_FILE_LOCK
             .lock()
             .map_err(|_| SecretError::Backend("本地加密存储锁已损坏".to_string()))?;
+        self.read_or_create_key()?;
         let account = secret_account(kind, id);
         let vault = self.read_vault_locked()?;
         Ok(vault.deleted.contains(&account))
@@ -151,10 +167,9 @@ impl LocalSecretVault {
         write_private_file(&self.path, &payload)
     }
 
-    fn encrypt_value(&self, account: &str, value: &str) -> Result<String, String> {
-        let key = self.read_or_create_key()?;
-        let cipher = Aes256Gcm::new_from_slice(&key)
-            .map_err(|e| format!("本地加密存储初始化失败: {}", e))?;
+    fn encrypt_value(&self, account: &str, value: &str, key: &[u8; 32]) -> Result<String, String> {
+        let cipher =
+            Aes256Gcm::new_from_slice(key).map_err(|e| format!("本地加密存储初始化失败: {}", e))?;
         let nonce_bytes = new_nonce();
         let nonce = Nonce::from_slice(&nonce_bytes);
         let ciphertext = cipher
@@ -171,46 +186,8 @@ impl LocalSecretVault {
         Ok(BASE64.encode(result))
     }
 
-    fn decrypt_value(&self, account: &str, encrypted: &str) -> Result<String, SecretError> {
-        let data = BASE64
-            .decode(encrypted)
-            .map_err(|e| SecretError::Backend(format!("本地加密存储解码失败: {}", e)))?;
-        if data.len() < 12 {
-            return Err(SecretError::Backend("本地加密存储数据长度无效".to_string()));
-        }
-        let key = self.read_or_create_key().map_err(SecretError::Backend)?;
-        let cipher = Aes256Gcm::new_from_slice(&key)
-            .map_err(|e| SecretError::Backend(format!("本地加密存储初始化失败: {}", e)))?;
-        let nonce = Nonce::from_slice(&data[..12]);
-        let plaintext = cipher
-            .decrypt(
-                nonce,
-                Payload {
-                    msg: &data[12..],
-                    aad: account.as_bytes(),
-                },
-            )
-            .map_err(|e| SecretError::Backend(format!("本地加密存储解密失败: {}", e)))?;
-        String::from_utf8(plaintext)
-            .map_err(|e| SecretError::Backend(format!("本地加密存储 UTF-8 解码失败: {}", e)))
-    }
-
-    fn read_or_create_key(&self) -> Result<[u8; 32], String> {
-        if self.key_path.exists() {
-            let encoded = fs::read_to_string(&self.key_path)
-                .map_err(|e| format!("本地加密密钥读取失败: {}", e))?;
-            let bytes = BASE64
-                .decode(encoded.trim())
-                .map_err(|e| format!("本地加密密钥格式无效: {}", e))?;
-            return bytes
-                .try_into()
-                .map_err(|_| "本地加密密钥长度无效".to_string());
-        }
-
-        let key = new_master_key();
-        let encoded = BASE64.encode(key);
-        write_private_file(&self.key_path, encoded.as_bytes())?;
-        Ok(key)
+    fn read_or_create_key(&self) -> Result<[u8; 32], SecretError> {
+        current_vault_master_key()
     }
 }
 
@@ -242,6 +219,77 @@ pub(crate) fn init_local_vault_dir(app_data_dir: PathBuf) -> Result<(), String> 
     LOCAL_VAULT_DIR
         .set(app_data_dir)
         .map_err(|_| "本地加密存储目录初始化失败".to_string())
+}
+
+pub fn is_local_vault_unlocked() -> bool {
+    VAULT_MASTER_KEY
+        .lock()
+        .map(|key| key.is_some())
+        .unwrap_or(false)
+}
+
+pub fn is_locked_error_message(message: &str) -> bool {
+    message == SecretError::Locked.to_string()
+}
+
+#[tauri::command]
+pub fn is_local_vault_unlocked_command() -> bool {
+    is_local_vault_unlocked()
+}
+
+#[tauri::command]
+pub fn unlock_local_vault(master_key: Option<String>) -> Result<(), String> {
+    if is_local_vault_unlocked() {
+        return Ok(());
+    }
+
+    match read_system_vault_master_key()? {
+        Some(key) => unlock_with_existing_or_provided_key(key, master_key.as_deref()),
+        None if legacy_vault_key_path().exists() => {
+            let key = read_legacy_vault_key()?;
+            validate_vault_key(&key)?;
+            write_system_vault_master_key(&key)?;
+            cache_vault_master_key(key)
+        }
+        None => {
+            let provided = master_key
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| "本地加密密钥不存在，请输入新的解锁密钥。".to_string())?;
+            let key = derive_master_key_from_passphrase(provided);
+            validate_vault_key(&key)?;
+            write_system_vault_master_key(&key)?;
+            cache_vault_master_key(key)
+        }
+    }
+}
+
+fn unlock_with_existing_or_provided_key(
+    existing_key: [u8; 32],
+    master_key: Option<&str>,
+) -> Result<(), String> {
+    match validate_vault_key(&existing_key) {
+        Ok(()) => cache_vault_master_key(existing_key),
+        Err(_) if legacy_vault_key_path().exists() => {
+            let key = read_legacy_vault_key()?;
+            validate_vault_key(&key)?;
+            write_system_vault_master_key(&key)?;
+            cache_vault_master_key(key)
+        }
+        Err(_) => {
+            let provided = master_key
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| {
+                    "系统钥匙串中的本地加密密钥无法解开现有 vault，请输入启动密钥。".to_string()
+                })?;
+            let key = derive_master_key_from_passphrase(provided);
+            validate_vault_key(&key)?;
+            write_system_vault_master_key(&key)?;
+            cache_vault_master_key(key)
+        }
+    }
 }
 
 fn store_secret(kind: &str, id: &str, value: &str) -> Result<(), String> {
@@ -298,7 +346,23 @@ fn default_vault() -> LocalSecretVault {
     LocalSecretVault::new(default_vault_dir().join(VAULT_FILE_NAME))
 }
 
+fn default_vault_path() -> PathBuf {
+    default_vault_dir().join(VAULT_FILE_NAME)
+}
+
+fn legacy_vault_key_path() -> PathBuf {
+    default_vault_path().with_extension(LEGACY_VAULT_KEY_EXTENSION)
+}
+
 fn default_vault_dir() -> PathBuf {
+    #[cfg(test)]
+    {
+        if let Ok(dir) = TEST_VAULT_DIR.lock() {
+            if let Some(path) = dir.as_ref() {
+                return path.clone();
+            }
+        }
+    }
     if let Some(path) = LOCAL_VAULT_DIR.get() {
         return path.clone();
     }
@@ -339,13 +403,184 @@ fn fallback_app_data_dir() -> PathBuf {
     PathBuf::from(".opsbatch")
 }
 
-fn new_master_key() -> [u8; 32] {
-    let first = uuid::Uuid::new_v4();
-    let second = uuid::Uuid::new_v4();
-    let mut key = [0u8; 32];
-    key[..16].copy_from_slice(first.as_bytes());
-    key[16..].copy_from_slice(second.as_bytes());
-    key
+fn current_vault_master_key() -> Result<[u8; 32], SecretError> {
+    VAULT_MASTER_KEY
+        .lock()
+        .map_err(|_| SecretError::Backend("本地加密密钥缓存锁已损坏".to_string()))?
+        .ok_or(SecretError::Locked)
+}
+
+fn cache_vault_master_key(key: [u8; 32]) -> Result<(), String> {
+    let mut cached = VAULT_MASTER_KEY
+        .lock()
+        .map_err(|_| "本地加密密钥缓存锁已损坏".to_string())?;
+    *cached = Some(key);
+    Ok(())
+}
+
+fn derive_master_key_from_passphrase(passphrase: &str) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+    hasher.update(b"opsbatch-local-vault-master-key-v1");
+    hasher.update(passphrase.as_bytes());
+    hasher.finalize().into()
+}
+
+fn validate_vault_key(key: &[u8; 32]) -> Result<(), String> {
+    let vault_path = default_vault_path();
+    if !vault_path.exists() {
+        return Ok(());
+    }
+
+    let text =
+        fs::read_to_string(&vault_path).map_err(|e| format!("本地加密存储读取失败: {}", e))?;
+    if text.trim().is_empty() {
+        return Ok(());
+    }
+
+    let vault: VaultFile =
+        serde_json::from_str(&text).map_err(|e| format!("本地加密存储格式无效: {}", e))?;
+    let Some((account, entry)) = vault.entries.iter().next() else {
+        return Ok(());
+    };
+
+    decrypt_with_key(account, &entry.encrypted, key)
+        .map(|_| ())
+        .map_err(|_| "本地加密密钥无法解开现有 vault，请检查输入或系统钥匙串记录。".to_string())
+}
+
+fn decrypt_with_key(account: &str, encrypted: &str, key: &[u8; 32]) -> Result<String, SecretError> {
+    let data = BASE64
+        .decode(encrypted)
+        .map_err(|e| SecretError::Backend(format!("本地加密存储解码失败: {}", e)))?;
+    if data.len() < 12 {
+        return Err(SecretError::Backend("本地加密存储数据长度无效".to_string()));
+    }
+    let cipher = Aes256Gcm::new_from_slice(key)
+        .map_err(|e| SecretError::Backend(format!("本地加密存储初始化失败: {}", e)))?;
+    let nonce = Nonce::from_slice(&data[..12]);
+    let plaintext = cipher
+        .decrypt(
+            nonce,
+            Payload {
+                msg: &data[12..],
+                aad: account.as_bytes(),
+            },
+        )
+        .map_err(|e| SecretError::Backend(format!("本地加密存储解密失败: {}", e)))?;
+    String::from_utf8(plaintext)
+        .map_err(|e| SecretError::Backend(format!("本地加密存储 UTF-8 解码失败: {}", e)))
+}
+
+fn read_system_vault_master_key() -> Result<Option<[u8; 32]>, String> {
+    #[cfg(test)]
+    {
+        return test_system_keyring_get();
+    }
+
+    #[cfg(not(test))]
+    {
+        let account = secret_account(KEY_LOCAL_VAULT_MASTER_KEY, "default");
+        let entry =
+            Entry::new(SERVICE_NAME, &account).map_err(|e| format!("keyring 创建失败: {}", e))?;
+        match entry.get_password() {
+            Ok(encoded) => decode_master_key(&encoded).map(Some),
+            Err(KeyringError::NoEntry) => Ok(None),
+            Err(KeyringError::NoStorageAccess(_)) => {
+                Err("系统钥匙串不可访问，无法解锁本地加密存储。".to_string())
+            }
+            Err(e) => Err(format!("系统钥匙串读取失败: {}", e)),
+        }
+    }
+}
+
+fn write_system_vault_master_key(key: &[u8; 32]) -> Result<(), String> {
+    #[cfg(test)]
+    {
+        return test_system_keyring_set(key);
+    }
+
+    #[cfg(not(test))]
+    {
+        let account = secret_account(KEY_LOCAL_VAULT_MASTER_KEY, "default");
+        let entry =
+            Entry::new(SERVICE_NAME, &account).map_err(|e| format!("keyring 创建失败: {}", e))?;
+        entry
+            .set_password(&BASE64.encode(key))
+            .map_err(|e| format!("系统钥匙串保存失败: {}", e))
+    }
+}
+
+fn read_legacy_vault_key() -> Result<[u8; 32], String> {
+    let encoded = fs::read_to_string(legacy_vault_key_path())
+        .map_err(|e| format!("旧本地加密密钥读取失败: {}", e))?;
+    decode_master_key(&encoded)
+}
+
+fn decode_master_key(encoded: &str) -> Result<[u8; 32], String> {
+    let bytes = BASE64
+        .decode(encoded.trim())
+        .map_err(|e| format!("系统钥匙串密钥格式无效: {}", e))?;
+    bytes
+        .try_into()
+        .map_err(|_| "系统钥匙串密钥长度无效".to_string())
+}
+
+#[cfg(test)]
+fn test_system_keyring_get() -> Result<Option<[u8; 32]>, String> {
+    TEST_SYSTEM_KEYRING_READS.fetch_add(1, Ordering::SeqCst);
+    TEST_SYSTEM_KEYRING_VALUE
+        .lock()
+        .map(|value| *value)
+        .map_err(|_| "测试系统钥匙串锁已损坏".to_string())
+}
+
+#[cfg(test)]
+fn test_system_keyring_set(key: &[u8; 32]) -> Result<(), String> {
+    let mut value = TEST_SYSTEM_KEYRING_VALUE
+        .lock()
+        .map_err(|_| "测试系统钥匙串锁已损坏".to_string())?;
+    *value = Some(*key);
+    Ok(())
+}
+
+#[cfg(test)]
+fn clear_cached_vault_key_for_tests() {
+    if let Ok(mut key) = VAULT_MASTER_KEY.lock() {
+        *key = None;
+    }
+    if let Ok(mut value) = TEST_SYSTEM_KEYRING_VALUE.lock() {
+        *value = None;
+    }
+    clear_mock_system_keyring_reads_for_tests();
+}
+
+#[cfg(test)]
+fn set_test_vault_dir_for_tests(path: Option<PathBuf>) {
+    if let Ok(mut dir) = TEST_VAULT_DIR.lock() {
+        *dir = path;
+    }
+}
+
+#[cfg(test)]
+fn unlock_local_vault_for_tests(key: [u8; 32]) {
+    cache_vault_master_key(key).expect("cache test vault key");
+}
+
+#[cfg(test)]
+fn store_mock_system_keyring_key_for_tests(key: [u8; 32]) {
+    test_system_keyring_set(&key).expect("store test keyring key");
+}
+
+#[cfg(test)]
+fn clear_mock_system_keyring_reads_for_tests() {
+    TEST_SYSTEM_KEYRING_READS.store(0, Ordering::SeqCst);
+}
+
+#[cfg(test)]
+fn mock_system_keyring_read_count_for_tests() -> usize {
+    TEST_SYSTEM_KEYRING_READS.load(Ordering::SeqCst)
 }
 
 fn new_nonce() -> [u8; 12] {
@@ -491,6 +726,8 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
 
+    static TEST_GUARD: Mutex<()> = Mutex::new(());
+
     fn temp_vault_path(name: &str) -> std::path::PathBuf {
         let unique = format!(
             "opsbatch-vault-{}-{}.json",
@@ -503,8 +740,23 @@ mod tests {
         std::env::temp_dir().join(unique)
     }
 
+    fn temp_vault_dir(name: &str) -> std::path::PathBuf {
+        let unique = format!(
+            "opsbatch-vault-dir-{}-{}",
+            name,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        );
+        std::env::temp_dir().join(unique)
+    }
+
     #[test]
     fn local_vault_round_trips_without_storing_plaintext() {
+        let _guard = TEST_GUARD.lock().expect("test guard");
+        clear_cached_vault_key_for_tests();
+        unlock_local_vault_for_tests([3; 32]);
         let path = temp_vault_path("round-trip");
         let vault = LocalSecretVault::new(path.clone());
 
@@ -520,11 +772,13 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(path);
-        let _ = std::fs::remove_file(vault.key_path);
     }
 
     #[test]
     fn local_vault_reports_missing_secret() {
+        let _guard = TEST_GUARD.lock().expect("test guard");
+        clear_cached_vault_key_for_tests();
+        unlock_local_vault_for_tests([4; 32]);
         let path = temp_vault_path("missing");
         let vault = LocalSecretVault::new(path.clone());
 
@@ -534,11 +788,13 @@ mod tests {
         );
 
         let _ = std::fs::remove_file(path);
-        let _ = std::fs::remove_file(vault.key_path);
     }
 
     #[test]
     fn fallback_secret_is_migrated_into_local_vault() {
+        let _guard = TEST_GUARD.lock().expect("test guard");
+        clear_cached_vault_key_for_tests();
+        unlock_local_vault_for_tests([5; 32]);
         let path = temp_vault_path("fallback");
         let vault = LocalSecretVault::new(path.clone());
         let legacy = MemoryLegacySecretBackend::new();
@@ -558,7 +814,123 @@ mod tests {
         assert_eq!("legacy-password", second);
 
         let _ = std::fs::remove_file(path);
-        let _ = std::fs::remove_file(vault.key_path);
+    }
+
+    #[test]
+    fn local_vault_requires_unlock_before_use() {
+        let _guard = TEST_GUARD.lock().expect("test guard");
+        clear_cached_vault_key_for_tests();
+        let path = temp_vault_path("locked");
+        let vault = LocalSecretVault::new(path.clone());
+
+        assert!(vault.store("host_password", "host-a", "secret").is_err());
+        assert!(matches!(
+            vault.get("host_password", "host-a"),
+            Err(SecretError::Locked)
+        ));
+        assert!(matches!(
+            vault.delete("host_password", "host-a"),
+            Err(message) if is_locked_error_message(&message)
+        ));
+        assert!(matches!(
+            vault.has_delete_marker("host_password", "host-a"),
+            Err(SecretError::Locked)
+        ));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn local_vault_uses_cached_key_after_unlock() {
+        let _guard = TEST_GUARD.lock().expect("test guard");
+        clear_cached_vault_key_for_tests();
+        let path = temp_vault_path("unlocked");
+        let vault = LocalSecretVault::new(path.clone());
+
+        unlock_local_vault_for_tests([7; 32]);
+        vault
+            .store("host_password", "host-a", "secret")
+            .expect("store");
+        clear_mock_system_keyring_reads_for_tests();
+
+        assert_eq!("secret", vault.get("host_password", "host-a").expect("get"));
+        assert_eq!(0, mock_system_keyring_read_count_for_tests());
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn unlock_local_vault_reads_system_keyring_once_when_present() {
+        let _guard = TEST_GUARD.lock().expect("test guard");
+        clear_cached_vault_key_for_tests();
+        store_mock_system_keyring_key_for_tests([11; 32]);
+
+        unlock_local_vault(None).expect("unlock");
+        assert!(is_local_vault_unlocked());
+        assert_eq!(1, mock_system_keyring_read_count_for_tests());
+
+        let path = temp_vault_path("system-keyring");
+        let vault = LocalSecretVault::new(path.clone());
+        vault
+            .store("host_password", "host-a", "secret")
+            .expect("store");
+        clear_mock_system_keyring_reads_for_tests();
+        assert_eq!("secret", vault.get("host_password", "host-a").expect("get"));
+        assert_eq!(0, mock_system_keyring_read_count_for_tests());
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn unlock_local_vault_requires_passphrase_when_system_keyring_missing() {
+        let _guard = TEST_GUARD.lock().expect("test guard");
+        clear_cached_vault_key_for_tests();
+
+        let error = unlock_local_vault(None).unwrap_err();
+        assert!(error.contains("本地加密密钥不存在"));
+
+        unlock_local_vault(Some("startup-secret".to_string())).expect("unlock");
+        assert!(is_local_vault_unlocked());
+
+        let path = temp_vault_path("passphrase");
+        let vault = LocalSecretVault::new(path.clone());
+        vault
+            .store("host_password", "host-a", "secret")
+            .expect("store");
+        assert_eq!("secret", vault.get("host_password", "host-a").expect("get"));
+
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn unlock_local_vault_allows_passphrase_recovery_when_system_keyring_key_is_stale() {
+        let _guard = TEST_GUARD.lock().expect("test guard");
+        clear_cached_vault_key_for_tests();
+        let dir = temp_vault_dir("stale-keyring");
+        let path = dir.join(VAULT_FILE_NAME);
+        let vault = LocalSecretVault::new(path.clone());
+        let passphrase = "startup-secret";
+        let correct_key = derive_master_key_from_passphrase(passphrase);
+
+        std::fs::create_dir_all(&dir).expect("vault dir");
+        set_test_vault_dir_for_tests(Some(dir.clone()));
+        unlock_local_vault_for_tests(correct_key);
+        vault
+            .store("host_password", "host-a", "secret")
+            .expect("store");
+
+        clear_cached_vault_key_for_tests();
+        store_mock_system_keyring_key_for_tests([99; 32]);
+
+        let error = unlock_local_vault(None).unwrap_err();
+        assert!(error.contains("系统钥匙串中的本地加密密钥无法解开现有 vault"));
+
+        unlock_local_vault(Some(passphrase.to_string())).expect("recover unlock");
+        assert_eq!("secret", vault.get("host_password", "host-a").expect("get"));
+
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_dir(dir);
+        set_test_vault_dir_for_tests(None);
     }
 
     #[derive(Clone, Default)]

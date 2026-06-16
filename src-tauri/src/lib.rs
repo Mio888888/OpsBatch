@@ -11,6 +11,11 @@ use tauri::webview::PageLoadEvent;
 use tauri::Listener;
 use tauri::Manager;
 
+#[tauri::command]
+fn migrate_plaintext_secrets_to_vault(db: tauri::State<'_, db::Database>) -> Result<(), String> {
+    db.migrate_plaintext_secrets_to_vault()
+}
+
 pub fn run() {
     tls::install_default_crypto_provider();
 
@@ -84,8 +89,6 @@ pub fn run() {
                     );
                 });
             }
-            commands::github::spawn_startup_repo_updates(app.handle().clone());
-
             // Open devtools for all windows in debug (dev) builds
             #[cfg(debug_assertions)]
             {
@@ -158,6 +161,9 @@ pub fn run() {
             commands::ai::ai_keychain_store,
             commands::ai::ai_keychain_get,
             commands::ai::ai_keychain_delete,
+            keychain::unlock_local_vault,
+            keychain::is_local_vault_unlocked_command,
+            migrate_plaintext_secrets_to_vault,
             // RAG
             commands::rag::rag_create_collection,
             commands::rag::rag_list_collections,
@@ -179,6 +185,7 @@ pub fn run() {
             commands::github::toggle_repo,
             commands::github::set_repo_update_on_startup,
             commands::github::pull_repo,
+            commands::github::run_startup_repo_updates,
             // Settings
             commands::settings::list_danger_rules,
             commands::settings::add_danger_rule,

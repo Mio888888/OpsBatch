@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { HashRouter, Routes, Route, useLocation, useNavigate } from 'react-router-dom';
 import { ToastProvider } from './components/ui';
 import { useTranslation } from './i18n';
@@ -183,11 +183,13 @@ function AppContent() {
 }
 
 function App() {
+  const [vaultUnlocked, setVaultUnlocked] = useState(false);
+
   return (
     <ToastProvider>
       <HashRouter>
-        <AppContent />
-        <KeychainNoticeModal />
+        {vaultUnlocked ? <AppContent /> : <RouteLoading />}
+        <KeychainNoticeModal onUnlocked={() => setVaultUnlocked(true)} />
       </HashRouter>
     </ToastProvider>
   );

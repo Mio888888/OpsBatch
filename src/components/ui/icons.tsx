@@ -19,6 +19,7 @@ import {
   FolderOpen,
   History,
   Import,
+  KeyRound,
   LoaderCircle,
   Minus,
   Plus,
@@ -65,6 +66,7 @@ export const ForwardOutlined = icon(StepForward);
 export const GithubOutlined = icon(Code);
 export const HistoryOutlined = icon(History);
 export const ImportOutlined = icon(Import);
+export const KeyOutlined = icon(KeyRound);
 export const LoadingOutlined = icon(LoaderCircle);
 export const PauseCircleOutlined = icon(CirclePause);
 export const PlayCircleOutlined = icon(CirclePlay);

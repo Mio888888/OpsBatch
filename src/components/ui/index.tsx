@@ -618,6 +618,8 @@ export function Modal({
   okButtonProps,
   cancelButtonProps,
   className,
+  maskClosable = true,
+  closable = true,
 }: {
   open?: boolean;
   onCancel?: () => void;
@@ -639,10 +641,16 @@ export function Modal({
   const { t } = useTranslation();
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={(next) => { if (!next) onCancel?.(); }}>
+    <DialogPrimitive.Root open={open} onOpenChange={(next) => { if (!next && closable) onCancel?.(); }}>
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay className="ui-dialog-overlay" />
-        <DialogPrimitive.Content className={cx('ui-dialog-content', className)} style={{ width }} aria-describedby={undefined}>
+        <DialogPrimitive.Content
+          className={cx('ui-dialog-content', className)}
+          style={{ width }}
+          aria-describedby={undefined}
+          onEscapeKeyDown={(event) => { if (!closable) event.preventDefault(); }}
+          onPointerDownOutside={(event) => { if (!maskClosable || !closable) event.preventDefault(); }}
+        >
           {title ? <DialogPrimitive.Title className="ui-dialog-title">{title}</DialogPrimitive.Title> : null}
           <div className="ui-dialog-body">{children}</div>
           {footer !== null ? (

@@ -865,6 +865,24 @@ impl Database {
     }
 
     fn migrate_host_secrets_to_keychain(&self, conn: &Connection) -> Result<(), String> {
+        self.migrate_host_secrets_to_keychain_with_mode(conn, false)
+    }
+
+    fn migrate_repo_tokens_to_keychain(&self, conn: &Connection) -> Result<(), String> {
+        self.migrate_repo_tokens_to_keychain_with_mode(conn, false)
+    }
+
+    pub fn migrate_plaintext_secrets_to_vault(&self) -> Result<(), String> {
+        let conn = self.pool.get().map_err(|e| e.to_string())?;
+        self.migrate_host_secrets_to_keychain_with_mode(&conn, true)?;
+        self.migrate_repo_tokens_to_keychain_with_mode(&conn, true)
+    }
+
+    fn migrate_host_secrets_to_keychain_with_mode(
+        &self,
+        conn: &Connection,
+        require_unlocked: bool,
+    ) -> Result<(), String> {
         let mut stmt = conn
             .prepare("SELECT id, password, private_key FROM hosts")
             .map_err(|e| e.to_string())?;
@@ -883,13 +901,23 @@ impl Database {
             if let Some(secret) =
                 password.filter(|value| !value.is_empty() && value != SECRET_PLACEHOLDER)
             {
-                crate::keychain::store_host_password(&id, &secret)?;
+                if let Err(error) = crate::keychain::store_host_password(&id, &secret) {
+                    if !require_unlocked && crate::keychain::is_locked_error_message(&error) {
+                        return Ok(());
+                    }
+                    return Err(error);
+                }
                 updates.push(("password", id.clone()));
             }
             if let Some(secret) =
                 private_key.filter(|value| !value.is_empty() && value != SECRET_PLACEHOLDER)
             {
-                crate::keychain::store_host_private_key(&id, &secret)?;
+                if let Err(error) = crate::keychain::store_host_private_key(&id, &secret) {
+                    if !require_unlocked && crate::keychain::is_locked_error_message(&error) {
+                        return Ok(());
+                    }
+                    return Err(error);
+                }
                 updates.push(("private_key", id.clone()));
             }
         }
@@ -901,7 +929,11 @@ impl Database {
         Ok(())
     }
 
-    fn migrate_repo_tokens_to_keychain(&self, conn: &Connection) -> Result<(), String> {
+    fn migrate_repo_tokens_to_keychain_with_mode(
+        &self,
+        conn: &Connection,
+        require_unlocked: bool,
+    ) -> Result<(), String> {
         let mut stmt = conn
             .prepare("SELECT id, token FROM github_repos")
             .map_err(|e| e.to_string())?;
@@ -916,7 +948,12 @@ impl Database {
             if let Some(secret) =
                 token.filter(|value| !value.is_empty() && value != SECRET_PLACEHOLDER)
             {
-                crate::keychain::store_github_token(&id, &secret)?;
+                if let Err(error) = crate::keychain::store_github_token(&id, &secret) {
+                    if !require_unlocked && crate::keychain::is_locked_error_message(&error) {
+                        return Ok(());
+                    }
+                    return Err(error);
+                }
                 ids.push(id);
             }
         }

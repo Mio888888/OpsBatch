@@ -16,7 +16,7 @@
 
 .keychain-notice {
   display: grid;
-  gap: 12px;
+  gap: 14px;
   color: var(--color-text);
   font-size: var(--font-size-body);
   line-height: var(--line-height-relaxed);
@@ -26,14 +26,63 @@
   margin: 0;
 }
 
-.keychain-notice ul {
-  display: grid;
-  gap: 8px;
-  padding: 12px 14px 12px 28px;
-  margin: 0;
+.keychain-notice-status,
+.keychain-notice-hint,
+.keychain-notice-footer {
   background: color-mix(in srgb, var(--color-primary) 6%, var(--color-surface));
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+}
+
+.keychain-notice-status {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  color: var(--color-text);
+  font-weight: 600;
+}
+
+.keychain-notice-status svg {
+  color: var(--color-primary);
+}
+
+.keychain-notice-hint {
+  padding: 12px;
+  color: var(--color-text-secondary);
+}
+
+.keychain-notice-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.keychain-notice-form .ui-input {
+  width: 100%;
+}
+
+.keychain-notice-form .ui-button span {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.keychain-notice-error {
+  padding: 10px 12px;
+  color: var(--color-danger);
+  background: color-mix(in srgb, var(--color-danger) 8%, var(--color-surface));
+  border: 1px solid color-mix(in srgb, var(--color-danger) 24%, var(--color-border));
+  border-radius: var(--radius-md);
+}
+
+.keychain-notice-footer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  color: var(--color-text-secondary);
 }
 
 .asset-host-form {

@@ -257,6 +257,20 @@ fn resolve_repo_token(repo_id: &str, stored: Option<String>) -> Result<Option<St
     }
 }
 
+fn log_startup_repo_update_summary(app: &AppHandle, results: &[StartupUpdateResult]) {
+    if results.is_empty() {
+        return;
+    }
+    let success_count = results.iter().filter(|item| item.pulled).count();
+    let error_count = results.len().saturating_sub(success_count);
+    let level = if error_count > 0 { "warn" } else { "info" };
+    let message = format!(
+        "Startup repository update finished: {} synced, {} failed",
+        success_count, error_count
+    );
+    crate::commands::app_log::emit_log(app, level, "repo-sync", &message, "backend");
+}
+
 #[tauri::command]
 pub fn pull_repo(
     app: AppHandle,
@@ -1554,30 +1568,12 @@ pub fn update_startup_repos(
     Ok(results)
 }
 
-pub fn spawn_startup_repo_updates(app: AppHandle) {
-    std::thread::spawn(move || {
-        let db = app.state::<Database>();
-        match update_startup_repos(app.clone(), db) {
-            Ok(results) if results.is_empty() => {}
-            Ok(results) => {
-                let success_count = results.iter().filter(|item| item.pulled).count();
-                let error_count = results.len().saturating_sub(success_count);
-                let level = if error_count > 0 { "warn" } else { "info" };
-                let message = format!(
-                    "Startup repository update finished: {} synced, {} failed",
-                    success_count, error_count
-                );
-                crate::commands::app_log::emit_log(&app, level, "repo-sync", &message, "backend");
-            }
-            Err(error) => {
-                crate::commands::app_log::emit_log(
-                    &app,
-                    "error",
-                    "repo-sync",
-                    &format!("Startup repository update failed: {}", error),
-                    "backend",
-                );
-            }
-        }
-    });
+#[tauri::command]
+pub fn run_startup_repo_updates(
+    app: AppHandle,
+    db: tauri::State<'_, Database>,
+) -> Result<Vec<StartupUpdateResult>, String> {
+    let results = update_startup_repos(app.clone(), db)?;
+    log_startup_repo_update_summary(&app, &results);
+    Ok(results)
 }

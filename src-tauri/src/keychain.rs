@@ -514,6 +514,7 @@ fn decrypt_with_key(account: &str, encrypted: &str, key: &[u8; 32]) -> Result<St
         .map_err(|e| SecretError::Backend(format!("本地加密存储 UTF-8 解码失败: {}", e)))
 }
 
+#[allow(clippy::needless_return)] // cfg(test)/cfg(not(test)) 分支下，test 构建去掉后半块后需显式 return 才不退化为单元值
 fn read_system_vault_master_key() -> Result<Option<SystemVaultMasterKey>, String> {
     #[cfg(test)]
     {
@@ -536,6 +537,7 @@ fn read_system_vault_master_key() -> Result<Option<SystemVaultMasterKey>, String
     }
 }
 
+#[allow(clippy::needless_return)] // 同 read_system_vault_master_key：cfg 分支需显式 return
 fn write_system_vault_master_key(key: &[u8; 32]) -> Result<(), String> {
     #[cfg(test)]
     {
@@ -715,7 +717,7 @@ fn write_private_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
 fn legacy_get_secret(account: &str) -> Result<String, SecretError> {
     #[cfg(target_os = "macos")]
     {
-        return macos_get_secret(account);
+        macos_get_secret(account)
     }
 
     #[cfg(not(target_os = "macos"))]

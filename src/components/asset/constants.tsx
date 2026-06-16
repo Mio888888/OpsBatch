@@ -105,14 +105,6 @@ export function submittedSecret(value?: string): string | undefined {
   return trimmed && trimmed !== SECRET_PLACEHOLDER ? value : undefined;
 }
 
-export function secretDebugState(value?: string) {
-  return {
-    present: Boolean(value),
-    placeholder: value === SECRET_PLACEHOLDER,
-    length: value?.length ?? 0,
-  };
-}
-
 export function hostUsesStoredSecret(host: Pick<Host, 'authType' | 'password' | 'privateKey' | 'jumpChain'>) {
   if (host.authType === 'password' && host.password === SECRET_PLACEHOLDER) return true;
   if (host.authType === 'key' && host.privateKey === SECRET_PLACEHOLDER) return true;

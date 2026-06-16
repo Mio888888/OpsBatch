@@ -101,6 +101,19 @@ struct HostConnectionInfo {
     os: String,
 }
 
+/// hosts 表查询的连接信息字段：
+/// (ip, port, auth_type, username, password, private_key, os, proxy_settings)
+type HostConnInfoRow = (
+    String,
+    i32,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+    Option<String>,
+);
+
 const HOST_SELECT_FIELDS: &str = "id, name, ip, port, auth_type, username, password, private_key, os, tags, group_id, remark, status, jump_chain, COALESCE(rdp_settings, '{}'), COALESCE(proxy_settings, '{}'), created_at, updated_at";
 
 fn map_host_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Host> {
@@ -177,16 +190,7 @@ fn get_host_connection_info(
     id: &str,
 ) -> Result<HostConnectionInfo, String> {
     let conn = db.pool.get().map_err(|e| e.to_string())?;
-    let (ip, port, auth_type, username, password, private_key, os, proxy_settings): (
-        String,
-        i32,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        String,
-        Option<String>,
-    ) = conn
+    let (ip, port, auth_type, username, password, private_key, os, proxy_settings): HostConnInfoRow = conn
         .query_row(
             "SELECT ip, port, auth_type, username, password, private_key, os, COALESCE(proxy_settings, '{}') FROM hosts WHERE id=?1",
             params![id],

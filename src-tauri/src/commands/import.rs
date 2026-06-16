@@ -39,7 +39,7 @@ pub fn import_hosts_csv(
         result.total += 1;
         let fields: Vec<&str> = line.split(',').collect();
 
-        let name = fields.get(0).unwrap_or(&"").trim();
+        let name = fields.first().unwrap_or(&"").trim();
         let ip = fields.get(1).unwrap_or(&"").trim();
 
         if name.is_empty() || ip.is_empty() {

@@ -352,8 +352,7 @@ fn font_from_path(path: &Path) -> Option<(String, String)> {
     let stem = path.file_stem()?.to_string_lossy();
     let mut name = stem
         .replace(['_', '-'], " ")
-        .replace("Nerd Font Complete", "Nerd Font")
-        .replace("Nerd Font Mono", "Nerd Font Mono");
+        .replace("Nerd Font Complete", "Nerd Font");
 
     let mut style = "Regular".to_string();
     for suffix in FONT_STYLE_SUFFIXES {
@@ -432,7 +431,6 @@ fn add_font_style(families: &mut HashMap<String, BTreeSet<String>>, family: Stri
 
 fn strip_font_style_suffix(family: &str) -> String {
     let original = family
-        .trim()
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
@@ -474,7 +472,7 @@ fn normalize_font_style(style: &str) -> String {
 fn font_family_infos(families: HashMap<String, BTreeSet<String>>) -> Vec<FontFamilyInfo> {
     let mut infos: Vec<FontFamilyInfo> = families
         .into_iter()
-        .filter_map(|(family, styles)| {
+        .map(|(family, styles)| {
             let mut styles: Vec<String> = styles.into_iter().collect();
             if styles.is_empty() {
                 styles.push("Regular".to_string());
@@ -484,10 +482,10 @@ fn font_family_infos(families: HashMap<String, BTreeSet<String>>) -> Vec<FontFam
                     .cmp(&font_style_rank(b))
                     .then_with(|| a.cmp(b))
             });
-            Some(FontFamilyInfo { family, styles })
+            FontFamilyInfo { family, styles }
         })
         .collect();
-    infos.sort_by(|a, b| a.family.to_lowercase().cmp(&b.family.to_lowercase()));
+    infos.sort_by_key(|a| a.family.to_lowercase());
     infos
 }
 

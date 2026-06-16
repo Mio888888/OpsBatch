@@ -9,6 +9,18 @@ use crate::db::Database;
 use crate::security::shell_quote;
 use crate::ssh;
 
+/// hosts 表查询的连接字段：(ip, port, auth_type, name, username, password, private_key, proxy_settings)
+type HostConnectionRow = (
+    String,
+    i32,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
 #[derive(Deserialize)]
 pub struct TransferRequest {
     pub direction: String,
@@ -30,7 +42,7 @@ fn resolve_firstdir(
     let cmd = format!("ls -1d {}/ 2>/dev/null | head -1", quoted_parent);
     let output = pool.execute(host_id, config, &cmd, timeout_secs)?;
     let name = output.trim().trim_end_matches('/');
-    let name = name.split('/').last().unwrap_or("");
+    let name = name.split('/').next_back().unwrap_or("");
     if name.is_empty() {
         Err(format!("no directories found under {}", parent_path))
     } else {
@@ -160,7 +172,7 @@ pub fn file_transfer(
 
     let mut configs: Vec<(String, String, ssh::SshConfig)> = Vec::new();
     for hid in &request.host_ids {
-        let (ip, port, auth_type, host_name, username, password, private_key, proxy_settings): (String, i32, String, String, String, Option<String>, Option<String>, Option<String>) = conn
+        let (ip, port, auth_type, host_name, username, password, private_key, proxy_settings): HostConnectionRow = conn
             .query_row(
                 "SELECT ip, port, auth_type, name, username, password, private_key, COALESCE(proxy_settings, '{}') FROM hosts WHERE id=?1",
                 params![hid],

@@ -131,6 +131,8 @@ fn hmac_sha1(key: &[u8], data: &[u8]) -> Vec<u8> {
     sha1_hash(&outer).to_vec()
 }
 
+// SHA-1 标准算法：按轮次索引 w[] 是算法固有写法，反迭代器化反而降低可读性。
+#[allow(clippy::needless_range_loop)]
 fn sha1_hash(data: &[u8]) -> [u8; 20] {
     // Simple SHA-1 implementation
     let mut h0: u32 = 0x67452301;

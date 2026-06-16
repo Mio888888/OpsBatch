@@ -78,7 +78,6 @@ import {
   type HostTreeNode,
   type HostFormValues,
   submittedSecret,
-  secretDebugState,
   hostUsesStoredSecret,
   hostFormStoresSecret,
   isWindowsHost,
@@ -391,12 +390,6 @@ export default function MainLayout({ children }: { children: ReactNode }) {
     const hostOs: Host['os'] = isVncRemoteDesktopHost(host) ? 'vnc' : (host.os ?? 'linux');
     setEditingHost(host);
     hostForm.resetFields();
-    console.info('[host-secret] open edit host modal', {
-      hostId: host.id,
-      authType: host.authType,
-      password: secretDebugState(host.password),
-      privateKey: secretDebugState(host.privateKey),
-    });
     hostForm.setFieldsValue({
       name: host.name,
       ip: host.ip,
@@ -515,15 +508,6 @@ export default function MainLayout({ children }: { children: ReactNode }) {
         rdpSettings: buildRdpSettings(values, os),
         proxySettings: buildProxySettings(values),
       };
-      console.info('[host-secret] submit host form', {
-        hostId: editingHost?.id ?? '(new)',
-        authType,
-        editing: Boolean(editingHost),
-        rawPassword: secretDebugState(values.password),
-        submittedPassword: secretDebugState(normalizedHost.password),
-        rawPrivateKey: secretDebugState(values.privateKey),
-        submittedPrivateKey: secretDebugState(normalizedHost.privateKey),
-      });
 
       try {
         if (hostFormStoresSecret(normalizedHost) && !(await requestKeychainNotice())) return;

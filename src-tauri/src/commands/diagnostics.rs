@@ -5,8 +5,7 @@ use tauri::{AppHandle, Manager};
 
 fn redact_diagnostic_message(message: &str) -> String {
     message
-        .replace('\r', " ")
-        .replace('\n', " ")
+        .replace(['\r', '\n'], " ")
         .chars()
         .take(2000)
         .collect()

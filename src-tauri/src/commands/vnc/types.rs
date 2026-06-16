@@ -6,8 +6,10 @@ pub const DEFAULT_VNC_PORT: u16 = 5900;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub enum VncAuthMethod {
     #[serde(rename = "vnc")]
+    #[default]
     VncAuth,
     #[serde(rename = "ard")]
     AppleRemoteDesktop,
@@ -29,11 +31,6 @@ impl VncAuthMethod {
     }
 }
 
-impl Default for VncAuthMethod {
-    fn default() -> Self {
-        Self::VncAuth
-    }
-}
 
 impl<'de> Deserialize<'de> for VncAuthMethod {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

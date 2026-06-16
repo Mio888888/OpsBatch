@@ -72,16 +72,13 @@ pub struct RdpMetricsPayload {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub enum RdpTransportMode {
+    #[default]
     LegacyBitmap,
     H264Direct,
 }
 
-impl Default for RdpTransportMode {
-    fn default() -> Self {
-        Self::LegacyBitmap
-    }
-}
 
 #[cfg(test)]
 #[derive(Debug, Clone)]

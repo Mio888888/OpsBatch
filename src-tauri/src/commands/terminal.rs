@@ -14,6 +14,19 @@ use crate::commands::terminal_shell::{current_shell_platform, select_local_shell
 use crate::db::Database;
 use crate::ssh;
 
+/// hosts 表查询的终端连接字段：
+/// (ip, port, auth_type, username, password, private_key, jump_chain_json, proxy_settings)
+type TerminalHostRow = (
+    String,
+    i32,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    String,
+    Option<String>,
+);
+
 const OUTPUT_BATCH_MAX_BYTES: usize = 128 * 1024;
 const OUTPUT_BATCH_WINDOW: Duration = Duration::from_millis(16);
 const READ_BUFFER_SIZE: usize = 16 * 1024;
@@ -484,16 +497,7 @@ pub async fn terminal_connect(
 ) -> Result<String, String> {
     let session_id = session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    let (ip, port, auth_type, username, password, private_key, jump_chain_json, proxy_settings): (
-        String,
-        i32,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        String,
-        Option<String>,
-    ) = {
+    let (ip, port, auth_type, username, password, private_key, jump_chain_json, proxy_settings): TerminalHostRow = {
         let db = app.state::<Database>();
         let conn = db.pool.get().map_err(|e| e.to_string())?;
         conn.query_row(

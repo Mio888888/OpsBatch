@@ -155,10 +155,11 @@ pub struct JumpTopology {
     pub edges: Vec<JumpTopologyEdge>,
 }
 
+/// 跳板拓扑图：(节点列表, 主机ID -> 下游主机ID列表 的邻接表)
+type TopologyGraph = (Vec<JumpTopologyNode>, HashMap<String, Vec<String>>);
+
 /// Build a jump topology graph from all hosts' jump_chain fields.
-fn build_topology(
-    db: &Database,
-) -> Result<(Vec<JumpTopologyNode>, HashMap<String, Vec<String>>), String> {
+fn build_topology(db: &Database) -> Result<TopologyGraph, String> {
     let rows = {
         let conn = db.pool.get().map_err(|e| e.to_string())?;
         let mut stmt = conn

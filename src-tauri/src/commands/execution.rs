@@ -8,6 +8,21 @@ use crate::db::Database;
 use crate::security::{clamp_execution_concurrency, truncate_output_lossy};
 use crate::ssh;
 
+/// hosts 表查询返回的连接字段：(ip, port, auth_type, name, username, password, private_key, proxy_settings)
+type HostConnectionRow = (
+    String,
+    i32,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+/// 单台主机执行结果：(host_id, host_name, result_flag, output, exit_code, duration_ms)
+type HostExecOutcome = (String, String, u32, String, i32, u64);
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExecutionHistory {
     pub id: String,
@@ -99,6 +114,7 @@ pub async fn get_execution_detail(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // Tauri command 参数与前端调用一一对应，无法合并
 pub fn execute_command(
     app: AppHandle,
     db: tauri::State<'_, Database>,
@@ -113,7 +129,7 @@ pub fn execute_command(
 
     let mut configs: Vec<(String, String, ssh::SshConfig)> = Vec::new();
     for hid in &host_ids {
-        let (ip, port, auth_type, host_name, username, password, private_key, proxy_settings): (String, i32, String, String, String, Option<String>, Option<String>, Option<String>) = conn
+        let (ip, port, auth_type, host_name, username, password, private_key, proxy_settings): HostConnectionRow = conn
             .query_row(
                 "SELECT ip, port, auth_type, name, username, password, private_key, COALESCE(proxy_settings, '{}') FROM hosts WHERE id=?1",
                 params![hid],
@@ -170,10 +186,8 @@ pub fn execute_command(
         );
 
         let max_concurrent = clamp_execution_concurrency(concurrency) as usize;
-        let mut handles: VecDeque<
-            std::thread::JoinHandle<(String, String, u32, String, i32, u64)>,
-        > = VecDeque::new();
-        let mut pending_db_writes: Vec<(String, String, u32, String, i32, u64)> = Vec::new();
+        let mut handles: VecDeque<std::thread::JoinHandle<HostExecOutcome>> = VecDeque::new();
+        let mut pending_db_writes: Vec<HostExecOutcome> = Vec::new();
 
         for (hid, host_name, config) in configs.into_iter() {
             if is_cancelled(&app, &task_id_arc) {

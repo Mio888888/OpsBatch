@@ -220,6 +220,7 @@ impl Default for VncSessionManager {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // 桥接监听器需要完整的会话/连接上下文，拆分反而降低可读性
 async fn run_bridge_listener(
     app: AppHandle,
     session_id: String,

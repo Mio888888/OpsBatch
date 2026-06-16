@@ -85,14 +85,6 @@ function parseJsonArray(value: string | undefined, fallback: string[] = []) {
   }
 }
 
-function secretDebugState(value?: string) {
-  return {
-    present: Boolean(value),
-    placeholder: value === '***keychain***',
-    length: value?.length ?? 0,
-  };
-}
-
 function mapHostMonitorNetwork(network: BackendHostMonitorNetwork): HostMonitorNetwork {
   return {
     interface: network.interface,
@@ -368,21 +360,10 @@ export const useAssetsStore = create<AssetsState>((set, get) => ({
       rdp_settings: serializeRdpSettings(host.rdpSettings),
       proxy_settings: serializeProxySettings(host.proxySettings),
     };
-    console.info('[host-secret] invoke update_host', {
-      hostId: host.id,
-      authType: host.authType,
-      password: secretDebugState(host.password),
-      privateKey: secretDebugState(host.privateKey),
-    });
     try {
       const updated = await invoke<BackendHost>('update_host', { host: backend });
-      console.info('[host-secret] update_host succeeded', { hostId: host.id });
       set((s) => ({ hosts: upsertHost(s.hosts, mapBackendHost(updated)) }));
     } catch (error: unknown) {
-      console.error('[host-secret] update_host failed', {
-        hostId: host.id,
-        error: getErrorMessage(error),
-      });
       throw new Error(getErrorMessage(error));
     }
   },

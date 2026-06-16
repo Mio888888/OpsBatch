@@ -102,6 +102,9 @@ pub(super) fn egfx_capability_diagnostics(caps: &CapabilitySet) -> EgfxCapabilit
 }
 
 impl RdpEgfxBridge {
+    /// 构建图形管道客户端并返回多条输出 channel。返回的不是 Self（含外部类型
+    /// GraphicsPipelineClient），故抑制 new_should_return Self。
+    #[allow(clippy::new_ret_no_self)]
     pub(super) fn new(
         session_id: String,
     ) -> (

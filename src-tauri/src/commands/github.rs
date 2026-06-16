@@ -6,7 +6,7 @@ use crate::security::SECRET_PLACEHOLDER;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::env;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -92,7 +92,7 @@ impl LibraryLanguage {
 fn path_has_language_suffix(path: &Path, language: LibraryLanguage) -> bool {
     path.file_stem()
         .and_then(|stem| stem.to_str())
-        .map_or(false, |stem| {
+        .is_some_and(|stem| {
             let script_stem = stem.strip_suffix(".meta").unwrap_or(stem);
             script_stem.ends_with(language.suffix())
         })
@@ -712,15 +712,14 @@ fn parse_yaml_to_json(content: &str) -> serde_json::Value {
                     if !next.starts_with("  ") && !next.starts_with('\t') {
                         break;
                     }
-                    let stripped = if next.starts_with("  ") {
-                        &next[2..]
-                    } else {
-                        &next[1..] // tab
-                    };
+                    let stripped = next
+                        .strip_prefix("  ")
+                        .or_else(|| next.strip_prefix('\t'))
+                        .unwrap_or(next);
                     block.push(stripped.to_string());
                     i += 1;
                 }
-                while block.last().map_or(false, |s| s.is_empty()) {
+                while block.last().is_some_and(|s| s.is_empty()) {
                     block.pop();
                 }
                 map.insert(key, Value::String(block.join("\n")));
@@ -735,7 +734,7 @@ fn parse_yaml_to_json(content: &str) -> serde_json::Value {
                     let next = lines[i];
                     let trimmed = next.trim_start();
                     if trimmed.starts_with("- ") {
-                        let after_dash = trimmed[2..].trim();
+                        let after_dash = trimmed.strip_prefix("- ").unwrap_or(trimmed).trim();
 
                         // Check if this "- " starts an object (contains ": ")
                         if let Some(obj_colon) = after_dash.find(": ") {
@@ -815,10 +814,10 @@ fn parse_yaml_to_json(content: &str) -> serde_json::Value {
 fn platform_array_to_string(platforms: &[serde_json::Value]) -> String {
     let has_linux = platforms
         .iter()
-        .any(|p| p.as_str().map_or(false, |s| s == "linux" || s == "macos"));
+        .any(|p| p.as_str().is_some_and(|s| s == "linux" || s == "macos"));
     let has_windows = platforms
         .iter()
-        .any(|p| p.as_str().map_or(false, |s| s == "windows"));
+        .any(|p| p.as_str() == Some("windows"));
     if has_linux && has_windows {
         "both".to_string()
     } else if has_windows {
@@ -1430,7 +1429,7 @@ fn resolve_quick_action_steps(
 fn sync_library_from_repo(
     conn: &rusqlite::Connection,
     repo_id: &str,
-    repo_path: &PathBuf,
+    repo_path: &Path,
     language: LibraryLanguage,
     result: &mut PullResult,
 ) {

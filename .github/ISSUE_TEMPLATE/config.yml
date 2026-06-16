@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 社区讨论
+    url: https://github.com/Mio888888/OpsBatch/discussions
+    about: 使用 GitHub Discussions 进行一般性讨论和问题交流
+  - name: 📖 文档
+    url: https://github.com/Mio888888/OpsBatch#readme
+    about: 查看项目文档和快速上手指南

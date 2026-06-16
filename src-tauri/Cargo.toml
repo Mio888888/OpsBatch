@@ -51,7 +51,7 @@ dashmap = "6"
 regex = "1"
 sha2 = "0.10"
 hmac = "0.12"
-keyring = { version = "3", features = ["windows-native", "sync-secret-service", "crypto-rust"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 tauri-plugin-updater = "2.10.1"
 tauri-plugin-process = "2.3.1"
 r2d2 = "0.8.10"

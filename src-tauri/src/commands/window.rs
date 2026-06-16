@@ -165,7 +165,7 @@ pub async fn open_managed_window(
             &format!("create kind={kind} label={label} route={route} url={url}"),
         );
 
-        let mut builder =
+        let builder =
             WebviewWindowBuilder::new(&app_for_create, label.clone(), WebviewUrl::App(url.into()))
                 .title(title)
                 .inner_size(width, height)
@@ -173,11 +173,9 @@ pub async fn open_managed_window(
                 .decorations(false);
 
         #[cfg(target_os = "macos")]
-        {
-            builder = builder
-                .transparent(true)
-                .background_color(tauri::utils::config::Color(0, 0, 0, 0));
-        }
+        let builder = builder
+            .transparent(true)
+            .background_color(tauri::utils::config::Color(0, 0, 0, 0));
 
         if let Err(e) = builder.build() {
             let message = e.to_string();

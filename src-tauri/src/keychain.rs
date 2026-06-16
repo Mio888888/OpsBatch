@@ -1,7 +1,7 @@
 use aes_gcm::aead::{Aead, Payload};
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-#[cfg(not(test))]
+#[cfg(not(target_os = "macos"))]
 use keyring::{Entry, Error as KeyringError};
 #[cfg(target_os = "macos")]
 use security_framework::os::macos::keychain::{SecKeychain, SecPreferencesDomain};

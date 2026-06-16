@@ -265,7 +265,15 @@ test('RDP AI execution does not silently succeed without an active session', () 
   const aiChatSource = readFileSync('src/stores/aiChat.ts', 'utf8');
   const executorSource = readFileSync('src/utils/rdpAgentExecutor.ts', 'utf8');
 
-  assert.doesNotMatch(rdpPageSource, /if \(!rdpSessionId\) return;/);
+  // 锚定到 AI 执行回调本身：无会话时必须 throw 而非静默 return。
+  // 注意不要扫描整个文件——文件拖拽等无关路径存在合法的 `if (!rdpSessionId) return;`。
+  const aiHandlerMatch = rdpPageSource.match(
+    /const handleExecuteRdpOperations = useCallback\(\s*async \(ops: RdpOperation\[\]\) => \{([\s\S]*?)\},\s*\[/,
+  );
+  assert.ok(aiHandlerMatch, 'handleExecuteRdpOperations 回调应存在');
+  const aiHandlerBody = aiHandlerMatch[1];
+  assert.doesNotMatch(aiHandlerBody, /if \(!rdpSessionId\) return;/);
+  assert.match(aiHandlerBody, /if \(!rdpSessionId\) \{\s*throw new Error/);
   assert.match(rdpPageSource, /RDP 会话未连接，无法执行 AI 操作/);
   assert.match(aiChatSource, /logHandledError\(\s*'rdp\.ai\.execute'/);
   assert.match(aiChatSource, /emitFrontendGlobalLog\(\s*'info',\s*'rdp\.ai\.execute'/);

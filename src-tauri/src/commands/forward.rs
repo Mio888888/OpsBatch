@@ -591,6 +591,9 @@ async fn remote_forward_loop(
         },
     );
 
+    // 阻塞等待停止/关闭信号；当前 ForwardCmd 变体都会终止循环，
+    // 但保留 while-let 命令循环结构以便未来新增非终止命令（如统计刷新）。
+    #[allow(clippy::never_loop)]
     while let Some(cmd) = cmd_rx.recv().await {
         match cmd {
             ForwardCmd::Stop | ForwardCmd::Shutdown => break,

@@ -66,9 +66,12 @@ test('managed child windows are created from an async command on Windows', () =>
 
 test('windows uses square app chrome while macOS keeps the rounded default', () => {
   const mainSource = readFileSync('src/main.tsx', 'utf8');
-  const cssSource = readFileSync('src/App.css', 'utf8');
+  // App.css 已重构为样式模块清单，--window-radius 默认值定义在 foundation/tokens.css，
+  // Windows 覆盖定义在 foundation/platform.css。
+  const tokensCss = readFileSync('src/styles/foundation/tokens.css', 'utf8');
+  const platformCss = readFileSync('src/styles/foundation/platform.css', 'utf8');
 
   assert.match(mainSource, /document\.documentElement\.dataset\.platform = detectHostPlatform\(\)/);
-  assert.match(cssSource, /--window-radius:\s*20px/);
-  assert.match(cssSource, /\[data-platform="windows"\][\s\S]*--window-radius:\s*0/);
+  assert.match(tokensCss, /--window-radius:\s*20px/);
+  assert.match(platformCss, /\[data-platform="windows"\][\s\S]*--window-radius:\s*0/);
 });

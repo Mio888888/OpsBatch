@@ -3,12 +3,64 @@ name: Build
 on:
   push:
     branches: [master, main]
+  pull_request:
+    branches: [master, main]
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  test:
+    name: Test & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libssl-dev \
+            libdbus-1-dev \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libasound2-dev
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Type check frontend
+        run: npx tsc --noEmit
+
+      - name: Run frontend tests
+        run: node --test tests/*.test.ts
+
+      - name: Run Rust tests
+        working-directory: src-tauri
+        run: cargo test
+
+      - name: Run Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets
+
   check-version:
     runs-on: ubuntu-latest
     outputs:
@@ -62,7 +114,7 @@ jobs:
 
   build-windows:
     name: Build Windows
-    needs: check-version
+    needs: [check-version, test]
     if: needs.check-version.outputs.should_build == 'true'
     runs-on: windows-latest
     steps:
@@ -117,7 +169,7 @@ jobs:
 
   build-macos:
     name: Build macOS
-    needs: check-version
+    needs: [check-version, test]
     if: needs.check-version.outputs.should_build == 'true'
     runs-on: macos-latest
     steps:
@@ -171,7 +223,7 @@ jobs:
 
   build-linux:
     name: Build Linux
-    needs: check-version
+    needs: [check-version, test]
     if: needs.check-version.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:

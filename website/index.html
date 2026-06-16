@@ -732,9 +732,14 @@
       ];
       var releasesUrl = 'https://github.com/Mio888888/OpsBatch/releases/latest';
       var fallbackVersion = 'v0.1.7';
+      // 注意：github.com 上的 release 资源（含 latest.json）不返回 CORS 头，
+      // 浏览器无法跨源读取，会触发 "CORS 头缺少 Access-Control-Allow-Origin"。
+      // 因此这里只保留支持 CORS 的源：
+      //   - jsDelivr GitHub Raw 镜像（仓库分支中的 latest.json，需要将其提交到默认分支）
+      //   - GitHub API 兜底（api.github.com 返回 CORS 头）
       var latestJsonUrls = [
-        'https://github.com/Mio888888/OpsBatch/releases/latest/download/latest.json',
-        'https://github.com/Mio888888/OpsBatch/releases/download/v0.1.7/latest.json'
+        'https://cdn.jsdelivr.net/gh/Mio888888/OpsBatch@main/latest.json',
+        'https://raw.githubusercontent.com/Mio888888/OpsBatch/main/latest.json'
       ];
       var latestReleaseApi = 'https://api.github.com/repos/Mio888888/OpsBatch/releases/latest';
       var osLabels = { mac: 'macOS', windows: 'Windows', linux: 'Linux', unknown: '未知系统' };
@@ -1200,25 +1205,47 @@
         var lastError = null;
         for(var i = 0; i < urls.length; i += 1){
           try{
-            var response = await fetch(urls[i], { headers: { Accept: 'application/json' } });
+            var response = await fetch(urls[i], { headers: { Accept: 'application/json' }, cache: 'no-cache' });
             if(!response.ok) throw new Error('HTTP ' + response.status);
             return await response.json();
           }catch(error){
+            // 这里捕获的失败可能包含 CORS 跨源错误，浏览器控制台仍可能打印拦截日志，
+            // 属于正常兜底逻辑：继续尝试下一个源或回退到 GitHub API。
             lastError = error;
           }
         }
         throw lastError || new Error('No latest.json URL available');
       }
 
+      async function fetchReleaseFromGitHubApi(){
+        // api.github.com 会返回 CORS 头，浏览器可正常跨源读取。
+        var response = await fetch(latestReleaseApi, {
+          headers: { Accept: 'application/vnd.github+json' },
+          cache: 'no-cache'
+        });
+        if(!response.ok) throw new Error('HTTP ' + response.status);
+        var release = await response.json();
+        return {
+          source: 'GitHub API',
+          version: release.tag_name || release.name,
+          assets: Array.isArray(release.assets) ? release.assets : []
+        };
+      }
+
       async function getDownloadManifest(){
+        // 直接请求 github.com 上的 release 资源（含 latest.json）会被浏览器 CORS 拦截，
+        // 因此默认走支持 CORS 的 GitHub API。仅当仓库默认分支中存在 latest.json 时，
+        // 才尝试通过支持 CORS 的镜像（jsDelivr / raw.githubusercontent）读取作为增强。
         try{
-          var manifest = await fetchJsonFromUrls(latestJsonUrls);
-          return { source: 'latest.json', version: manifest.version, platforms: manifest.platforms || {} };
-        }catch(error){
-          var response = await fetch(latestReleaseApi, { headers: { Accept: 'application/vnd.github+json' } });
-          if(!response.ok) throw new Error('HTTP ' + response.status);
-          var release = await response.json();
-          return { source: 'GitHub API', version: release.tag_name || release.name, assets: Array.isArray(release.assets) ? release.assets : [] };
+          return await fetchReleaseFromGitHubApi();
+        }catch(apiError){
+          // GitHub API 失败（例如触发速率限制）时，再尝试 CORS 友好的 latest.json 镜像。
+          try{
+            var manifest = await fetchJsonFromUrls(latestJsonUrls);
+            return { source: 'latest.json', version: manifest.version, platforms: manifest.platforms || {} };
+          }catch(jsonError){
+            throw apiError;
+          }
         }
       }
 

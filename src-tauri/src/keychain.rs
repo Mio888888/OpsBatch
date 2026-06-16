@@ -573,14 +573,15 @@ fn encode_system_vault_master_key(key: &[u8; 32]) -> String {
 fn decode_system_vault_master_key(encoded: &str) -> Result<SystemVaultMasterKey, String> {
     let trimmed = encoded.trim();
     if let Some(value) = trimmed.strip_prefix(SYSTEM_VAULT_MASTER_KEY_PREFIX) {
-        return decode_master_key(value).map(|key| SystemVaultMasterKey {
-            key,
-            needs_user_setup: false,
-        });
+        return decode_system_keyring_master_key(value);
     }
-    decode_master_key(trimmed).map(|key| SystemVaultMasterKey {
+    decode_system_keyring_master_key(trimmed)
+}
+
+fn decode_system_keyring_master_key(encoded: &str) -> Result<SystemVaultMasterKey, String> {
+    decode_master_key(encoded).map(|key| SystemVaultMasterKey {
         key,
-        needs_user_setup: true,
+        needs_user_setup: false,
     })
 }
 
@@ -1017,7 +1018,7 @@ mod tests {
     }
 
     #[test]
-    fn unlock_local_vault_requires_passphrase_when_system_keyring_has_legacy_raw_key() {
+    fn unlock_local_vault_uses_legacy_raw_key_when_system_keyring_has_one() {
         let _guard = TEST_GUARD.lock().expect("test guard");
         clear_cached_vault_key_for_tests();
         let dir = temp_vault_dir("legacy-keyring");
@@ -1035,16 +1036,10 @@ mod tests {
         clear_cached_vault_key_for_tests();
         store_mock_legacy_system_keyring_key_for_tests(legacy_key);
 
-        let error = unlock_local_vault(None).unwrap_err();
-        assert!(error.contains("本地加密密钥不存在"));
-        assert!(!is_local_vault_unlocked());
-
-        unlock_local_vault(Some("startup-secret".to_string())).expect("unlock");
+        unlock_local_vault(None).expect("unlock");
+        assert!(is_local_vault_unlocked());
         assert_eq!("secret", vault.get("host_password", "host-a").expect("get"));
-        assert!(raw_test_system_keyring_get()
-            .expect("raw test keyring")
-            .expect("stored key")
-            .starts_with(SYSTEM_VAULT_MASTER_KEY_PREFIX));
+        assert_eq!(1, mock_system_keyring_read_count_for_tests());
 
         let _ = std::fs::remove_file(path);
         let _ = std::fs::remove_dir(dir);

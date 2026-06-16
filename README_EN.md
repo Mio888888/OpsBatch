@@ -186,8 +186,6 @@ OpsBatch would not exist without the following open-source projects and communit
 - [tokio](https://tokio.rs) — Rust async runtime
 - And all other dependencies and their contributors
 
-- [linux.do](https://linux.do) — community support and discussion
-
 ## 📝 License
 
 OpsBatch and its dependencies follow the open-source and third-party licenses declared in the repository; distribution, modification, or integration must comply with those licenses.

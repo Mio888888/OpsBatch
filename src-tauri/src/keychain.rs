@@ -277,9 +277,11 @@ fn unlock_with_setup_required_key(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| "本地加密密钥不存在，请输入新的解锁密钥。".to_string())?;
-    validate_vault_key(&setup_key)?;
     let key = derive_master_key_from_passphrase(provided);
-    reencrypt_vault(&setup_key, &key)?;
+    match validate_vault_key(&setup_key) {
+        Ok(()) => reencrypt_vault(&setup_key, &key)?,
+        Err(_) => validate_vault_key(&key)?,
+    }
     write_system_vault_master_key(&key)?;
     cache_vault_master_key(key)
 }
@@ -991,6 +993,8 @@ mod tests {
         let _guard = TEST_GUARD.lock().expect("test guard");
         clear_cached_vault_key_for_tests();
         let dir = temp_vault_dir("legacy-key-only");
+        let path = dir.join(VAULT_FILE_NAME);
+        let vault = LocalSecretVault::new(path.clone());
         let legacy_key_path = dir
             .join(VAULT_FILE_NAME)
             .with_extension(LEGACY_VAULT_KEY_EXTENSION);
@@ -998,6 +1002,11 @@ mod tests {
 
         std::fs::create_dir_all(&dir).expect("vault dir");
         set_test_vault_dir_for_tests(Some(dir.clone()));
+        unlock_local_vault_for_tests(legacy_key);
+        vault
+            .store("host_password", "host-a", "secret")
+            .expect("store");
+        clear_cached_vault_key_for_tests();
         std::fs::write(&legacy_key_path, BASE64.encode(legacy_key)).expect("legacy key");
 
         let error = unlock_local_vault(None).unwrap_err();
@@ -1007,11 +1016,55 @@ mod tests {
 
         unlock_local_vault(Some("startup-secret".to_string())).expect("unlock");
         assert!(is_local_vault_unlocked());
+        assert_eq!("secret", vault.get("host_password", "host-a").expect("get"));
         assert!(raw_test_system_keyring_get()
             .expect("raw test keyring")
             .expect("stored key")
             .starts_with(SYSTEM_VAULT_MASTER_KEY_PREFIX));
 
+        let _ = std::fs::remove_file(path);
+        let _ = std::fs::remove_file(legacy_key_path);
+        let _ = std::fs::remove_dir(dir);
+        set_test_vault_dir_for_tests(None);
+    }
+
+    #[test]
+    fn unlock_local_vault_falls_back_to_passphrase_when_legacy_key_file_is_stale() {
+        let _guard = TEST_GUARD.lock().expect("test guard");
+        clear_cached_vault_key_for_tests();
+        let dir = temp_vault_dir("stale-legacy-key");
+        let path = dir.join(VAULT_FILE_NAME);
+        let vault = LocalSecretVault::new(path.clone());
+        let passphrase = "startup-secret";
+        let correct_key = derive_master_key_from_passphrase(passphrase);
+        let stale_legacy_key = [88; 32];
+        let legacy_key_path = dir
+            .join(VAULT_FILE_NAME)
+            .with_extension(LEGACY_VAULT_KEY_EXTENSION);
+
+        std::fs::create_dir_all(&dir).expect("vault dir");
+        set_test_vault_dir_for_tests(Some(dir.clone()));
+        unlock_local_vault_for_tests(correct_key);
+        vault
+            .store("host_password", "host-a", "secret")
+            .expect("store");
+
+        clear_cached_vault_key_for_tests();
+        std::fs::write(&legacy_key_path, BASE64.encode(stale_legacy_key)).expect("legacy key");
+
+        let error = unlock_local_vault(None).unwrap_err();
+        assert!(error.contains("本地加密密钥不存在"));
+        assert!(!is_local_vault_unlocked());
+
+        unlock_local_vault(Some(passphrase.to_string())).expect("unlock");
+        assert!(is_local_vault_unlocked());
+        assert_eq!("secret", vault.get("host_password", "host-a").expect("get"));
+        assert!(raw_test_system_keyring_get()
+            .expect("raw test keyring")
+            .expect("stored key")
+            .starts_with(SYSTEM_VAULT_MASTER_KEY_PREFIX));
+
+        let _ = std::fs::remove_file(path);
         let _ = std::fs::remove_file(legacy_key_path);
         let _ = std::fs::remove_dir(dir);
         set_test_vault_dir_for_tests(None);

@@ -23,12 +23,24 @@ type HostConnectionRow = (
 
 #[derive(Deserialize)]
 pub struct TransferRequest {
+    pub task_id: Option<String>,
     pub direction: String,
     pub host_ids: Vec<String>,
     pub local_path: String,
     pub remote_path: String,
     pub remote_paths: Option<HashMap<String, String>>,
     pub timeout: Option<u64>,
+}
+
+#[derive(serde::Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct TransferProgressRecord {
+    host_id: String,
+    host_name: String,
+    success: bool,
+    file_size: i64,
+    duration: i64,
+    error: Option<String>,
 }
 
 fn resolve_firstdir(
@@ -77,6 +89,24 @@ fn resolve_remote_path_template(
     Ok(result)
 }
 
+fn resolve_upload_target_path(local_path: &str, remote_path: &str) -> Result<String, String> {
+    let normalized = remote_path.trim();
+    if normalized.is_empty() {
+        return Err("remote path is empty".to_string());
+    }
+
+    let local_name = Path::new(local_path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("invalid local file name: {}", local_path))?;
+
+    if normalized.ends_with('/') {
+        return Ok(format!("{}{}", normalized, local_name));
+    }
+
+    Ok(normalized.to_string())
+}
+
 fn upload_file_via_pool(
     pool: &ssh::SshConnectionRegistry,
     host_id: &str,
@@ -92,16 +122,42 @@ fn upload_file_via_pool(
         return Err(format!("local file not found: {}", local_path));
     }
 
+    let upload_target = resolve_upload_target_path(local_path, remote_path)?;
     let file_size = local.metadata().map(|m| m.len()).unwrap_or(0);
     let data = fs::read(local).map_err(|e| format!("read local file failed: {}", e))?;
 
     let sftp_session = pool.open_sftp_session(host_id, config, timeout_secs)?;
+
+    // 确保远程父目录存在，否则 SFTP write 会返回 Failure
+    if let Some(parent) = Path::new(&upload_target).parent() {
+        if !parent.as_os_str().is_empty() {
+            let parent_str = parent.to_string_lossy();
+            let quoted = shell_quote(&parent_str)?;
+            let mkdir_cmd = format!("mkdir -p {}", quoted);
+            if let Err(e) = pool.execute(host_id, config, &mkdir_cmd, timeout_secs) {
+                // 非致命：父目录可能已存在，忽略错误继续尝试写入
+                eprintln!("[transfer] mkdir -p {} failed for {}: {}", parent_str, host_id, e);
+            }
+        }
+    }
+
     sftp_session.lease.block_on(async move {
-        sftp_session
+        use tokio::io::AsyncWriteExt;
+
+        let mut file = sftp_session
             .sftp
-            .write(remote_path, &data)
+            .create(&upload_target)
+            .await
+            .map_err(|e| format!("create file failed: {}", e))?;
+        file.write_all(&data)
             .await
             .map_err(|e| format!("write failed: {}", e))?;
+        file.flush()
+            .await
+            .map_err(|e| format!("flush failed: {}", e))?;
+        file.shutdown()
+            .await
+            .map_err(|e| format!("close file failed: {}", e))?;
 
         let duration_ms = start.elapsed().as_millis() as u64;
 
@@ -167,7 +223,11 @@ pub fn file_transfer(
     db: tauri::State<'_, Database>,
     request: TransferRequest,
 ) -> Result<String, String> {
-    let task_id = uuid::Uuid::new_v4().to_string();
+    let task_id = request
+        .task_id
+        .clone()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let conn = db.pool.get().map_err(|e| e.to_string())?;
 
     let mut configs: Vec<(String, String, ssh::SshConfig)> = Vec::new();
@@ -208,6 +268,7 @@ pub fn file_transfer(
 
     std::thread::spawn(move || {
         let pool = app.state::<ssh::SshConnectionRegistry>();
+        let mut records: Vec<TransferProgressRecord> = Vec::new();
 
         for (hid, host_name, config) in configs {
             let resolved_remote = match remote_paths.as_ref().and_then(|m| m.get(&hid)) {
@@ -223,16 +284,19 @@ pub fn file_transfer(
                     ) {
                         Ok(p) => p,
                         Err(e) => {
-                            let record = serde_json::json!({
-                                "hostId": hid,
-                                "hostName": host_name,
-                                "success": false,
-                                "fileSize": 0,
-                                "duration": 0,
-                                "error": format!("路径解析失败: {}", e),
-                            });
-                            let _ =
-                                app.emit(&format!("transfer:{}:progress", task_id_clone), record);
+                            let record = TransferProgressRecord {
+                                host_id: hid.clone(),
+                                host_name: host_name.clone(),
+                                success: false,
+                                file_size: 0,
+                                duration: 0,
+                                error: Some(format!("路径解析失败: {}", e)),
+                            };
+                            records.push(record.clone());
+                            let _ = app.emit(
+                                &format!("transfer:{}:progress", task_id_clone),
+                                &record,
+                            );
                             continue;
                         }
                     }
@@ -251,22 +315,23 @@ pub fn file_transfer(
                 Err(e) => (false, 0, 0, Some(e)),
             };
 
-            let record = serde_json::json!({
-                "hostId": hid,
-                "hostName": host_name,
-                "success": success,
-                "fileSize": file_size,
-                "duration": duration,
-                "error": error,
-            });
-
-            let _ = app.emit(&format!("transfer:{}:progress", task_id_clone), record);
+            let record = TransferProgressRecord {
+                host_id: hid.clone(),
+                host_name: host_name.clone(),
+                success,
+                file_size,
+                duration,
+                error,
+            };
+            records.push(record.clone());
+            let _ = app.emit(&format!("transfer:{}:progress", task_id_clone), &record);
         }
 
         let _ = app.emit(
             &format!("transfer:{}:done", task_id_clone),
             serde_json::json!({
                 "direction": direction,
+                "results": records,
             }),
         );
     });

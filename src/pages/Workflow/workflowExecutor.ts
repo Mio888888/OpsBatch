@@ -455,9 +455,9 @@ async function executeNode(
       await invoke<string>('file_transfer', {
         request: {
           direction: direction || 'upload',
-          hostIds,
-          localPath,
-          remotePath,
+          host_ids: hostIds,
+          local_path: localPath,
+          remote_path: remotePath,
           timeout: 120,
         },
       });

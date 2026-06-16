@@ -26,6 +26,11 @@ interface TransferProgress {
   error: string | null;
 }
 
+interface TransferDonePayload {
+  direction: string;
+  results?: TransferProgress[];
+}
+
 const TEMPLATE_QUICK_FILLS = [
   { label: '主机名', value: '/home/{host}/' },
   { label: '第一个目录', value: '/home/{firstdir:/home}/' },
@@ -69,10 +74,53 @@ export default function BatchTransferWindow() {
   const listenersRef = useRef<UnlistenFn[]>([]);
   const resultIndexByHostIdRef = useRef<Map<string, number>>(new Map());
 
+  const mergeResults = useCallback((incoming: TransferProgress[]) => {
+    setResults((prev) => {
+      const next = prev.slice();
+      for (const data of incoming) {
+        const index = resultIndexByHostIdRef.current.get(data.hostId);
+        if (index === undefined) {
+          resultIndexByHostIdRef.current.set(data.hostId, next.length);
+          next.push(data);
+        } else {
+          next[index] = data;
+        }
+      }
+      return next;
+    });
+  }, []);
+
   const cleanupListeners = useCallback(() => {
     listenersRef.current.forEach((fn) => fn());
     listenersRef.current = [];
   }, []);
+
+  const setupTaskListeners = useCallback(async (taskId: string) => {
+    cleanupListeners();
+
+    const un1 = await listen(`transfer:${taskId}:progress`, (event) => {
+      mergeResults([event.payload as TransferProgress]);
+    });
+    const un2 = await listen(`transfer:${taskId}:done`, (event) => {
+      const payload = event.payload as TransferDonePayload;
+      if (payload.results?.length) {
+        mergeResults(payload.results);
+        const failed = payload.results.filter((item) => !item.success).length;
+        if (failed > 0) {
+          message.error(`上传完成，失败 ${failed} 台`);
+        } else {
+          message.success('上传完成');
+        }
+      } else {
+        message.success('上传完成');
+      }
+      setTransferring(false);
+      setActiveTaskId(null);
+      cleanupListeners();
+    });
+
+    listenersRef.current = [un1, un2];
+  }, [cleanupListeners, mergeResults]);
 
   useEffect(() => () => cleanupListeners(), [cleanupListeners]);
 
@@ -88,35 +136,6 @@ export default function BatchTransferWindow() {
       setHostsLoading(false);
     });
   }, [hostIdSet, hostIds.length]);
-
-  useEffect(() => {
-    let unlisteners: UnlistenFn[] = [];
-    if (!activeTaskId) return;
-
-    const setup = async () => {
-      const un1 = await listen(`transfer:${activeTaskId}:progress`, (event) => {
-        const data = event.payload as TransferProgress;
-        setResults((prev) => {
-          const index = resultIndexByHostIdRef.current.get(data.hostId);
-          if (index === undefined) {
-            resultIndexByHostIdRef.current.set(data.hostId, prev.length);
-            return [...prev, data];
-          }
-          const next = prev.slice();
-          next[index] = data;
-          return next;
-        });
-      });
-      const un2 = await listen(`transfer:${activeTaskId}:done`, () => {
-        setTransferring(false);
-        setActiveTaskId(null);
-        message.success('上传完成');
-      });
-      unlisteners = [un1, un2];
-    };
-    setup();
-    return () => { unlisteners.forEach((fn) => fn()); };
-  }, [activeTaskId]);
 
   useEffect(() => {
     if (hosts.length <= MAX_COLLAPSED_HOSTS && targetsExpanded) {
@@ -152,18 +171,23 @@ export default function BatchTransferWindow() {
       setTransferring(true);
       resultIndexByHostIdRef.current.clear();
       setResults([]);
-      const taskId = await invoke<string>('file_transfer', {
+      const taskId = crypto.randomUUID();
+      await setupTaskListeners(taskId);
+      setActiveTaskId(taskId);
+      await invoke<string>('file_transfer', {
         request: {
+          task_id: taskId,
           direction: 'upload',
-          hostIds,
-          localPath,
-          remotePath,
+          host_ids: hostIds,
+          local_path: localPath,
+          remote_path: remotePath,
           timeout,
         },
       });
-      setActiveTaskId(taskId);
       message.info(`已开始上传到 ${hostIds.length} 台主机`);
     } catch (e: unknown) {
+      cleanupListeners();
+      setActiveTaskId(null);
       message.error(`上传失败: ${e}`);
       setTransferring(false);
     }

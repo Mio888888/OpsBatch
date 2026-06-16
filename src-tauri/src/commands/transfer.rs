@@ -134,10 +134,7 @@ fn upload_file_via_pool(
             let parent_str = parent.to_string_lossy();
             let quoted = shell_quote(&parent_str)?;
             let mkdir_cmd = format!("mkdir -p {}", quoted);
-            if let Err(e) = pool.execute(host_id, config, &mkdir_cmd, timeout_secs) {
-                // 非致命：父目录可能已存在，忽略错误继续尝试写入
-                eprintln!("[transfer] mkdir -p {} failed for {}: {}", parent_str, host_id, e);
-            }
+            let _ = pool.execute(host_id, config, &mkdir_cmd, timeout_secs);
         }
     }
 

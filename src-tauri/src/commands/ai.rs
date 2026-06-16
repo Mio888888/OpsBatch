@@ -1338,30 +1338,6 @@ pub async fn ai_list_models(
     Ok(models)
 }
 
-// ---------------------------------------------------------------------------
-// Keychain commands
-// ---------------------------------------------------------------------------
-
-#[tauri::command]
-pub fn ai_keychain_store(provider: String, api_key: String) -> Result<(), String> {
-    crate::keychain::store_api_key(&provider, &api_key)
-}
-
-#[tauri::command]
-pub fn ai_keychain_get(provider: String) -> Result<String, String> {
-    crate::keychain::get_api_key(&provider).map_err(|e| match e {
-        crate::keychain::SecretError::Missing => {
-            "API Key 未在本地加密存储中找到，请重新保存 AI 配置。".to_string()
-        }
-        other => other.to_string(),
-    })
-}
-
-#[tauri::command]
-pub fn ai_keychain_delete(provider: String) -> Result<(), String> {
-    crate::keychain::delete_api_key(&provider)
-}
-
 #[cfg(test)]
 mod ai_action_tests {
     use super::{

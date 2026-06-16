@@ -132,6 +132,14 @@ test('registers a managed VNC window and backend VNC commands', () => {
   assert.match(capabilitySource, /"vnc-\*"/);
 });
 
+test('does not expose the legacy VNC command that returned stored host passwords', () => {
+  const libSource = readFileSync('src-tauri/src/lib.rs', 'utf8');
+  const vncSource = readVncBackendSource();
+
+  assert.doesNotMatch(libSource, /start_vnc_session/);
+  assert.doesNotMatch(vncSource, /secret_owner_id/);
+});
+
 test('backend defaults missing VNC ports to 5900 instead of SSH or RDP ports', () => {
   const source = readVncBackendSource();
 

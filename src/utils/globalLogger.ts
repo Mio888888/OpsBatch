@@ -15,6 +15,7 @@ declare global {
 export function sanitizeLogMessage(message: string) {
   return message
     .replace(/(Bearer\s+)[^\s"']+/gi, '$1***')
+    .replace(/("(?:(?:[^"]*)(?:api[_-]?key|apikey|token|password)[^"]*)"\s*:\s*")[^"]*(")/gi, '$1***$2')
     .replace(/((?:api[_-]?key|token|password)\s*[:=]\s*)[^\s,"']+/gi, '$1***')
     .slice(0, MAX_LOG_MESSAGE_LENGTH);
 }

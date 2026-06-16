@@ -181,7 +181,7 @@ pub fn file_transfer(
                 auth_type,
                 password,
                 private_key,
-                proxy: crate::commands::hosts::parse_host_proxy_settings(proxy_settings),
+                proxy: crate::commands::hosts::resolve_host_proxy_settings(hid, proxy_settings)?,
             },
         ));
     }

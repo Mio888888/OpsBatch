@@ -188,6 +188,48 @@ mod tests {
     }
 }
 
+fn migrate_json_secret_to_keychain<F>(
+    id: &str,
+    settings: Option<String>,
+    field: &str,
+    store: F,
+) -> Result<Option<String>, String>
+where
+    F: FnOnce(&str, &str) -> Result<(), String>,
+{
+    let Some(raw) = settings else {
+        return Ok(None);
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+
+    let mut value: serde_json::Value =
+        serde_json::from_str(trimmed).map_err(|e| format!("settings JSON 格式无效: {}", e))?;
+    let Some(object) = value.as_object_mut() else {
+        return Ok(None);
+    };
+    let Some(secret) = object
+        .get(field)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty() && *value != SECRET_PLACEHOLDER)
+        .map(str::to_string)
+    else {
+        return Ok(None);
+    };
+
+    store(id, &secret)?;
+    object.insert(
+        field.to_string(),
+        serde_json::Value::String(SECRET_PLACEHOLDER.to_string()),
+    );
+    serde_json::to_string(&value)
+        .map(Some)
+        .map_err(|e| e.to_string())
+}
+
 #[derive(Debug)]
 struct DbConnectionCustomizer;
 
@@ -539,8 +581,6 @@ impl Database {
                 .map_err(|e| e.to_string())?;
         }
 
-        self.migrate_host_secrets_to_keychain(&conn)?;
-
         // Add jump_chain column to hosts if missing
         let has_jump_chain: bool = conn
             .query_row(
@@ -580,6 +620,8 @@ impl Database {
             conn.execute_batch("ALTER TABLE hosts ADD COLUMN proxy_settings TEXT DEFAULT '{}';")
                 .map_err(|e| e.to_string())?;
         }
+
+        self.migrate_host_secrets_to_keychain(&conn)?;
 
         // Migrate: add new columns to quick_actions if missing
         let has_qa_starred: bool = conn
@@ -884,7 +926,7 @@ impl Database {
         require_unlocked: bool,
     ) -> Result<(), String> {
         let mut stmt = conn
-            .prepare("SELECT id, password, private_key FROM hosts")
+            .prepare("SELECT id, password, private_key, rdp_settings, proxy_settings FROM hosts")
             .map_err(|e| e.to_string())?;
         let rows = stmt
             .query_map([], |row| {
@@ -892,12 +934,16 @@ impl Database {
                     row.get::<_, String>(0)?,
                     row.get::<_, Option<String>>(1)?,
                     row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
                 ))
             })
             .map_err(|e| e.to_string())?;
         let mut updates = Vec::new();
+        let mut settings_updates = Vec::new();
         for row in rows {
-            let (id, password, private_key) = row.map_err(|e| e.to_string())?;
+            let (id, password, private_key, rdp_settings, proxy_settings) =
+                row.map_err(|e| e.to_string())?;
             if let Some(secret) =
                 password.filter(|value| !value.is_empty() && value != SECRET_PLACEHOLDER)
             {
@@ -920,10 +966,47 @@ impl Database {
                 }
                 updates.push(("private_key", id.clone()));
             }
+            match migrate_json_secret_to_keychain(
+                &id,
+                rdp_settings,
+                "vncPassword",
+                crate::keychain::store_host_vnc_password,
+            ) {
+                Ok(Some(updated)) => settings_updates.push(("rdp_settings", id.clone(), updated)),
+                Ok(None) => {}
+                Err(error) => {
+                    if !require_unlocked && crate::keychain::is_locked_error_message(&error) {
+                        return Ok(());
+                    }
+                    return Err(error);
+                }
+            }
+            match migrate_json_secret_to_keychain(
+                &id,
+                proxy_settings,
+                "password",
+                crate::keychain::store_host_proxy_password,
+            ) {
+                Ok(Some(updated)) => {
+                    settings_updates.push(("proxy_settings", id.clone(), updated));
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    if !require_unlocked && crate::keychain::is_locked_error_message(&error) {
+                        return Ok(());
+                    }
+                    return Err(error);
+                }
+            }
         }
         for (column, id) in updates {
             let sql = format!("UPDATE hosts SET {}=?1 WHERE id=?2", column);
             conn.execute(&sql, rusqlite::params![SECRET_PLACEHOLDER, id])
+                .map_err(|e| e.to_string())?;
+        }
+        for (column, id, value) in settings_updates {
+            let sql = format!("UPDATE hosts SET {}=?1 WHERE id=?2", column);
+            conn.execute(&sql, rusqlite::params![value, id])
                 .map_err(|e| e.to_string())?;
         }
         Ok(())

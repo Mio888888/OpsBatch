@@ -104,6 +104,13 @@ struct HostConnectionInfo {
 const HOST_SELECT_FIELDS: &str = "id, name, ip, port, auth_type, username, password, private_key, os, tags, group_id, remark, status, jump_chain, COALESCE(rdp_settings, '{}'), COALESCE(proxy_settings, '{}'), created_at, updated_at";
 
 fn map_host_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Host> {
+    let rdp_settings = row
+        .get::<_, Option<String>>(14)?
+        .unwrap_or_else(|| "{}".to_string());
+    let proxy_settings = row
+        .get::<_, Option<String>>(15)?
+        .unwrap_or_else(|| "{}".to_string());
+
     Ok(Host {
         id: row.get(0)?,
         name: row.get(1)?,
@@ -121,12 +128,8 @@ fn map_host_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Host> {
         jump_chain: row
             .get::<_, Option<String>>(13)?
             .unwrap_or_else(|| "[]".to_string()),
-        rdp_settings: row
-            .get::<_, Option<String>>(14)?
-            .unwrap_or_else(|| "{}".to_string()),
-        proxy_settings: row
-            .get::<_, Option<String>>(15)?
-            .unwrap_or_else(|| "{}".to_string()),
+        rdp_settings: mask_json_secret_for_frontend(&rdp_settings, "vncPassword"),
+        proxy_settings: mask_json_secret_for_frontend(&proxy_settings, "password"),
         created_at: row.get(16)?,
         updated_at: row.get(17)?,
     })
@@ -144,6 +147,28 @@ pub(crate) fn parse_host_proxy_settings(value: Option<String>) -> Option<ssh::Pr
         .filter(|settings| {
             settings.enabled && !settings.host.trim().is_empty() && settings.port > 0
         })
+}
+
+pub(crate) fn resolve_host_proxy_settings(
+    host_id: &str,
+    value: Option<String>,
+) -> Result<Option<ssh::ProxySettings>, String> {
+    let mut settings = match parse_host_proxy_settings(value) {
+        Some(settings) => settings,
+        None => return Ok(None),
+    };
+    if settings.password.as_deref() == Some(SECRET_PLACEHOLDER) {
+        settings.password = Some(crate::keychain::get_host_proxy_password(host_id).map_err(
+            |error| match error {
+                crate::keychain::SecretError::Missing => format!(
+                    "主机 {} 的代理密码未在本地加密存储中找到，请重新编辑主机并保存代理密码。",
+                    host_id
+                ),
+                other => other.to_string(),
+            },
+        )?);
+    }
+    Ok(Some(settings))
 }
 
 fn get_host_connection_info(
@@ -195,7 +220,7 @@ fn get_host_connection_info(
             auth_type,
             password,
             private_key,
-            proxy: parse_host_proxy_settings(proxy_settings),
+            proxy: resolve_host_proxy_settings(id, proxy_settings)?,
         },
         os,
     })
@@ -259,6 +284,171 @@ fn store_host_secrets(
         None => None,
     };
     Ok((stored_password, stored_private_key))
+}
+
+fn store_host_rdp_settings(host_id: &str, settings: Option<String>) -> Result<String, String> {
+    store_json_secret_for_save(
+        host_id,
+        settings,
+        "vncPassword",
+        crate::keychain::store_host_vnc_password,
+    )
+}
+
+fn store_host_proxy_settings(host_id: &str, settings: Option<String>) -> Result<String, String> {
+    store_json_secret_for_save(
+        host_id,
+        settings,
+        "password",
+        crate::keychain::store_host_proxy_password,
+    )
+}
+
+fn stored_host_rdp_settings_for_update(
+    host_id: &str,
+    current_settings: Option<String>,
+    incoming_settings: Option<String>,
+) -> Result<String, String> {
+    stored_json_secret_for_update(
+        host_id,
+        "VNC 密码",
+        current_settings,
+        incoming_settings,
+        "vncPassword",
+        crate::keychain::store_host_vnc_password,
+        crate::keychain::get_host_vnc_password,
+    )
+}
+
+fn stored_host_proxy_settings_for_update(
+    host_id: &str,
+    current_settings: Option<String>,
+    incoming_settings: Option<String>,
+) -> Result<String, String> {
+    stored_json_secret_for_update(
+        host_id,
+        "代理密码",
+        current_settings,
+        incoming_settings,
+        "password",
+        crate::keychain::store_host_proxy_password,
+        crate::keychain::get_host_proxy_password,
+    )
+}
+
+fn store_json_secret_for_save<F>(
+    host_id: &str,
+    settings: Option<String>,
+    field: &str,
+    mut store: F,
+) -> Result<String, String>
+where
+    F: FnMut(&str, &str) -> Result<(), String>,
+{
+    let mut value = parse_settings_json(settings.as_deref())?;
+    if let Some(secret) = json_string_field(&value, field) {
+        if !secret.is_empty() && secret != SECRET_PLACEHOLDER {
+            store(host_id, &secret)?;
+            set_json_string_field(&mut value, field, SECRET_PLACEHOLDER);
+        }
+    }
+    serde_json::to_string(&value).map_err(|e| e.to_string())
+}
+
+fn stored_json_secret_for_update<F, R>(
+    host_id: &str,
+    label: &str,
+    current_settings: Option<String>,
+    incoming_settings: Option<String>,
+    field: &str,
+    mut store: F,
+    mut read: R,
+) -> Result<String, String>
+where
+    F: FnMut(&str, &str) -> Result<(), String>,
+    R: FnMut(&str) -> Result<String, crate::keychain::SecretError>,
+{
+    let mut incoming = parse_settings_json(incoming_settings.as_deref())?;
+    match json_string_field(&incoming, field).as_deref() {
+        Some(SECRET_PLACEHOLDER) => ensure_json_placeholder_secret(
+            host_id,
+            label,
+            current_settings.as_deref(),
+            field,
+            &mut store,
+            &mut read,
+        )?,
+        Some(secret) => {
+            store(host_id, secret)?;
+            set_json_string_field(&mut incoming, field, SECRET_PLACEHOLDER);
+        }
+        None => {}
+    }
+    serde_json::to_string(&incoming).map_err(|e| e.to_string())
+}
+
+fn ensure_json_placeholder_secret<F, R>(
+    host_id: &str,
+    label: &str,
+    current_settings: Option<&str>,
+    field: &str,
+    store: &mut F,
+    read: &mut R,
+) -> Result<(), String>
+where
+    F: FnMut(&str, &str) -> Result<(), String>,
+    R: FnMut(&str) -> Result<String, crate::keychain::SecretError>,
+{
+    let current = parse_settings_json(current_settings)?;
+    match json_string_field(&current, field).as_deref() {
+        Some(SECRET_PLACEHOLDER) | None => read(host_id)
+            .map(|_| ())
+            .map_err(|error| missing_host_secret_message(label, host_id, error)),
+        Some(secret) => store(host_id, secret),
+    }
+}
+
+fn mask_json_secret_for_frontend(settings: &str, field: &str) -> String {
+    let Ok(mut value) = parse_settings_json(Some(settings)) else {
+        return "{}".to_string();
+    };
+    if let Some(secret) = json_string_field(&value, field) {
+        if !secret.is_empty() {
+            set_json_string_field(&mut value, field, SECRET_PLACEHOLDER);
+        }
+    }
+    serde_json::to_string(&value).unwrap_or_else(|_| "{}".to_string())
+}
+
+fn parse_settings_json(settings: Option<&str>) -> Result<serde_json::Value, String> {
+    let raw = settings
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("{}");
+    let value: serde_json::Value =
+        serde_json::from_str(raw).map_err(|e| format!("settings JSON 格式无效: {}", e))?;
+    match value {
+        serde_json::Value::Object(_) => Ok(value),
+        _ => Err("settings JSON 必须是对象".to_string()),
+    }
+}
+
+fn json_string_field(value: &serde_json::Value, field: &str) -> Option<String> {
+    value
+        .get(field)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn set_json_string_field(value: &mut serde_json::Value, field: &str, secret: &str) {
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            field.to_string(),
+            serde_json::Value::String(secret.to_string()),
+        );
+    }
 }
 
 fn mask_secret_for_frontend(value: Option<String>) -> Option<String> {
@@ -694,6 +884,8 @@ pub async fn add_host(db: tauri::State<'_, Database>, host: NewHost) -> Result<H
     tokio::task::spawn_blocking(move || {
         let id = uuid::Uuid::new_v4().to_string();
         let (password, private_key) = store_host_secrets(&id, host.password, host.private_key)?;
+        let rdp_settings = store_host_rdp_settings(&id, host.rdp_settings)?;
+        let proxy_settings = store_host_proxy_settings(&id, host.proxy_settings)?;
         let conn = conn.get().map_err(|e| e.to_string())?;
         conn.execute(
             "INSERT INTO hosts (id, name, ip, port, auth_type, username, password, private_key, os, tags, group_id, remark, jump_chain, rdp_settings, proxy_settings) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
@@ -711,8 +903,8 @@ pub async fn add_host(db: tauri::State<'_, Database>, host: NewHost) -> Result<H
                 host.group_id,
                 host.remark.unwrap_or_default(),
                 host.jump_chain.unwrap_or_else(|| "[]".into()),
-                host.rdp_settings.unwrap_or_else(|| "{}".into()),
-                host.proxy_settings.unwrap_or_else(|| "{}".into()),
+                rdp_settings,
+                proxy_settings,
             ],
         ).map_err(|e| e.to_string())?;
         get_host_by_id(&conn, &id)
@@ -740,12 +932,17 @@ pub async fn update_host(
             ),
             "backend",
         );
-        let (current_password, current_private_key): (Option<String>, Option<String>) = {
+        let (
+            current_password,
+            current_private_key,
+            current_rdp_settings,
+            current_proxy_settings,
+        ): (Option<String>, Option<String>, Option<String>, Option<String>) = {
             let conn = conn.get().map_err(|e| e.to_string())?;
             conn.query_row(
-                "SELECT password, private_key FROM hosts WHERE id=?1",
+                "SELECT password, private_key, rdp_settings, proxy_settings FROM hosts WHERE id=?1",
                 params![host.id],
-                |row| Ok((row.get(0)?, row.get(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
             .map_err(|e| format!("host {} not found: {}", host.id, e))?
         };
@@ -769,12 +966,19 @@ pub async fn update_host(
             crate::keychain::store_host_private_key,
             crate::keychain::get_host_private_key,
         )?;
+        let rdp_settings =
+            stored_host_rdp_settings_for_update(&host.id, current_rdp_settings, host.rdp_settings)?;
+        let proxy_settings = stored_host_proxy_settings_for_update(
+            &host.id,
+            current_proxy_settings,
+            host.proxy_settings,
+        )?;
 
         let updated_host = {
             let conn = conn.get().map_err(|e| e.to_string())?;
             conn.execute(
                 "UPDATE hosts SET name=?1, ip=?2, port=?3, auth_type=?4, username=?5, password=?6, private_key=?7, os=?8, tags=?9, group_id=?10, remark=?11, jump_chain=?12, rdp_settings=?13, proxy_settings=?14, updated_at=datetime('now','localtime') WHERE id=?15",
-                params![host.name, host.ip, host.port, host.auth_type, host.username, password, private_key, host.os, host.tags, host.group_id, host.remark, host.jump_chain.as_deref().unwrap_or("[]"), host.rdp_settings.as_deref().unwrap_or("{}"), host.proxy_settings.as_deref().unwrap_or("{}"), host.id],
+                params![host.name, host.ip, host.port, host.auth_type, host.username, password, private_key, host.os, host.tags, host.group_id, host.remark, host.jump_chain.as_deref().unwrap_or("[]"), rdp_settings, proxy_settings, host.id],
             ).map_err(|e| e.to_string())?;
             get_host_by_id(&conn, &host.id)?
         };
@@ -806,6 +1010,8 @@ pub async fn delete_host(
             .map_err(|e| e.to_string())?;
         let _ = crate::keychain::delete_host_password(&id);
         let _ = crate::keychain::delete_host_private_key(&id);
+        let _ = crate::keychain::delete_host_vnc_password(&id);
+        let _ = crate::keychain::delete_host_proxy_password(&id);
         app.state::<crate::ssh::SshConnectionRegistry>()
             .forget_config(&id);
         Ok(())
@@ -877,5 +1083,97 @@ mod tests {
     #[test]
     fn host_status_probe_port_keeps_regular_host_port() {
         assert_eq!(3389, host_status_probe_port(3389, r#"{"protocol":"rdp"}"#));
+    }
+
+    #[test]
+    fn json_secret_is_stored_in_vault_and_replaced_with_placeholder() {
+        let mut stored = Vec::new();
+        let protected = store_json_secret_for_save(
+            "host-a",
+            Some(r#"{"protocol":"vnc","vncPassword":"secret"}"#.to_string()),
+            "vncPassword",
+            |host_id, secret| {
+                stored.push((host_id.to_string(), secret.to_string()));
+                Ok(())
+            },
+        )
+        .expect("protect settings");
+
+        let parsed: serde_json::Value = serde_json::from_str(&protected).expect("json");
+        assert_eq!("vnc", parsed["protocol"]);
+        assert_eq!(SECRET_PLACEHOLDER, parsed["vncPassword"]);
+        assert_eq!(vec![("host-a".to_string(), "secret".to_string())], stored);
+    }
+
+    #[test]
+    fn json_secret_placeholder_is_preserved_without_rewriting_vault() {
+        let mut calls = 0;
+        let protected = store_json_secret_for_save(
+            "host-a",
+            Some(format!(
+                r#"{{"enabled":true,"password":"{}"}}"#,
+                SECRET_PLACEHOLDER
+            )),
+            "password",
+            |_host_id, _secret| {
+                calls += 1;
+                Ok(())
+            },
+        )
+        .expect("protect settings");
+
+        let parsed: serde_json::Value = serde_json::from_str(&protected).expect("json");
+        assert_eq!(SECRET_PLACEHOLDER, parsed["password"]);
+        assert_eq!(0, calls);
+    }
+
+    #[test]
+    fn json_secret_update_migrates_current_plaintext_when_incoming_is_placeholder() {
+        let mut stored = Vec::new();
+        let protected = stored_json_secret_for_update(
+            "host-a",
+            "代理密码",
+            Some(r#"{"enabled":true,"password":"legacy-secret"}"#.to_string()),
+            Some(format!(
+                r#"{{"enabled":true,"password":"{}"}}"#,
+                SECRET_PLACEHOLDER
+            )),
+            "password",
+            |host_id, secret| {
+                stored.push((host_id.to_string(), secret.to_string()));
+                Ok(())
+            },
+            |_host_id| Err(crate::keychain::SecretError::Missing),
+        )
+        .expect("protect settings");
+
+        let parsed: serde_json::Value = serde_json::from_str(&protected).expect("json");
+        assert_eq!(SECRET_PLACEHOLDER, parsed["password"]);
+        assert_eq!(
+            vec![("host-a".to_string(), "legacy-secret".to_string())],
+            stored
+        );
+    }
+
+    #[test]
+    fn json_secret_update_rejects_placeholder_when_vault_entry_is_missing() {
+        let error = stored_json_secret_for_update(
+            "host-a",
+            "代理密码",
+            Some(format!(
+                r#"{{"enabled":true,"password":"{}"}}"#,
+                SECRET_PLACEHOLDER
+            )),
+            Some(format!(
+                r#"{{"enabled":true,"password":"{}"}}"#,
+                SECRET_PLACEHOLDER
+            )),
+            "password",
+            |_host_id, _secret| Ok(()),
+            |_host_id| Err(crate::keychain::SecretError::Missing),
+        )
+        .expect_err("missing vault entry should fail");
+
+        assert!(error.contains("代理密码未在本地加密存储中找到"));
     }
 }

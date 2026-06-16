@@ -13,6 +13,10 @@ test('redacts sensitive values from frontend log messages', () => {
     sanitizeLogMessage('Bearer abc123 token=secret password: hunter2 api_key = live-key'),
     'Bearer *** token=*** password: *** api_key = ***',
   );
+  assert.equal(
+    sanitizeLogMessage('{"vncPassword":"secret","proxyPassword":"proxy-secret","apiKey":"live-key"}'),
+    '{"vncPassword":"***","proxyPassword":"***","apiKey":"***"}',
+  );
 });
 
 test('keeps long parser diagnostics in frontend log messages', () => {

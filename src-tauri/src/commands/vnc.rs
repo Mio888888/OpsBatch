@@ -10,7 +10,7 @@ pub use config::{parse_vnc_settings, vnc_port_from_settings};
 pub use manager::VncSessionManager;
 pub use types::{
     StartVncSessionRequest, VncConnectResponse, VncInputEvent, VncKeyEventRequest,
-    VncPointerEventRequest, VncSessionStarted, VncSessionStatus, VncSimpleRequest,
+    VncPointerEventRequest, VncSessionStatus, VncSimpleRequest,
 };
 
 pub(crate) fn append_vnc_diagnostic_log(app: &AppHandle, message: &str) {
@@ -111,24 +111,6 @@ pub fn vnc_disconnect(
     session_id: String,
 ) -> Result<(), String> {
     manager.close_session(VncSimpleRequest { session_id })
-}
-
-#[tauri::command]
-pub fn start_vnc_session(
-    app: AppHandle,
-    manager: tauri::State<'_, VncSessionManager>,
-    mut request: StartVncSessionRequest,
-) -> Result<VncSessionStarted, String> {
-    if request.password().is_none() {
-        if let Some(owner_id) = request.secret_owner_id().map(str::to_string) {
-            request.set_password(
-                crate::keychain::get_host_password(&owner_id)
-                    .map(Some)
-                    .map_err(|error| format!("failed to read VNC password: {error}"))?,
-            );
-        }
-    }
-    manager.start_session(app, request, None)
 }
 
 #[tauri::command]

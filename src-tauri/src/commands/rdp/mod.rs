@@ -1,10 +1,10 @@
 mod audio;
 mod clipboard;
 mod clipboard_files;
-mod file_transfer;
 mod config;
 mod dynamic_channels;
 mod egfx;
+mod file_transfer;
 mod frame;
 mod input;
 mod protocol;
@@ -171,7 +171,12 @@ impl RdpManager {
         }
     }
 
-    async fn upload_files(&self, session_id: &str, paths: Vec<String>, position: Option<(u16, u16)>) -> Result<(), String> {
+    async fn upload_files(
+        &self,
+        session_id: &str,
+        paths: Vec<String>,
+        position: Option<(u16, u16)>,
+    ) -> Result<(), String> {
         self.sessions
             .get(session_id)
             .map(|entry| entry.sender.clone())
@@ -265,7 +270,8 @@ pub async fn rdp_disconnect(
 pub async fn rdp_upload_files(
     manager: tauri::State<'_, RdpManager>,
     session_id: String,
-    paths: Vec<String>, position: Option<(u16, u16)>,
+    paths: Vec<String>,
+    position: Option<(u16, u16)>,
 ) -> Result<(), String> {
     manager.upload_files(&session_id, paths, position).await
 }
@@ -273,26 +279,43 @@ pub async fn rdp_upload_files(
 fn load_host_rdp_fields(app: &tauri::AppHandle, host_id: &str) -> Result<HostRdpFields, String> {
     let db = app.state::<Database>();
     let conn = db.pool.get().map_err(|e| e.to_string())?;
-    conn.query_row(
+    let (host, port, auth_type, username, password, os, settings_json, proxy_json): (
+        String,
+        i32,
+        String,
+        String,
+        Option<String>,
+        String,
+        String,
+        Option<String>,
+    ) = conn.query_row(
         "SELECT ip, port, auth_type, username, password, os, COALESCE(rdp_settings, '{}'), COALESCE(proxy_settings, '{}') FROM hosts WHERE id=?1",
         params![host_id],
         |row| {
-            let settings_json = row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "{}".to_string());
-            let proxy_json = row.get::<_, Option<String>>(7)?;
-            let settings = serde_json::from_str(&settings_json).unwrap_or_default();
-            Ok(HostRdpFields {
-                host: row.get(0)?,
-                port: row.get(1)?,
-                auth_type: row.get(2)?,
-                username: row.get(3)?,
-                password: row.get(4)?,
-                os: row.get(5)?,
-                settings,
-                proxy: crate::commands::hosts::parse_host_proxy_settings(proxy_json),
-            })
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get::<_, Option<String>>(6)?.unwrap_or_else(|| "{}".to_string()),
+                row.get(7)?,
+            ))
         },
     )
-    .map_err(|e| format!("host not found: {}", e))
+    .map_err(|e| format!("host not found: {}", e))?;
+    let settings = serde_json::from_str(&settings_json).unwrap_or_default();
+    Ok(HostRdpFields {
+        host,
+        port,
+        auth_type,
+        username,
+        password,
+        os,
+        settings,
+        proxy: crate::commands::hosts::resolve_host_proxy_settings(host_id, proxy_json)?,
+    })
 }
 
 fn normalize_rdp_options(

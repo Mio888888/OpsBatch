@@ -23,6 +23,8 @@ const SERVICE_NAME: &str = "com.opsbatch.app";
 const KEY_API_KEY: &str = "ai_api_key";
 const KEY_HOST_PASSWORD: &str = "host_password";
 const KEY_HOST_PRIVATE_KEY: &str = "host_private_key";
+const KEY_HOST_VNC_PASSWORD: &str = "host_vnc_password";
+const KEY_HOST_PROXY_PASSWORD: &str = "host_proxy_password";
 const KEY_GITHUB_TOKEN: &str = "github_token";
 const KEY_SSH_HOST_KEY: &str = "ssh_host_key";
 #[cfg(not(test))]
@@ -283,6 +285,7 @@ fn unlock_with_setup_required_key(
         Err(_) => validate_vault_key(&key)?,
     }
     write_system_vault_master_key(&key)?;
+    delete_legacy_vault_key_file()?;
     cache_vault_master_key(key)
 }
 
@@ -568,6 +571,15 @@ fn read_legacy_vault_key() -> Result<[u8; 32], String> {
     decode_master_key(&encoded)
 }
 
+fn delete_legacy_vault_key_file() -> Result<(), String> {
+    let path = legacy_vault_key_path();
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("旧本地加密密钥删除失败: {}", error)),
+    }
+}
+
 fn encode_system_vault_master_key(key: &[u8; 32]) -> String {
     format!("{}{}", SYSTEM_VAULT_MASTER_KEY_PREFIX, BASE64.encode(key))
 }
@@ -786,6 +798,30 @@ pub fn delete_host_private_key(host_id: &str) -> Result<(), String> {
     delete_secret(KEY_HOST_PRIVATE_KEY, host_id)
 }
 
+pub fn store_host_vnc_password(host_id: &str, value: &str) -> Result<(), String> {
+    store_secret(KEY_HOST_VNC_PASSWORD, host_id, value)
+}
+
+pub fn get_host_vnc_password(host_id: &str) -> Result<String, SecretError> {
+    get_secret(KEY_HOST_VNC_PASSWORD, host_id)
+}
+
+pub fn delete_host_vnc_password(host_id: &str) -> Result<(), String> {
+    delete_secret(KEY_HOST_VNC_PASSWORD, host_id)
+}
+
+pub fn store_host_proxy_password(host_id: &str, value: &str) -> Result<(), String> {
+    store_secret(KEY_HOST_PROXY_PASSWORD, host_id, value)
+}
+
+pub fn get_host_proxy_password(host_id: &str) -> Result<String, SecretError> {
+    get_secret(KEY_HOST_PROXY_PASSWORD, host_id)
+}
+
+pub fn delete_host_proxy_password(host_id: &str) -> Result<(), String> {
+    delete_secret(KEY_HOST_PROXY_PASSWORD, host_id)
+}
+
 pub fn store_github_token(repo_id: &str, value: &str) -> Result<(), String> {
     store_secret(KEY_GITHUB_TOKEN, repo_id, value)
 }
@@ -946,6 +982,30 @@ mod tests {
     }
 
     #[test]
+    fn host_vnc_and_proxy_passwords_round_trip_through_local_vault() {
+        let _guard = TEST_GUARD.lock().expect("test guard");
+        clear_cached_vault_key_for_tests();
+        let dir = temp_vault_dir("embedded-host-secrets");
+        set_test_vault_dir_for_tests(Some(dir.clone()));
+        unlock_local_vault_for_tests([9; 32]);
+
+        store_host_vnc_password("host-a", "vnc-secret").expect("store vnc");
+        store_host_proxy_password("host-a", "proxy-secret").expect("store proxy");
+
+        assert_eq!(
+            "vnc-secret",
+            get_host_vnc_password("host-a").expect("get vnc")
+        );
+        assert_eq!(
+            "proxy-secret",
+            get_host_proxy_password("host-a").expect("get proxy")
+        );
+
+        let _ = std::fs::remove_dir_all(dir);
+        set_test_vault_dir_for_tests(None);
+    }
+
+    #[test]
     fn unlock_local_vault_reads_system_keyring_once_when_present() {
         let _guard = TEST_GUARD.lock().expect("test guard");
         clear_cached_vault_key_for_tests();
@@ -1021,6 +1081,7 @@ mod tests {
             .expect("raw test keyring")
             .expect("stored key")
             .starts_with(SYSTEM_VAULT_MASTER_KEY_PREFIX));
+        assert!(!legacy_key_path.exists());
 
         let _ = std::fs::remove_file(path);
         let _ = std::fs::remove_file(legacy_key_path);
@@ -1063,6 +1124,7 @@ mod tests {
             .expect("raw test keyring")
             .expect("stored key")
             .starts_with(SYSTEM_VAULT_MASTER_KEY_PREFIX));
+        assert!(!legacy_key_path.exists());
 
         let _ = std::fs::remove_file(path);
         let _ = std::fs::remove_file(legacy_key_path);

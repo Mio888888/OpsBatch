@@ -553,7 +553,7 @@ pub async fn terminal_connect(
         auth_type: auth_type.clone(),
         password,
         private_key,
-        proxy: crate::commands::hosts::parse_host_proxy_settings(proxy_settings),
+        proxy: crate::commands::hosts::resolve_host_proxy_settings(&host_id, proxy_settings)?,
     };
     let pool = app.state::<ssh::SshConnectionRegistry>();
     pool.remember_config(&host_id, &config);
@@ -613,7 +613,7 @@ pub async fn terminal_connect(
                 auth_type: jauth,
                 password: jpass,
                 private_key: jkey,
-                proxy: crate::commands::hosts::parse_host_proxy_settings(jproxy),
+                proxy: crate::commands::hosts::resolve_host_proxy_settings(jump_id, jproxy)?,
             };
             pool.remember_config(jump_id, &jump_config);
             configs.push(jump_config);

@@ -119,8 +119,13 @@ export function hostUsesStoredSecret(host: Pick<Host, 'authType' | 'password' | 
   return host.jumpChain.length > 0;
 }
 
-export function hostFormStoresSecret(host: Pick<Host, 'password' | 'privateKey'>) {
-  return Boolean(host.password || host.privateKey);
+export function hostFormStoresSecret(host: Pick<Host, 'password' | 'privateKey' | 'rdpSettings' | 'proxySettings'>) {
+  return Boolean(
+    host.password
+    || host.privateKey
+    || (host.rdpSettings?.vncPassword && host.rdpSettings.vncPassword !== SECRET_PLACEHOLDER)
+    || (host.proxySettings?.password && host.proxySettings.password !== SECRET_PLACEHOLDER),
+  );
 }
 
 export function isWindowsHost(host: Pick<Host, 'os'>) {

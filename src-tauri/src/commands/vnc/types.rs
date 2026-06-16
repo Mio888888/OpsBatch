@@ -95,7 +95,6 @@ pub struct StartVncSessionRequest {
     pub port: Option<u16>,
     #[serde(default)]
     pub username: Option<String>,
-    pub secret_owner_id: Option<String>,
     pub password: Option<String>,
     #[serde(default)]
     pub auth_method: VncAuthMethod,
@@ -188,26 +187,10 @@ impl StartVncSessionRequest {
             host: config.host,
             port: Some(config.port),
             username: config.username,
-            secret_owner_id: None,
             password: config.password,
             auth_method: config.auth_method,
             options: Some(config.options),
         }
-    }
-
-    pub(crate) fn secret_owner_id(&self) -> Option<&str> {
-        self.secret_owner_id
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-    }
-
-    pub(crate) fn password(&self) -> Option<&str> {
-        self.password.as_deref().filter(|value| !value.is_empty())
-    }
-
-    pub(crate) fn set_password(&mut self, password: Option<String>) {
-        self.password = password;
     }
 }
 

@@ -140,7 +140,7 @@ fn load_host_config(db: &Database, host_id: &str) -> Result<ssh::SshConfig, Stri
         auth_type,
         password,
         private_key,
-        proxy: crate::commands::hosts::parse_host_proxy_settings(proxy_settings),
+        proxy: crate::commands::hosts::resolve_host_proxy_settings(host_id, proxy_settings)?,
     })
 }
 

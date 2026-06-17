@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, memo, useMemo, startTransition, useDeferredValue, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
-import { Tabs, Empty, Button, Spin } from '../../components/ui';
+import { Tabs, Empty, Button, Spin, Form, Input, Modal, Select, message } from '../../components/ui';
 import { PlayCircleOutlined, PlusOutlined } from '../../components/ui/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -9,9 +9,13 @@ import { useAssetsStore } from '../../stores/assets';
 import { useAiChatStore } from '../../stores/aiChat';
 import { useTranslation } from '../../i18n';
 import type { HostMonitorNetwork, HostMonitorSnapshot } from '../../types';
+import type { Host } from '../../types';
 import { isHostMonitorIdle, shouldPollHostMonitor } from '../../utils/hostMonitor';
 import { getTerminalTabCloseTargets, type TerminalTabCloseMode } from '../../utils/terminalTabs';
 import { logHandledError } from '../../utils/globalLogger';
+import { isSshAuthenticationFailure } from '../../utils/terminalAuth';
+import { requestKeychainNotice } from '../../utils/keychainNotice';
+import { hostFormStoresSecret, submittedSecret } from '../../components/asset/constants';
 import BottomPanel from './BottomPanel';
 import {
   SplitContextMenu,
@@ -49,6 +53,13 @@ interface TerminalBufferApi extends TerminalController {}
 interface RemoteHostConnection {  hostId: string;
   name: string;
   ip: string;
+}
+
+interface AuthRetryFormValues {
+  authType: Host['authType'];
+  username: string;
+  password?: string;
+  privateKey?: string;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -575,6 +586,11 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
   const activeKeyRef = useRef<string>('');
   const activeConnectionIdsRef = useRef<Map<string, string>>(new Map());
   const setInlineVisible = useAiChatStore((s) => s.setInlineVisible);
+  const loadHosts = useAssetsStore((s) => s.loadHosts);
+  const updateHost = useAssetsStore((s) => s.updateHost);
+  const [authRetryForm] = Form.useForm<AuthRetryFormValues>();
+  const [authRetryTabKey, setAuthRetryTabKey] = useState<string | null>(null);
+  const [authRetrySaving, setAuthRetrySaving] = useState(false);
   const terminalBufferRefs = useRef<Map<string, TerminalBufferApi>>(new Map());
   const setTerminalBuffer = useCallback((key: string, api: TerminalBufferApi) => {
     terminalBufferRefs.current.set(key, api);
@@ -1139,6 +1155,102 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
     void connectLocalTab(tab.key);
   }, [connectLocalTab, connectRemoteTab]);
 
+  const findHostForAuthRetry = useCallback(async (hostId: string) => {
+    let host = useAssetsStore.getState().hosts.find((item) => item.id === hostId);
+    if (host) return host;
+
+    await loadHosts();
+    host = useAssetsStore.getState().hosts.find((item) => item.id === hostId);
+    return host;
+  }, [loadHosts]);
+
+  const handleOpenAuthRetry = useCallback((tab: TerminalTab) => {
+    if (tab.kind !== 'remote' || !tab.hostId) return;
+
+    void findHostForAuthRetry(tab.hostId).then((host) => {
+      if (!host) {
+        message.error(tText('terminal.authRetryHostMissing'));
+        return;
+      }
+      if (host.os !== 'linux') {
+        message.error(tText('terminal.authRetryUnsupportedHost'));
+        return;
+      }
+
+      authRetryForm.resetFields();
+      authRetryForm.setFieldsValue({
+        authType: host.authType,
+        username: host.username,
+        password: '',
+        privateKey: '',
+      });
+      setAuthRetryTabKey(tab.key);
+    }).catch((error: unknown) => {
+      message.error(tText('common.operationFailed', { error: getErrorMessage(error) }));
+    });
+  }, [authRetryForm, findHostForAuthRetry, tText]);
+
+  const closeAuthRetryModal = useCallback(() => {
+    if (authRetrySaving) return;
+    setAuthRetryTabKey(null);
+    authRetryForm.resetFields();
+  }, [authRetryForm, authRetrySaving]);
+
+  const handleSaveAuthAndRetry = useCallback(async () => {
+    const tab = tabsRef.current.find((item) => item.key === authRetryTabKey);
+    if (!tab?.hostId) return;
+
+    const values = await authRetryForm.validateFields().catch(() => null);
+    if (!values) return;
+
+    const username = values.username.trim();
+    if (!username) {
+      message.error(tText('common.required'));
+      return;
+    }
+
+    try {
+      const host = await findHostForAuthRetry(tab.hostId);
+      if (!host) {
+        message.error(tText('terminal.authRetryHostMissing'));
+        return;
+      }
+
+      const nextHost: Host = {
+        ...host,
+        authType: values.authType,
+        username,
+        password: values.authType === 'password' ? submittedSecret(values.password) : undefined,
+        privateKey: values.authType === 'key' ? submittedSecret(values.privateKey) : undefined,
+      };
+
+      if (hostFormStoresSecret(nextHost) && !(await requestKeychainNotice())) return;
+
+      setAuthRetrySaving(true);
+      await updateHost(nextHost);
+      const updatedHost = useAssetsStore.getState().hosts.find((item) => item.id === host.id) ?? nextHost;
+      setAuthRetryTabKey(null);
+      authRetryForm.resetFields();
+      message.success(tText('terminal.authRetrySaved'));
+
+      setTabs((prev) => prev.map((item) => (
+        item.key === tab.key
+          ? { ...item, hostName: updatedHost.name, hostIp: updatedHost.ip }
+          : item
+      )));
+      lastRemoteConnectionRef.current = {
+        hostId: updatedHost.id,
+        name: updatedHost.name,
+        ip: updatedHost.ip,
+      };
+      void connectRemoteTab(tab.key, updatedHost.id, updatedHost.name, updatedHost.ip);
+    } catch (error: unknown) {
+      message.error(tText('common.operationFailed', { error: getErrorMessage(error) }));
+    } finally {
+      setAuthRetrySaving(false);
+    }
+  }, [authRetryForm, authRetryTabKey, connectRemoteTab, findHostForAuthRetry, tText, updateHost]);
+
   const handleOpenLocalTerminal = useCallback(() => {
     autoConnectedLocalRef.current = true;
     connectLocal();
@@ -1216,6 +1328,7 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
 
     if (tab.state === 'error') {
       const isRemote = tab.kind === 'remote';
+      const canEditAuth = isRemote && isSshAuthenticationFailure(tab.errorMessage);
       return (
         <div className="terminal-page-state-shell">
           <section className="terminal-state-card terminal-state-card-error" role="alert">
@@ -1227,6 +1340,9 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
             <p className="terminal-state-subtitle">{tab.errorMessage || t('terminal.errorFallback')}</p>
             <div className="terminal-state-actions">
               <Button type="primary" onClick={() => handleRetryTab(tab)}>{t('terminal.retry')}</Button>
+              {canEditAuth ? (
+                <Button onClick={() => handleOpenAuthRetry(tab)}>{t('terminal.editAuthAndRetry')}</Button>
+              ) : null}
               {isRemote ? <Button onClick={handleBackToAssets}>{t('terminal.openAssetsSidebar')}</Button> : null}
             </div>
           </section>
@@ -1239,7 +1355,7 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
         <Empty description={t('terminal.sessionNotReady')} />
       </div>
     );
-  }, [handleBackToAssets, handleRetryTab, setTerminalBuffer, handleTerminalContextMenu, handleCloseSplit, t]);
+  }, [handleBackToAssets, handleOpenAuthRetry, handleRetryTab, setTerminalBuffer, handleTerminalContextMenu, handleCloseSplit, t]);
 
   // 监听连接状态变化（空闲断开、级联故障等）
   useEffect(() => {
@@ -1387,83 +1503,135 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
   }
 
   return (
-    <div ref={terminalPageShellRef} className={`terminal-page-shell terminal-page-shell-active ${hasMonitor ? 'terminal-layout-with-monitor' : ''}`}>
-      <div className={`terminal-layout-left${tabSwitching ? ' terminal-tab-switching' : ''}`}>
-        <Tabs
-          type="editable-card"
-          activeKey={activeKey}
-          onChange={setActiveKey}
-          hideAdd
-          destroyInactiveTabPane
-          className="terminal-tabs"
-          items={tabItems}
-          onTabContextMenu={handleTabContextMenu}
-          onTabListContextMenu={handleTabListContextMenu}
-          tabBarExtraContent={(
-            <button
-              type="button"
-              className="terminal-tab-add"
-              title={tText('terminal.connectHost')}
-              onClick={handleBackToAssets}
-            >
-              <PlusOutlined />
-            </button>
-          )}
-          onEdit={(targetKey, action) => {
-            if (action === 'remove' && typeof targetKey === 'string') {
-              handleCloseTab(targetKey);
-            }
-          }}
-        />
+    <>
+      <div ref={terminalPageShellRef} className={`terminal-page-shell terminal-page-shell-active ${hasMonitor ? 'terminal-layout-with-monitor' : ''}`}>
+        <div className={`terminal-layout-left${tabSwitching ? ' terminal-tab-switching' : ''}`}>
+          <Tabs
+            type="editable-card"
+            activeKey={activeKey}
+            onChange={setActiveKey}
+            hideAdd
+            destroyInactiveTabPane
+            className="terminal-tabs"
+            items={tabItems}
+            onTabContextMenu={handleTabContextMenu}
+            onTabListContextMenu={handleTabListContextMenu}
+            tabBarExtraContent={(
+              <button
+                type="button"
+                className="terminal-tab-add"
+                title={tText('terminal.connectHost')}
+                onClick={handleBackToAssets}
+              >
+                <PlusOutlined />
+              </button>
+            )}
+            onEdit={(targetKey, action) => {
+              if (action === 'remove' && typeof targetKey === 'string') {
+                handleCloseTab(targetKey);
+              }
+            }}
+          />
 
-        {shouldShowFixedPanels && deferredActiveTab?.sessionId && (
-          <BottomPanel
-            hostId={deferredActiveTab.hostId}
-            hostName={deferredActiveTab.hostName}
+          {shouldShowFixedPanels && deferredActiveTab?.sessionId && (
+            <BottomPanel
+              hostId={deferredActiveTab.hostId}
+              hostName={deferredActiveTab.hostName}
+              hostIp={deferredActiveTab.hostIp}
+              sessionId={deferredActiveTab.sessionId}
+              isRemote={!!activeRemoteHostId}
+              getTerminalBuffer={bottomPanelGetTerminalBuffer}
+              executeTerminalCommand={bottomPanelExecuteTerminalCommand}
+              insertTerminalCommand={bottomPanelInsertTerminalCommand}
+            />
+          )}
+
+          <SplitContextMenu
+            menu={splitContextMenu}
+            copyLabel={tText('terminal.copy')}
+            pasteLabel={tText('terminal.paste')}
+            aiAnalyzeLabel={tText('terminal.aiAnalyzeError')}
+            openSplitLabel={tText('terminal.openSplit')}
+            onCopySelection={handleCopySelection}
+            onPasteClipboard={handlePasteClipboard}
+            onAiAnalyzeSelection={handleAiAnalyzeSelection}
+            onOpenSplit={handleOpenSplit}
+          />
+
+          <TabContextMenu
+            menu={tabContextMenu}
+            labels={{
+              newConnection: tText('terminal.context.newConnection'),
+              closeAll: tText('terminal.context.closeAll'),
+              closeOthers: tText('terminal.context.closeOthers'),
+              closeLeft: tText('terminal.context.closeLeft'),
+              closeRight: tText('terminal.context.closeRight'),
+            }}
+            onNewConnection={handleNewConnectionFromContext}
+            onCloseAll={handleCloseAllTabs}
+            onCloseTabsByMode={handleCloseTabsByMode}
+          />
+        </div>
+
+        {hasMonitor && deferredActiveTab && activeRemoteHostId && (
+          <HostMonitorPanel
+            hostId={activeRemoteHostId}
             hostIp={deferredActiveTab.hostIp}
-            sessionId={deferredActiveTab.sessionId}
-            isRemote={!!activeRemoteHostId}
-            getTerminalBuffer={bottomPanelGetTerminalBuffer}
-            executeTerminalCommand={bottomPanelExecuteTerminalCommand}
-            insertTerminalCommand={bottomPanelInsertTerminalCommand}
+            width={monitorWidth}
+            onResizePointerDown={handleMonitorResizePointerDown}
           />
         )}
-
-        <SplitContextMenu
-          menu={splitContextMenu}
-          copyLabel={tText('terminal.copy')}
-          pasteLabel={tText('terminal.paste')}
-          aiAnalyzeLabel={tText('terminal.aiAnalyzeError')}
-          openSplitLabel={tText('terminal.openSplit')}
-          onCopySelection={handleCopySelection}
-          onPasteClipboard={handlePasteClipboard}
-          onAiAnalyzeSelection={handleAiAnalyzeSelection}
-          onOpenSplit={handleOpenSplit}
-        />
-
-        <TabContextMenu
-          menu={tabContextMenu}
-          labels={{
-            newConnection: tText('terminal.context.newConnection'),
-            closeAll: tText('terminal.context.closeAll'),
-            closeOthers: tText('terminal.context.closeOthers'),
-            closeLeft: tText('terminal.context.closeLeft'),
-            closeRight: tText('terminal.context.closeRight'),
-          }}
-          onNewConnection={handleNewConnectionFromContext}
-          onCloseAll={handleCloseAllTabs}
-          onCloseTabsByMode={handleCloseTabsByMode}
-        />
       </div>
 
-      {hasMonitor && deferredActiveTab && activeRemoteHostId && (
-        <HostMonitorPanel
-          hostId={activeRemoteHostId}
-          hostIp={deferredActiveTab.hostIp}
-          width={monitorWidth}
-          onResizePointerDown={handleMonitorResizePointerDown}
-        />
-      )}
-    </div>
+      <Modal
+        open={!!authRetryTabKey}
+        title={t('terminal.authRetryTitle')}
+        width={460}
+        onCancel={closeAuthRetryModal}
+        maskClosable={!authRetrySaving}
+        closable={!authRetrySaving}
+        footer={(
+          <>
+            <Button onClick={closeAuthRetryModal} disabled={authRetrySaving}>{t('common.cancel')}</Button>
+            <Button type="primary" loading={authRetrySaving} onClick={() => { void handleSaveAuthAndRetry(); }}>
+              {t('terminal.saveAuthAndReconnect')}
+            </Button>
+          </>
+        )}
+      >
+        <div className="terminal-auth-retry-copy">{t('terminal.authRetryDescription')}</div>
+        <Form form={authRetryForm} layout="vertical" className="terminal-auth-retry-form">
+          <Form.Item noStyle shouldUpdate>
+            {({ getFieldValue }) => {
+              const authType = (getFieldValue('authType') as Host['authType'] | undefined) ?? 'password';
+              return (
+                <>
+                  <div className="terminal-auth-retry-grid">
+                    <Form.Item name="authType" label={t('assets.auth')} rules={[{ required: true, message: tText('common.required') }]}>
+                      <Select<Host['authType']> options={[
+                        { value: 'password', label: t('assets.passwordAuth') },
+                        { value: 'key', label: t('assets.keyAuth') },
+                      ]} />
+                    </Form.Item>
+                    <Form.Item name="username" label={t('assets.username')} rules={[{ required: true, message: tText('common.required') }]}>
+                      <Input placeholder="root" />
+                    </Form.Item>
+                  </div>
+                  {authType === 'key' ? (
+                    <Form.Item name="privateKey" label={t('assets.sshPrivateKey')} extra={t('terminal.authRetrySecretExtra')}>
+                      <Input.TextArea rows={4} placeholder={tText('assets.pastePrivateKey')} />
+                    </Form.Item>
+                  ) : (
+                    <Form.Item name="password" label={t('assets.password')} extra={t('terminal.authRetrySecretExtra')}>
+                      <Input.Password placeholder={tText('assets.passwordKeepPlaceholder')} />
+                    </Form.Item>
+                  )}
+                </>
+              );
+            }}
+          </Form.Item>
+        </Form>
+      </Modal>
+    </>
   );
 }

@@ -916,6 +916,30 @@ body.terminal-monitor-resizing * {
   margin-top: 18px;
 }
 
+.terminal-auth-retry-copy {
+  margin-bottom: 14px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+}
+
+.terminal-auth-retry-form {
+  margin-top: 4px;
+}
+
+.terminal-auth-retry-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+  gap: 12px;
+}
+
+@media (max-width: 560px) {
+  .terminal-auth-retry-grid {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}
+
 @keyframes terminal-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.62; transform: scale(0.86); }

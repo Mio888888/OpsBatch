@@ -975,6 +975,113 @@ body.terminal-monitor-resizing * {
   min-height: 0;
 }
 
+.terminal-single-pane {
+  position: relative;
+}
+
+.terminal-pane-search-button,
+.terminal-pane-search-box {
+  position: absolute;
+  top: 10px;
+  right: 14px;
+  z-index: 5;
+}
+
+.terminal-pane-search-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  color: var(--terminal-muted);
+  background: rgba(10, 16, 26, 0.74);
+  border: 1px solid var(--terminal-border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  opacity: 0.78;
+  backdrop-filter: blur(8px);
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.terminal-pane-search-button:hover,
+.terminal-pane-search-button:focus-visible {
+  color: var(--terminal-fg);
+  background: rgba(20, 30, 44, 0.92);
+  outline: none;
+  opacity: 1;
+}
+
+.terminal-pane-search-box {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: min(360px, calc(100% - 28px));
+  height: 32px;
+  padding: 0 4px 0 8px;
+  color: var(--terminal-muted);
+  background: rgba(10, 16, 26, 0.92);
+  border: 1px solid var(--terminal-border);
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(10px);
+}
+
+.terminal-search-input {
+  min-width: 80px;
+  flex: 1;
+  height: 24px;
+  padding: 0;
+  color: var(--terminal-fg);
+  font-size: var(--font-size-small);
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.terminal-search-input::placeholder {
+  color: var(--terminal-weak);
+}
+
+.terminal-search-count {
+  min-width: 42px;
+  color: var(--terminal-weak);
+  font-size: var(--font-size-caption);
+  line-height: var(--line-height-tight);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.terminal-search-icon-button {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--terminal-muted);
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+}
+
+.terminal-search-icon-button:hover:not(:disabled),
+.terminal-search-icon-button:focus-visible {
+  color: var(--terminal-fg);
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
+}
+
+.terminal-search-icon-button:disabled {
+  color: var(--terminal-weak);
+  cursor: not-allowed;
+  opacity: 0.48;
+}
+
 .terminal-split-layout {
   display: flex;
   gap: 0;

@@ -4,6 +4,8 @@ import {
   Archive,
   Bot,
   CheckCircle,
+  ChevronDown,
+  ChevronUp,
   CirclePause,
   CirclePlay,
   Clock,
@@ -48,6 +50,8 @@ function icon(Component: typeof Activity) {
 export const BotOutlined = icon(Bot);
 export const ApartmentOutlined = icon(Archive);
 export const CheckCircleOutlined = icon(CheckCircle);
+export const ChevronDownOutlined = icon(ChevronDown);
+export const ChevronUpOutlined = icon(ChevronUp);
 export const ClearOutlined = icon(XCircle);
 export const ClockCircleOutlined = icon(Clock);
 export const CloseCircleOutlined = icon(XCircle);

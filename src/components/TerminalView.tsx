@@ -12,6 +12,7 @@ import { createTrackedCommand, createTrackedCommandOutputCleaner, stripTrackedCo
 import { getCurrentTerminalAppearance, onThemeChange } from '../stores/theme';
 import { logHandledError } from '../utils/globalLogger';
 import { compileDangerRules, checkDangerousCommand, DEFAULT_COMPILED_DANGER_RULES, type CompiledDangerRule } from '../utils/dangerCommandCheck';
+import { findTerminalSearchMatches, type TerminalSearchLine } from '../utils/terminalSearch';
 
 export interface TerminalCommandExecutionOptions {
   timeoutMs?: number;
@@ -24,9 +25,22 @@ export interface TerminalCommandExecutionResult {
   output: string;
 }
 
+export interface TerminalSearchOptions {
+  direction?: 'next' | 'previous';
+  fromIndex?: number;
+}
+
+export interface TerminalSearchResult {
+  found: boolean;
+  matchCount: number;
+  matchIndex: number;
+}
+
 export interface TerminalController {
   getBuffer: () => string;
   getSelection: () => string;
+  search: (query: string, options?: TerminalSearchOptions) => TerminalSearchResult;
+  clearSearch: () => void;
   pasteText: (text: string) => Promise<void>;
   insertCommand: (command: string) => Promise<void>;
   executeCommand: (command: string, options?: TerminalCommandExecutionOptions) => Promise<TerminalCommandExecutionResult>;
@@ -63,6 +77,31 @@ function limitTrackedOutput(output: string): string {
 
 function cleanExecutionOutput(output: string): string {
   return stripTrackedCommandOutputArtifacts(output).trim();
+}
+
+function getTerminalSearchLines(terminal: Terminal): TerminalSearchLine[] {
+  const buffer = terminal.buffer.active;
+  const lines: TerminalSearchLine[] = [];
+
+  for (let row = 0; row < buffer.length; row += 1) {
+    const line = buffer.getLine(row);
+    if (line) {
+      lines.push({ row, text: line.translateToString(true) });
+    }
+  }
+
+  return lines;
+}
+
+function getNextSearchIndex(matchCount: number, direction: TerminalSearchOptions['direction'], fromIndex?: number) {
+  if (matchCount <= 0) return -1;
+  if (typeof fromIndex !== 'number' || fromIndex < 0 || fromIndex >= matchCount) {
+    return direction === 'previous' ? matchCount - 1 : 0;
+  }
+
+  return direction === 'previous'
+    ? (fromIndex - 1 + matchCount) % matchCount
+    : (fromIndex + 1) % matchCount;
 }
 /**
  * 本地追踪用户终端输入,返回命令提交时的完整命令文本。
@@ -257,6 +296,28 @@ export default memo(function TerminalView({ sessionId, active = true, onTerminal
           } catch {
             return '';
           }
+        },
+        search: (query, options) => {
+          const matches = findTerminalSearchMatches(getTerminalSearchLines(terminal), query);
+          const matchIndex = getNextSearchIndex(matches.length, options?.direction, options?.fromIndex);
+          const match = matchIndex >= 0 ? matches[matchIndex] : undefined;
+
+          if (!match) {
+            terminal.clearSelection();
+            return { found: false, matchCount: 0, matchIndex: -1 };
+          }
+
+          terminal.select(match.column, match.row, match.length);
+          terminal.scrollToLine(match.row);
+
+          return {
+            found: true,
+            matchCount: matches.length,
+            matchIndex,
+          };
+        },
+        clearSearch: () => {
+          terminal.clearSelection();
         },
         pasteText: async (text) => {
           if (!text || disposed) {

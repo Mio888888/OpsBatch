@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useRef, memo, useMemo, startTransition, useDeferredValue, type MouseEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useState, useEffect, useCallback, useRef, memo, useMemo, startTransition, useDeferredValue, type MouseEvent, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Tabs, Empty, Button, Spin, Form, Input, Modal, Select, message } from '../../components/ui';
-import { PlayCircleOutlined, PlusOutlined } from '../../components/ui/icons';
+import { ChevronDownOutlined, ChevronUpOutlined, CloseOutlined, PlayCircleOutlined, PlusOutlined, SearchOutlined } from '../../components/ui/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import TerminalView, { type TerminalController } from '../../components/TerminalView';
@@ -49,6 +49,11 @@ interface OpenHostRequest {
 }
 
 interface TerminalBufferApi extends TerminalController {}
+
+interface TerminalSearchState {
+  matchCount: number;
+  matchIndex: number;
+}
 
 interface RemoteHostConnection {  hostId: string;
   name: string;
@@ -495,7 +500,114 @@ interface TerminalTabContentProps {
   setTerminalBuffer: (key: string, api: TerminalBufferApi) => void;
   onContextMenu: (event: MouseEvent<HTMLDivElement>, tab: TerminalTab, terminalKey: string) => void;
   onCloseSplit: (tab: TerminalTab) => void;
+  searchVisible: boolean;
+  searchQuery: string;
+  searchState: TerminalSearchState;
+  searchInputRef: RefObject<HTMLInputElement | null>;
+  onOpenSearch: () => void;
+  onCloseSearch: () => void;
+  onSearchChange: (query: string) => void;
+  onJumpSearchMatch: (direction: 'next' | 'previous') => void;
 }
+
+interface TerminalSearchOverlayProps {
+  visible: boolean;
+  query: string;
+  state: TerminalSearchState;
+  inputRef: RefObject<HTMLInputElement | null>;
+  onOpen: () => void;
+  onClose: () => void;
+  onChange: (query: string) => void;
+  onJumpMatch: (direction: 'next' | 'previous') => void;
+}
+
+const TerminalSearchOverlay = memo(function TerminalSearchOverlay({
+  visible,
+  query,
+  state,
+  inputRef,
+  onOpen,
+  onClose,
+  onChange,
+  onJumpMatch,
+}: TerminalSearchOverlayProps) {
+  const { t, tText } = useTranslation();
+
+  if (!visible) {
+    return (
+      <button
+        type="button"
+        className="terminal-pane-search-button"
+        title={tText('terminal.openSearch')}
+        aria-label={tText('terminal.openSearch')}
+        onClick={onOpen}
+      >
+        <SearchOutlined />
+      </button>
+    );
+  }
+
+  return (
+    <div className="terminal-pane-search-box" role="search">
+      <SearchOutlined />
+      <input
+        ref={inputRef}
+        type="search"
+        className="terminal-search-input"
+        value={query}
+        placeholder={tText('terminal.searchPlaceholder')}
+        aria-label={tText('terminal.searchPlaceholder')}
+        onChange={(event) => onChange(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') {
+            event.preventDefault();
+            onClose();
+            return;
+          }
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            onJumpMatch(event.shiftKey ? 'previous' : 'next');
+          }
+        }}
+      />
+      <span className="terminal-search-count" aria-live="polite">
+        {query.trim()
+          ? (state.matchCount > 0 ? `${state.matchIndex + 1}/${state.matchCount}` : t('terminal.searchNoMatch'))
+          : ''}
+      </span>
+      <button
+        type="button"
+        className="terminal-search-icon-button"
+        title={tText('terminal.searchPrevious')}
+        aria-label={tText('terminal.searchPrevious')}
+        disabled={!query.trim() || state.matchCount === 0}
+        onClick={() => onJumpMatch('previous')}
+      >
+        <ChevronUpOutlined />
+      </button>
+      <button
+        type="button"
+        className="terminal-search-icon-button"
+        title={tText('terminal.searchNext')}
+        aria-label={tText('terminal.searchNext')}
+        disabled={!query.trim() || state.matchCount === 0}
+        onClick={() => onJumpMatch('next')}
+      >
+        <ChevronDownOutlined />
+      </button>
+      <button
+        type="button"
+        className="terminal-search-icon-button"
+        title={tText('common.close')}
+        aria-label={tText('common.close')}
+        onClick={onClose}
+      >
+        <CloseOutlined />
+      </button>
+    </div>
+  );
+});
+TerminalSearchOverlay.displayName = 'TerminalSearchOverlay';
 
 const TerminalTabContent = memo(function TerminalTabContent({
   tab,
@@ -503,6 +615,14 @@ const TerminalTabContent = memo(function TerminalTabContent({
   setTerminalBuffer,
   onContextMenu,
   onCloseSplit,
+  searchVisible,
+  searchQuery,
+  searchState,
+  searchInputRef,
+  onOpenSearch,
+  onCloseSearch,
+  onSearchChange,
+  onJumpSearchMatch,
 }: TerminalTabContentProps) {
   const { t, tText } = useTranslation();
   const sessionId = tab.sessionId || '';
@@ -552,6 +672,16 @@ const TerminalTabContent = memo(function TerminalTabContent({
 
   return (
     <div className="terminal-single-pane" onContextMenu={(event) => onContextMenu(event, tab, tab.key)}>
+      <TerminalSearchOverlay
+        visible={searchVisible}
+        query={searchQuery}
+        state={searchState}
+        inputRef={searchInputRef}
+        onOpen={onOpenSearch}
+        onClose={onCloseSearch}
+        onChange={onSearchChange}
+        onJumpMatch={onJumpSearchMatch}
+      />
       <TerminalView
         sessionId={sessionId}
         active={isActive}
@@ -575,7 +705,11 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
   const [splitContextMenu, setSplitContextMenu] = useState<TerminalSplitContextMenu | null>(null);
   const [tabContextMenu, setTabContextMenu] = useState<TerminalTabContextMenu | null>(null);
   const [monitorWidth, setMonitorWidth] = useState(DEFAULT_MONITOR_PANEL_WIDTH);
+  const [terminalSearchVisible, setTerminalSearchVisible] = useState(false);
+  const [terminalSearchQuery, setTerminalSearchQuery] = useState('');
+  const [terminalSearchState, setTerminalSearchState] = useState<TerminalSearchState>({ matchCount: 0, matchIndex: -1 });
   const terminalPageShellRef = useRef<HTMLDivElement>(null);
+  const terminalSearchInputRef = useRef<HTMLInputElement>(null);
   const monitorResizeCleanupRef = useRef<(() => void) | null>(null);
   const autoConnectedHostIdRef = useRef<string | null>(null);
   const consumedOpenHostRequestIdsRef = useRef<Set<string>>(new Set());
@@ -599,19 +733,62 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
   const executeTerminalCommand = useCallback((key: string, command: string, options?: Parameters<TerminalController['executeCommand']>[1]) => terminalBufferRefs.current.get(key)?.executeCommand(command, options), []);
   const insertTerminalCommand = useCallback((key: string, command: string) => terminalBufferRefs.current.get(key)?.insertCommand(command), []);
   const pasteTerminalText = useCallback((key: string, text: string) => terminalBufferRefs.current.get(key)?.pasteText(text), []);
+  const runTerminalSearch = useCallback((query: string, direction: 'next' | 'previous' = 'next', fromIndex?: number) => {
+    const terminalKey = activeKeyRef.current;
+    const api = terminalKey ? terminalBufferRefs.current.get(terminalKey) : undefined;
+    if (!api || !query.trim()) {
+      api?.clearSearch();
+      setTerminalSearchState({ matchCount: 0, matchIndex: -1 });
+      return;
+    }
 
-  // ⌘I global shortcut for inline AI panel
+    const result = api.search(query, { direction, fromIndex });
+    setTerminalSearchState({ matchCount: result.matchCount, matchIndex: result.matchIndex });
+  }, []);
+  const focusTerminalSearchInput = useCallback(() => {
+    window.setTimeout(() => {
+      terminalSearchInputRef.current?.focus();
+      terminalSearchInputRef.current?.select();
+    }, 0);
+  }, []);
+  const openTerminalSearch = useCallback(() => {
+    const tab = tabsRef.current.find((item) => item.key === activeKeyRef.current);
+    if (!tab?.sessionId || tab.splitSessionId || tab.splitState) return;
+    setTerminalSearchVisible(true);
+    focusTerminalSearchInput();
+  }, [focusTerminalSearchInput]);
+  const closeTerminalSearch = useCallback(() => {
+    const api = activeKeyRef.current ? terminalBufferRefs.current.get(activeKeyRef.current) : undefined;
+    api?.clearSearch();
+    setTerminalSearchVisible(false);
+    setTerminalSearchQuery('');
+    setTerminalSearchState({ matchCount: 0, matchIndex: -1 });
+  }, []);
+  const handleTerminalSearchChange = useCallback((nextQuery: string) => {
+    setTerminalSearchQuery(nextQuery);
+    runTerminalSearch(nextQuery);
+  }, [runTerminalSearch]);
+  const jumpTerminalSearchMatch = useCallback((direction: 'next' | 'previous') => {
+    runTerminalSearch(terminalSearchQuery, direction, terminalSearchState.matchIndex);
+  }, [runTerminalSearch, terminalSearchQuery, terminalSearchState.matchIndex]);
+
+  // ⌘I global shortcut for inline AI panel; ⌘F/Ctrl+F opens terminal search.
   useEffect(() => {
     if (!visible) return;
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'i') {
         e.preventDefault();
         setInlineVisible(true);
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        openTerminalSearch();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [visible, setInlineVisible]);
+  }, [openTerminalSearch, visible, setInlineVisible]);
 
   useEffect(() => {
     tabsRef.current = tabs;
@@ -624,6 +801,11 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
   useEffect(() => {
     activeKeyRef.current = activeKey;
   }, [activeKey]);
+
+  useEffect(() => {
+    if (!terminalSearchVisible || !terminalSearchQuery.trim()) return;
+    runTerminalSearch(terminalSearchQuery);
+  }, [activeKey, runTerminalSearch, terminalSearchQuery, terminalSearchVisible]);
 
   useEffect(() => {
     if (!splitContextMenu) return;
@@ -1297,6 +1479,14 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
           setTerminalBuffer={setTerminalBuffer}
           onContextMenu={handleTerminalContextMenu}
           onCloseSplit={handleCloseSplit}
+          searchVisible={terminalSearchVisible && activeKey === tab.key}
+          searchQuery={terminalSearchQuery}
+          searchState={terminalSearchState}
+          searchInputRef={terminalSearchInputRef}
+          onOpenSearch={openTerminalSearch}
+          onCloseSearch={closeTerminalSearch}
+          onSearchChange={handleTerminalSearchChange}
+          onJumpSearchMatch={jumpTerminalSearchMatch}
         />
       );
     }
@@ -1355,7 +1545,23 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
         <Empty description={t('terminal.sessionNotReady')} />
       </div>
     );
-  }, [handleBackToAssets, handleOpenAuthRetry, handleRetryTab, setTerminalBuffer, handleTerminalContextMenu, handleCloseSplit, t]);
+  }, [
+    closeTerminalSearch,
+    activeKey,
+    handleBackToAssets,
+    handleCloseSplit,
+    handleOpenAuthRetry,
+    handleRetryTab,
+    handleTerminalContextMenu,
+    handleTerminalSearchChange,
+    jumpTerminalSearchMatch,
+    openTerminalSearch,
+    setTerminalBuffer,
+    t,
+    terminalSearchQuery,
+    terminalSearchState,
+    terminalSearchVisible,
+  ]);
 
   // 监听连接状态变化（空闲断开、级联故障等）
   useEffect(() => {

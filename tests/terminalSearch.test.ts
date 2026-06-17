@@ -1,4 +1,4 @@
-import { findTerminalSearchMatches } from '../src/utils/terminalSearch';
+import { findTerminalSearchMatches } from '../src/utils/terminalSearch.ts';
 
 function assertDeepEqual(actual: unknown, expected: unknown) {
   const actualJson = JSON.stringify(actual);

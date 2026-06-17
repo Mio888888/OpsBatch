@@ -6,7 +6,7 @@
 
 请通过以下方式报告安全相关问题：
 
-- **邮箱**：[请填写安全联系邮箱]
+- **邮箱**：mio@866619.xyz
 - **GitHub Security Advisories**：通过本仓库的 [Security](https://github.com/Mio888888/OpsBatch/security) 页面报告
 
 报告时请尽量提供：
@@ -41,7 +41,7 @@
 
 ## 联系我们
 
-如有安全问题，请联系：[请填写安全联系邮箱]
+如有安全问题，请联系：mio@866619.xyz
 
 ---
 

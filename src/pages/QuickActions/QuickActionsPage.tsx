@@ -15,6 +15,7 @@ import type { TranslationKey } from '../../i18n';
 import type { QuickAction } from '../../types';
 import { parseQuickActionParams, replaceQuickActionParams } from '../../utils/quickActionParams';
 import { logHandledError } from '../../utils/globalLogger';
+import '../../styles/pages/quick-actions.css';
 
 interface QuickActionFormValues {
   name: string;

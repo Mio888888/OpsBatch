@@ -3,9 +3,7 @@
   font-style: normal;
   font-weight: 500;
   font-display: swap;
-  src:
-    url('../../assets/font/HarmonyOS_Sans_SC_Medium.woff2') format('woff2'),
-    url('../../assets/font/HarmonyOS_Sans_SC_Medium.woff') format('woff');
+  src: url('../../assets/font/HarmonyOS_Sans_SC_Medium.woff2') format('woff2');
 }
 
 :root {

@@ -5,6 +5,7 @@ import { extractEmptyCommandPlanNotice, stripCommandPlanBlock } from '../utils/a
 import { useTranslation } from '../i18n';
 import type { TerminalCommandExecutionResult } from './TerminalView';
 import type { FC } from 'react';
+import '../styles/panels/ai-panels.css';
 
 const MESSAGE_BUFFER = 80;
 

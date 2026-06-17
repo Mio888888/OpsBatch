@@ -14,6 +14,7 @@ import ExecutionLogPanel from './components/ExecutionLogPanel';
 import { executeWorkflow, type ProgressEvent } from './workflowExecutor';
 import { collectWorkflowHostIds, createWorkflowLogEntry, type LogEntry } from './workflowExecutionLogs';
 import { logHandledError } from '../../utils/globalLogger';
+import '../../styles/pages/workflow-dashboard.css';
 
 interface WorkflowFormValues {
   name: string;

@@ -15,6 +15,7 @@ import RdpAiPanel from '../../components/RdpAiPanel';
 import { executeRdpOperations } from '../../utils/rdpAgentExecutor';
 import type { RdpOperation } from '../../utils/aiActionParser';
 import { BotOutlined } from '../../components/ui/icons';
+import '../../styles/pages/rdp.css';
 
 const RDP_AI_SCREENSHOT_MAX_WIDTH = 1280;
 const RDP_AI_SCREENSHOT_MAX_HEIGHT = 720;

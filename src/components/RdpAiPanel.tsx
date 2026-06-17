@@ -12,6 +12,7 @@ import {
 } from '../stores/aiChat';
 import type { RdpOperation } from '../utils/aiActionParser';
 import { useTranslation } from '../i18n';
+import '../styles/panels/ai-panels.css';
 
 interface RdpAiPanelProps {
   hostId: string;

@@ -16,6 +16,7 @@ import {
   CheckCircleOutlined, CloseCircleOutlined,
   LoadingOutlined,
 } from '../../components/ui/icons';
+import '../../styles/windows/batch-window.css';
 
 interface TransferProgress {
   hostId: string;

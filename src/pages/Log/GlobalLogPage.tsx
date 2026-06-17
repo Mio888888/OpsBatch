@@ -3,6 +3,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { useLogStore, type LogEntry } from '../../stores/log';
 import { useTranslation } from '../../i18n';
 import WindowControls from '../../components/WindowControls';
+import '../../styles/windows/global-log.css';
 
 const levelColors: Record<string, string> = {
   error: 'var(--color-error, #ef4444)',

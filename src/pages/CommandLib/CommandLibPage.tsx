@@ -13,6 +13,8 @@ import { useTranslation } from '../../i18n';
 import type { TranslationKey } from '../../i18n';
 import type { CommandEntry } from '../../types';
 import { logHandledError } from '../../utils/globalLogger';
+import '../../styles/pages/library.css';
+import '../../styles/pages/quick-actions.css';
 
 const RISK_LABEL_KEYS: Record<string, TranslationKey> = {
   low: 'library.risk.low',

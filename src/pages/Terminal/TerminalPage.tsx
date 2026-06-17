@@ -23,6 +23,7 @@ import {
   type TerminalSplitContextMenu,
   type TerminalTabContextMenu,
 } from './TerminalContextMenus';
+import '../../styles/terminal/terminal.css';
 
 interface TerminalTab {
   key: string;

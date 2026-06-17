@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, memo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { FC } from 'react';
+import '../styles/panels/ai-panels.css';
 
 interface StreamChunk {
   delta: string;

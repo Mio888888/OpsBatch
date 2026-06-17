@@ -12,6 +12,8 @@ import {
   shouldAcceptExternalFileDrop,
 } from '../utils/dragDropTarget';
 import type { FC, ReactNode } from 'react';
+import '../styles/panels/sftp.css';
+import '../styles/panels/sftp-skeleton.css';
 
 const SFTP_FILE_ROW_HEIGHT = 23;
 

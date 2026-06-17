@@ -7,6 +7,7 @@ import WindowControls from '../../components/WindowControls';
 import TerminalPane from './TerminalPane';
 import { logHandledError } from '../../utils/globalLogger';
 import './batch-terminal.css';
+import '../../styles/windows/batch-window.css';
 
 const MAX_CONCURRENT_CONNECTS = 4;
 

@@ -11,6 +11,8 @@ import type { TranslationKey } from '../../i18n';
 import type { ScriptEntry } from '../../types';
 import { invoke } from '@tauri-apps/api/core';
 import { logHandledError } from '../../utils/globalLogger';
+import '../../styles/pages/library.css';
+import '../../styles/pages/quick-actions.css';
 
 const LazyCodeEditor = lazy(() => import('../../components/CodeEditor'));
 

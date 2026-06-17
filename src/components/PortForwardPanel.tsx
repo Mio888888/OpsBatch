@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useTranslation } from '../i18n';
 import type { FC } from 'react';
+import '../styles/panels/port-forward.css';
 
 type ForwardType = 'local' | 'remote' | 'dynamic';
 type ForwardStatus = 'active' | 'suspended' | 'error';

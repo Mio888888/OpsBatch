@@ -16,6 +16,7 @@ import {
   vncDefaultResolution,
 } from './vncProtocol';
 import { createVncClipboardBridge } from './vncClipboard';
+import '../../styles/pages/rdp.css';
 
 interface VncConnectResponse {
   sessionId: string;

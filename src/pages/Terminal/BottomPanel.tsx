@@ -15,6 +15,7 @@ import ScriptsInlinePanel from '../../components/ScriptsInlinePanel';
 import { useAiChatStore } from '../../stores/aiChat';
 import { useTranslation } from '../../i18n';
 import type { TerminalController } from '../../components/TerminalView';
+import '../../styles/panels/bottom-panel.css';
 
 interface BottomPanelProps {
   hostId?: string;

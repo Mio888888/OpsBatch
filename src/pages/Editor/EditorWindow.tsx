@@ -5,6 +5,7 @@ import { ask } from '@tauri-apps/plugin-dialog';
 import { useEditorStore } from '../../stores/editor';
 import WindowControls from '../../components/WindowControls';
 import FileTree from './FileTree';
+import '../../styles/windows/editor.css';
 
 const LazyCodeEditor = lazy(() => import('../../components/CodeEditor'));
 

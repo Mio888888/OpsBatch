@@ -22,6 +22,7 @@ import { requestKeychainNotice } from '../../utils/keychainNotice';
 import { logHandledError } from '../../utils/globalLogger';
 import { darkThemes, lightThemes, accentColors } from '../../data/themes';
 import type { ThemePreviewMeta } from '../../data/themes';
+import '../../styles/pages/settings.css';
 
 const QuickActionsPage = lazy(() => import('../QuickActions/QuickActionsPage'));
 const CommandLibPage = lazy(() => import('../CommandLib/CommandLibPage'));

@@ -6,6 +6,8 @@ import { useTranslation } from '../i18n';
 import type { TranslationKey } from '../i18n';
 import type { ScriptEntry } from '../types';
 import { buildRemoteScriptCommand } from '../utils/remoteScriptCommand';
+import '../styles/panels/inline-panels.css';
+import '../styles/dialogs/command-execution.css';
 
 const RISK_COLORS: Record<string, string> = { low: 'green', medium: 'orange', high: 'red', critical: 'magenta' };
 const RISK_LABEL_KEYS: Record<string, TranslationKey> = { low: 'library.risk.low', medium: 'library.risk.medium', high: 'library.risk.high', critical: 'library.risk.critical' };

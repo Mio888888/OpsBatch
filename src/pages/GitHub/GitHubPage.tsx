@@ -11,6 +11,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from '../../i18n';
 import { requestKeychainNotice } from '../../utils/keychainNotice';
 import { logHandledError } from '../../utils/globalLogger';
+import '../../styles/pages/repo-sync.css';
 
 interface RepoInfo {
   id: string;

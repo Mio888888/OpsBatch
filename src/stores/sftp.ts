@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { basenameFromPath } from '../utils/pathNames';
 
 export interface FileEntry {
   name: string;
@@ -234,7 +235,7 @@ export const useSftpStore = create<SftpState>((set, get) => ({
   },
 
   upload: async (hostId, localFilePath, remoteDir) => {
-    const fileName = localFilePath.split('/').pop() || 'file';
+    const fileName = basenameFromPath(localFilePath);
     const remotePath = remoteDir.endsWith('/')
       ? `${remoteDir}${fileName}`
       : `${remoteDir}/${fileName}`;
@@ -310,7 +311,7 @@ export const useSftpStore = create<SftpState>((set, get) => ({
   },
 
   download: async (hostId, remoteFilePath, localDir) => {
-    const fileName = remoteFilePath.split('/').pop() || 'file';
+    const fileName = basenameFromPath(remoteFilePath);
     const localPath = localDir.endsWith('/')
       ? `${localDir}${fileName}`
       : `${localDir}/${fileName}`;

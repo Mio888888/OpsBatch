@@ -256,6 +256,12 @@
   background: rgba(128, 202, 255, 0.04);
 }
 
+.sftp-pane-drag-over .sftp-file-list {
+  outline: 1px solid rgba(128, 202, 255, 0.38);
+  outline-offset: -2px;
+  background: rgba(128, 202, 255, 0.05);
+}
+
 .sftp-pane-header {
   display: flex;
   align-items: center;
@@ -738,4 +744,3 @@
   margin: 3px 0;
   background: var(--terminal-border);
 }
-

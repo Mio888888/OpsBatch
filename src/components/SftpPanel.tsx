@@ -1,10 +1,16 @@
 import { useState, useEffect, useCallback, useRef, memo, useMemo, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
+import type { UnlistenFn } from '@tauri-apps/api/event';
 import { useSftpStore, type FileEntry } from '../stores/sftp';
 import PortForwardPanel from './PortForwardPanel';
 import { useTranslation } from '../i18n';
 import { CloudServerOutlined, FolderOpenOutlined } from './ui/icons';
+import {
+  isPointInsideRectInEitherCoordinateSpace,
+  shouldAcceptExternalFileDrop,
+} from '../utils/dragDropTarget';
 import type { FC, ReactNode } from 'react';
 
 const SFTP_FILE_ROW_HEIGHT = 23;
@@ -147,6 +153,32 @@ function getViewportSafeMenuPosition(
   };
 }
 
+interface TauriDragDropPayload {
+  type: 'enter' | 'over' | 'drop' | 'leave' | string;
+  paths?: string[];
+  position?: { x: number; y: number } | null;
+}
+
+function isDragPointInsideElement(
+  element: HTMLElement | null,
+  position?: { x: number; y: number } | null,
+): boolean {
+  if (!element || !position) return false;
+  const rect = element.getBoundingClientRect();
+  return isPointInsideRectInEitherCoordinateSpace(position, rect, window.devicePixelRatio || 1);
+}
+
+function getElementRect(element: HTMLElement | null) {
+  if (!element) return null;
+  const rect = element.getBoundingClientRect();
+  return {
+    left: rect.left,
+    right: rect.right,
+    top: rect.top,
+    bottom: rect.bottom,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // FileRow (memoized)
 // ---------------------------------------------------------------------------
@@ -234,6 +266,7 @@ const FilePane: FC<FilePaneProps> = memo(({ side, hostId, onContextMenu }) => {
   const [pathInput, setPathInput] = useState(path);
   const [dragOver, setDragOver] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
+  const externalDragOverTarget = useRef(false);
 
   useEffect(() => {
     setPathInput(path);
@@ -278,6 +311,66 @@ const FilePane: FC<FilePaneProps> = memo(({ side, hostId, onContextMenu }) => {
     if (entry.is_dir) return;
     await transferFn(entry);
   }, [side, transferFn]);
+
+  const uploadExternalPaths = useCallback(async (paths: string[]) => {
+    if (side !== 'remote' || paths.length === 0) return;
+    for (const localFilePath of paths) {
+      await upload(hostId, localFilePath, remotePath);
+    }
+  }, [hostId, remotePath, side, upload]);
+
+  useEffect(() => {
+    if (side !== 'remote') return;
+
+    let mounted = true;
+    let unlisten: UnlistenFn | undefined;
+
+    const setupDragDrop = async () => {
+      unlisten = await getCurrentWebview().onDragDropEvent((event) => {
+        const payload = event.payload as TauriDragDropPayload;
+        const paths = payload.paths ?? [];
+
+        if (payload.type === 'leave') {
+          externalDragOverTarget.current = false;
+          setDragOver(false);
+          return;
+        }
+
+        if (payload.type === 'enter' || payload.type === 'over') {
+          const isOverRemoteList = isDragPointInsideElement(listRef.current, payload.position);
+          externalDragOverTarget.current = isOverRemoteList;
+          setDragOver(isOverRemoteList);
+          return;
+        }
+
+        if (payload.type === 'drop') {
+          const shouldUpload = shouldAcceptExternalFileDrop({
+            paths,
+            isOverTarget: externalDragOverTarget.current,
+            position: payload.position,
+            targetRect: getElementRect(listRef.current),
+            devicePixelRatio: window.devicePixelRatio || 1,
+          });
+          externalDragOverTarget.current = false;
+          setDragOver(false);
+          if (shouldUpload) {
+            void uploadExternalPaths(paths);
+          }
+        }
+      });
+
+      if (!mounted) {
+        unlisten?.();
+      }
+    };
+
+    void setupDragDrop();
+
+    return () => {
+      mounted = false;
+      unlisten?.();
+    };
+  }, [side, uploadExternalPaths]);
 
   const selectedPath = selected?.path ?? null;
   const selectedIndex = useMemo(() => {

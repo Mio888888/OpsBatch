@@ -6,14 +6,60 @@ mod ssh;
 mod tls;
 
 use std::sync::Arc;
+use tauri::menu::MenuBuilder;
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::PageLoadEvent;
 #[cfg(debug_assertions)]
 use tauri::Listener;
-use tauri::Manager;
+use tauri::{AppHandle, Manager, WindowEvent};
+
+const TRAY_MENU_SHOW: &str = "tray-show";
+const TRAY_MENU_QUIT: &str = "tray-quit";
 
 #[tauri::command]
 fn migrate_plaintext_secrets_to_vault(db: tauri::State<'_, db::Database>) -> Result<(), String> {
     db.migrate_plaintext_secrets_to_vault()
+}
+
+fn settings_minimize_to_tray(app_handle: &AppHandle) -> bool {
+    let db = app_handle.state::<db::Database>();
+    let Ok(conn) = db.pool.get() else {
+        return true;
+    };
+
+    conn.query_row(
+        "SELECT value FROM general_settings WHERE key='minimizeToTray'",
+        [],
+        |row| row.get::<_, String>(0),
+    )
+    .map(|value| value != "false")
+    .unwrap_or(true)
+}
+
+fn show_main_window(app_handle: &AppHandle) {
+    if let Some(window) = app_handle.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
+fn setup_system_tray(app: &mut tauri::App) -> tauri::Result<()> {
+    let menu = MenuBuilder::new(app)
+        .text(TRAY_MENU_SHOW, "显示主窗口")
+        .text(TRAY_MENU_QUIT, "退出")
+        .build()?;
+
+    let mut tray = TrayIconBuilder::with_id("main")
+        .tooltip("OpsBatch")
+        .menu(&menu)
+        .show_menu_on_left_click(false);
+
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray = tray.icon(icon);
+    }
+
+    tray.build(app)?;
+    Ok(())
 }
 
 pub fn run() {
@@ -75,6 +121,7 @@ pub fn run() {
             let ssh_registry = app.state::<ssh::SshConnectionRegistry>();
             ssh_registry.set_app_handle(app.handle().clone());
             ssh::SshConnectionRegistry::start_idle_reaper(app.handle().clone());
+            setup_system_tray(app)?;
 
             // Emit startup log
             {
@@ -104,6 +151,37 @@ pub fn run() {
             }
 
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            let WindowEvent::CloseRequested { api, .. } = event else {
+                return;
+            };
+            if window.label() != "main" {
+                return;
+            }
+
+            let app_handle = window.app_handle();
+            if settings_minimize_to_tray(app_handle) {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            TRAY_MENU_SHOW => show_main_window(app),
+            TRAY_MENU_QUIT => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|app, event| match event {
+            TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            }
+            | TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            } => show_main_window(app),
+            _ => {}
         })
         .invoke_handler(tauri::generate_handler![
             // App Log

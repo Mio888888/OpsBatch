@@ -1,4 +1,5 @@
 import { useCallback } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { Maximize2, Minus, X } from 'lucide-react';
 
@@ -14,7 +15,15 @@ function runWindowCommand(command: () => Promise<void>) {
 
 export default function WindowControls({ className = '' }: WindowControlsProps) {
   const minimize = useCallback(() => {
-    runWindowCommand(() => getCurrentWindow().minimize());
+    runWindowCommand(async () => {
+      const window = getCurrentWindow();
+      const settings = await invoke<Record<string, string>>('get_general_settings');
+      if (window.label === 'main' && settings.minimizeToTray !== 'false') {
+        await window.hide();
+        return;
+      }
+      await window.minimize();
+    });
   }, []);
 
   const toggleMaximize = useCallback(() => {

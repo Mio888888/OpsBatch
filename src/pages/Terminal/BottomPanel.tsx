@@ -24,7 +24,6 @@ interface BottomPanelProps {
   hostIp?: string;
   sessionId?: string;
   isRemote: boolean;
-  dockerAvailable?: boolean;
   getTerminalBuffer: () => string;
   executeTerminalCommand: (command: string, options?: Parameters<TerminalController['executeCommand']>[1]) => ReturnType<TerminalController['executeCommand']> | undefined;
   insertTerminalCommand: (command: string) => ReturnType<TerminalController['insertCommand']> | undefined;
@@ -48,7 +47,6 @@ const BottomPanel = memo(function BottomPanel({
   hostIp,
   sessionId,
   isRemote,
-  dockerAvailable,
   getTerminalBuffer,
   executeTerminalCommand,
   insertTerminalCommand,
@@ -63,7 +61,6 @@ const BottomPanel = memo(function BottomPanel({
   const resizeCleanupRef = useRef<(() => void) | null>(null);
 
   const effectiveTab = (!isRemote && bottomTab !== 'ai' && bottomTab !== 'commands' && bottomTab !== 'scripts')
-    || (bottomTab === 'docker' && !dockerAvailable)
     ? 'ai'
     : bottomTab;
 
@@ -168,12 +165,12 @@ const BottomPanel = memo(function BottomPanel({
           >
             {t('terminal.tab.scripts')}
           </button>
-          {isRemote && dockerAvailable && (
+          {isRemote && (
             <button
               className={`sftp-tab-btn ${effectiveTab === 'docker' ? 'sftp-tab-btn-active' : ''}`}
               onClick={() => setBottomTab('docker')}
             >
-              Docker
+              {t('terminal.tab.docker')}
             </button>
           )}
           <button

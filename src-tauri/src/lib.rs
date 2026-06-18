@@ -184,7 +184,6 @@ pub fn run() {
             commands::hosts::check_host_status,
             commands::hosts::get_host_system_info,
             commands::hosts::get_host_monitor_snapshot,
-            commands::hosts::detect_host_docker,
             // Groups
             commands::groups::list_groups,
             commands::groups::add_group,

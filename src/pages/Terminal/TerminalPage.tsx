@@ -56,16 +56,6 @@ interface TerminalSearchState {
   matchIndex: number;
 }
 
-interface DockerDetectionState {
-  sessionId: string;
-  status: 'checking' | 'installed' | 'missing' | 'error';
-  version?: string;
-}
-
-interface HostDockerDetection {
-  installed: boolean;
-  version?: string;
-}
 
 interface RemoteHostConnection {  hostId: string;
   name: string;
@@ -127,12 +117,6 @@ function getTabStateLabel(state: TerminalTab['state'], labels: Record<TerminalTa
   return labels[state];
 }
 
-function waitForDockerDetectionAttempt(attempt: number) {
-  const delay = DOCKER_DETECTION_RETRY_DELAYS[Math.min(attempt, DOCKER_DETECTION_RETRY_DELAYS.length - 1)];
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, delay);
-  });
-}
 
 async function disconnectTerminalSession(sessionId: string, hostId?: string) {
   try {
@@ -192,7 +176,6 @@ const DEFAULT_MONITOR_PANEL_WIDTH = 280;
 const MAX_MONITOR_PANEL_WIDTH = DEFAULT_MONITOR_PANEL_WIDTH;
 const MIN_MONITOR_PANEL_WIDTH = 8;
 const MIN_TERMINAL_MAIN_WIDTH = 420;
-const DOCKER_DETECTION_RETRY_DELAYS = [600, 1800, 3600];
 
 function clampMonitorPanelWidth(nextWidth: number, containerWidth?: number) {
   const layoutMaxWidth = containerWidth
@@ -728,8 +711,6 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
   const [terminalSearchVisible, setTerminalSearchVisible] = useState(false);
   const [terminalSearchQuery, setTerminalSearchQuery] = useState('');
   const [terminalSearchState, setTerminalSearchState] = useState<TerminalSearchState>({ matchCount: 0, matchIndex: -1 });
-  const [dockerDetections, setDockerDetections] = useState<Record<string, DockerDetectionState>>({});
-  const [terminalReadyVersion, setTerminalReadyVersion] = useState(0);
   const terminalPageShellRef = useRef<HTMLDivElement>(null);
   const terminalSearchInputRef = useRef<HTMLInputElement>(null);
   const monitorResizeCleanupRef = useRef<(() => void) | null>(null);
@@ -741,8 +722,6 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
   const tabsRef = useRef<TerminalTab[]>([]);
   const activeKeyRef = useRef<string>('');
   const activeConnectionIdsRef = useRef<Map<string, string>>(new Map());
-  const dockerDetectionInFlightRef = useRef<Set<string>>(new Set());
-  const dockerDetectionsRef = useRef<Record<string, DockerDetectionState>>({});
   const setInlineVisible = useAiChatStore((s) => s.setInlineVisible);
   const loadHosts = useAssetsStore((s) => s.loadHosts);
   const updateHost = useAssetsStore((s) => s.updateHost);
@@ -752,7 +731,6 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
   const terminalBufferRefs = useRef<Map<string, TerminalBufferApi>>(new Map());
   const setTerminalBuffer = useCallback((key: string, api: TerminalBufferApi) => {
     terminalBufferRefs.current.set(key, api);
-    setTerminalReadyVersion((version) => version + 1);
   }, []);
   const getTerminalBuffer = useCallback((key: string) => terminalBufferRefs.current.get(key)?.getBuffer() || '', []);
   const executeTerminalCommand = useCallback((key: string, command: string, options?: Parameters<TerminalController['executeCommand']>[1]) => terminalBufferRefs.current.get(key)?.executeCommand(command, options), []);
@@ -819,9 +797,6 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
     tabsRef.current = tabs;
   }, [tabs]);
 
-  useEffect(() => {
-    dockerDetectionsRef.current = dockerDetections;
-  }, [dockerDetections]);
 
   useEffect(() => () => {
     monitorResizeCleanupRef.current?.();
@@ -835,77 +810,6 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
     if (!terminalSearchVisible || !terminalSearchQuery.trim()) return;
     runTerminalSearch(terminalSearchQuery);
   }, [activeKey, runTerminalSearch, terminalSearchQuery, terminalSearchVisible]);
-
-  useEffect(() => {
-    const tab = tabs.find((item) => item.key === activeKey);
-    if (!tab?.sessionId || tab.kind !== 'remote' || tab.state !== 'connected' || !tab.hostId) return;
-
-    const currentDetection = dockerDetectionsRef.current[tab.key];
-    if (currentDetection?.sessionId === tab.sessionId && currentDetection.status !== 'checking') return;
-    if (dockerDetectionInFlightRef.current.has(tab.sessionId)) return;
-    if (!terminalBufferRefs.current.has(tab.key)) return;
-
-    let cancelled = false;
-    const sessionId = tab.sessionId;
-    const tabKey = tab.key;
-
-    dockerDetectionInFlightRef.current.add(sessionId);
-    setDockerDetections((current) => ({
-      ...current,
-      [tabKey]: { sessionId, status: 'checking' },
-    }));
-
-    const isCurrentSession = () => tabsRef.current.some((item) => (
-      item.key === tabKey && item.sessionId === sessionId && item.state === 'connected'
-    ));
-
-    const detectDocker = async () => {
-      for (let attempt = 0; attempt < DOCKER_DETECTION_RETRY_DELAYS.length; attempt += 1) {
-        await waitForDockerDetectionAttempt(attempt);
-        if (cancelled || !isCurrentSession()) return;
-
-        const result = await invoke<HostDockerDetection>('detect_host_docker', { id: tab.hostId });
-        if (cancelled || !isCurrentSession() || !result) return;
-
-        if (result.installed) {
-          setDockerDetections((current) => ({
-            ...current,
-            [tabKey]: { sessionId, status: 'installed', version: result.version },
-          }));
-          return;
-        }
-
-        setDockerDetections((current) => ({
-          ...current,
-          [tabKey]: { sessionId, status: 'missing' },
-        }));
-        return;
-      }
-
-      if (!cancelled && isCurrentSession()) {
-        setDockerDetections((current) => ({
-          ...current,
-          [tabKey]: { sessionId, status: 'error' },
-        }));
-      }
-    };
-
-    void detectDocker().catch(() => {
-      if (!cancelled && isCurrentSession()) {
-        setDockerDetections((current) => ({
-          ...current,
-          [tabKey]: { sessionId, status: 'error' },
-        }));
-      }
-    }).finally(() => {
-      dockerDetectionInFlightRef.current.delete(sessionId);
-    });
-
-    return () => {
-      cancelled = true;
-      dockerDetectionInFlightRef.current.delete(sessionId);
-    };
-  }, [activeKey, tabs, terminalReadyVersion]);
 
   useEffect(() => {
     if (!splitContextMenu) return;
@@ -1706,7 +1610,6 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
 
   const activeTab = useMemo(() => tabs.find((t) => t.key === activeKey), [tabs, activeKey]);
   const deferredActiveTab = useDeferredValue(activeTab);
-  const activeDockerDetection = deferredActiveTab ? dockerDetections[deferredActiveTab.key] : undefined;
   const [tabSwitching, setTabSwitching] = useState(false);
 
   useEffect(() => {
@@ -1847,7 +1750,6 @@ export default function TerminalPage({ visible }: TerminalPageProps) {
               hostIp={deferredActiveTab.hostIp}
               sessionId={deferredActiveTab.sessionId}
               isRemote={!!activeRemoteHostId}
-              dockerAvailable={activeDockerDetection?.sessionId === deferredActiveTab.sessionId && activeDockerDetection.status === 'installed'}
               getTerminalBuffer={bottomPanelGetTerminalBuffer}
               executeTerminalCommand={bottomPanelExecuteTerminalCommand}
               insertTerminalCommand={bottomPanelInsertTerminalCommand}

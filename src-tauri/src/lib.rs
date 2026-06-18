@@ -347,6 +347,7 @@ pub fn run() {
             commands::terminal::terminal_batch_write,
             commands::terminal::terminal_resize,
             commands::terminal::terminal_disconnect,
+            commands::terminal::terminal_spawn_background_process,
             // SFTP
             commands::sftp::sftp_open,
             commands::sftp::sftp_close,

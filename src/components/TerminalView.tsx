@@ -13,6 +13,7 @@ import { getCurrentTerminalAppearance, onThemeChange } from '../stores/theme';
 import { logHandledError } from '../utils/globalLogger';
 import { compileDangerRules, checkDangerousCommand, DEFAULT_COMPILED_DANGER_RULES, type CompiledDangerRule } from '../utils/dangerCommandCheck';
 import { findTerminalSearchMatches, type TerminalSearchLine } from '../utils/terminalSearch';
+import { parseOpsBatchBackgroundCommand } from '../utils/backgroundCommand';
 
 export interface TerminalCommandExecutionOptions {
   timeoutMs?: number;
@@ -58,6 +59,11 @@ interface PendingTerminalExecution {
   output: string;
   timeoutId: number;
   resolve: (result: TerminalCommandExecutionResult) => void;
+}
+
+interface BackgroundProcessInfo {
+  pid: number;
+  log_file: string;
 }
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 30 * 60 * 1000;
@@ -428,6 +434,24 @@ export default memo(function TerminalView({ sessionId, active = true, onTerminal
         // 优先使用本地缓冲的完整命令，回退到终端行文本
         const cmd = inputResult.command || lineText;
         if (cmd) {
+          const backgroundCommand = parseOpsBatchBackgroundCommand(cmd);
+          if (backgroundCommand) {
+            flushWriteQueue(sessionId);
+            invoke('terminal_write', { sessionId, data: '\x15' }).catch((error) => {
+              void logHandledError('terminal.backgroundClearLine', error, 'warn');
+            });
+            terminal.write(`\r\n\x1b[36mOpsBatch 后台启动: ${backgroundCommand}\x1b[0m\r\n`);
+            invoke<BackgroundProcessInfo>('terminal_spawn_background_process', { command: backgroundCommand })
+              .then((info) => {
+                terminal.write(`\x1b[32m后台进程已脱离终端 PID=${info.pid}\x1b[0m\r\n日志: ${info.log_file}\r\n`);
+              })
+              .catch((error) => {
+                terminal.write(`\x1b[31m后台进程启动失败: ${String(error)}\x1b[0m\r\n`);
+                void logHandledError('terminal.backgroundProcess', error, 'warn');
+              });
+            return;
+          }
+
           const matched = checkDangerousCommand(compiledDangerRulesRef.current, cmd);
           if (matched.length > 0) {
             pendingDangerConfirmRef.current = lineText;

@@ -1,5 +1,7 @@
+use std::fs;
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -33,6 +35,12 @@ const READ_BUFFER_SIZE: usize = 16 * 1024;
 const IDLE_SLEEP: Duration = Duration::from_millis(5);
 const ACTOR_CHANNEL_CAPACITY: usize = 512;
 const SSH_DISCONNECT_TIMEOUT: Duration = Duration::from_millis(500);
+
+#[derive(serde::Serialize)]
+pub struct BackgroundProcessInfo {
+    pid: u32,
+    log_file: String,
+}
 
 // ---------------------------------------------------------------------------
 // Actor command protocol
@@ -173,6 +181,120 @@ fn cleanup_terminal_session_in_background(session_id: String, handle: SessionHan
             );
         }
     });
+}
+
+fn default_background_log_file(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("background-processes");
+    fs::create_dir_all(&dir).map_err(|e| format!("创建后台日志目录失败: {}", e))?;
+    Ok(dir.join(format!(
+        "terminal-{}.log",
+        chrono::Local::now().format("%Y%m%d-%H%M%S-%3f")
+    )))
+}
+
+fn resolve_background_log_file(
+    app: &tauri::AppHandle,
+    log_file: Option<String>,
+) -> Result<PathBuf, String> {
+    match log_file
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        Some(path) => {
+            let path = PathBuf::from(path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent).map_err(|e| format!("创建后台日志目录失败: {}", e))?;
+            }
+            Ok(path)
+        }
+        None => default_background_log_file(app),
+    }
+}
+
+#[cfg(unix)]
+fn shell_quote(value: &str) -> String {
+    if value.is_empty() {
+        return "''".to_string();
+    }
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+#[cfg(unix)]
+fn spawn_detached_background_process(
+    command: &str,
+    cwd: Option<&str>,
+    log_file: &Path,
+) -> Result<u32, String> {
+    let wrapper = format!(
+        "nohup sh -lc {} >> {} 2>&1 < /dev/null & printf '%s' \"$!\"",
+        shell_quote(command),
+        shell_quote(&log_file.to_string_lossy())
+    );
+    let mut shell = Command::new("/bin/sh");
+    shell
+        .arg("-lc")
+        .arg(wrapper)
+        .stdin(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(cwd) = cwd.filter(|value| !value.trim().is_empty()) {
+        shell.current_dir(cwd);
+    }
+
+    let output = shell
+        .output()
+        .map_err(|e| format!("启动后台进程失败: {}", e))?;
+    if !output.status.success() {
+        return Err(format!("启动后台进程失败: exit {}", output.status));
+    }
+
+    let pid = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u32>()
+        .map_err(|_| "后台进程已启动，但无法读取 PID".to_string())?;
+    Ok(pid)
+}
+
+#[cfg(windows)]
+fn spawn_detached_background_process(
+    command: &str,
+    cwd: Option<&str>,
+    log_file: &Path,
+) -> Result<u32, String> {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+
+    let stdout = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_file)
+        .map_err(|e| format!("打开后台日志失败: {}", e))?;
+    let stderr = stdout
+        .try_clone()
+        .map_err(|e| format!("打开后台日志失败: {}", e))?;
+
+    let mut process = Command::new("cmd.exe");
+    process
+        .arg("/C")
+        .arg(command)
+        .stdin(Stdio::null())
+        .stdout(Stdio::from(stdout))
+        .stderr(Stdio::from(stderr))
+        .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
+    if let Some(cwd) = cwd.filter(|value| !value.trim().is_empty()) {
+        process.current_dir(cwd);
+    }
+
+    let child = process
+        .spawn()
+        .map_err(|e| format!("启动后台进程失败: {}", e))?;
+    Ok(child.id())
 }
 
 // ---------------------------------------------------------------------------
@@ -766,6 +888,38 @@ pub fn terminal_connect_local(
 }
 
 #[tauri::command]
+pub async fn terminal_spawn_background_process(
+    app: tauri::AppHandle,
+    command: String,
+    cwd: Option<String>,
+    log_file: Option<String>,
+) -> Result<BackgroundProcessInfo, String> {
+    let command = command.trim();
+    if command.is_empty() {
+        return Err("后台命令不能为空".to_string());
+    }
+
+    let log_file = resolve_background_log_file(&app, log_file)?;
+    let pid = spawn_detached_background_process(command, cwd.as_deref(), &log_file)?;
+    crate::commands::app_log::emit_log(
+        &app,
+        "info",
+        "terminal",
+        &format!(
+            "Detached background process pid={} log={}",
+            pid,
+            log_file.display()
+        ),
+        "backend",
+    );
+
+    Ok(BackgroundProcessInfo {
+        pid,
+        log_file: log_file.to_string_lossy().to_string(),
+    })
+}
+
+#[tauri::command]
 pub async fn terminal_write(
     manager: tauri::State<'_, TerminalManager>,
     session_id: String,
@@ -866,4 +1020,19 @@ pub async fn terminal_disconnect(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod background_process_tests {
+    #[cfg(unix)]
+    #[test]
+    fn shell_quote_escapes_single_quotes() {
+        assert_eq!(super::shell_quote("mio's app"), "'mio'\\''s app'");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_quote_handles_empty_values() {
+        assert_eq!(super::shell_quote(""), "''");
+    }
 }

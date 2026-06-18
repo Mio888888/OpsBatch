@@ -10,7 +10,6 @@ use tauri::menu::MenuBuilder;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::PageLoadEvent;
 #[cfg(debug_assertions)]
-use tauri::Listener;
 use tauri::{AppHandle, Manager, WindowEvent};
 
 const TRAY_MENU_SHOW: &str = "tray-show";
@@ -136,20 +135,6 @@ pub fn run() {
                     );
                 });
             }
-            // Open devtools for all windows in debug (dev) builds
-            #[cfg(debug_assertions)]
-            {
-                if let Some(window) = app.get_webview_window("main") {
-                    window.open_devtools();
-                }
-                let handle = app.handle().clone();
-                app.listen("tauri://window-created", move |_event| {
-                    for window in handle.webview_windows().values() {
-                        window.open_devtools();
-                    }
-                });
-            }
-
             Ok(())
         })
         .on_window_event(|window, event| {

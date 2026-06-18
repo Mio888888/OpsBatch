@@ -31,7 +31,14 @@ export default function WindowControls({ className = '' }: WindowControlsProps) 
   }, []);
 
   const close = useCallback(() => {
-    runWindowCommand(() => getCurrentWindow().close());
+    runWindowCommand(async () => {
+      const window = getCurrentWindow();
+      if (window.label === 'main') {
+        await window.close();
+        return;
+      }
+      await window.destroy();
+    });
   }, []);
 
   return (

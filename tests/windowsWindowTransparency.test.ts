@@ -75,3 +75,10 @@ test('windows uses square app chrome while macOS keeps the rounded default', () 
   assert.match(tokensCss, /--window-radius:\s*20px/);
   assert.match(platformCss, /\[data-platform="windows"\][\s\S]*--window-radius:\s*0/);
 });
+
+test('custom close destroys managed child windows so they can be reopened', () => {
+  const source = readFileSync('src/components/WindowControls.tsx', 'utf8');
+
+  assert.match(source, /if \(window\.label === 'main'\)[\s\S]*await window\.close\(\)/);
+  assert.match(source, /await window\.destroy\(\)/);
+});

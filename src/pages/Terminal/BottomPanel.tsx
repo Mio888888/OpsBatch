@@ -12,6 +12,7 @@ import AiInlinePanel from '../../components/AiInlinePanel';
 import PortForwardPanel from '../../components/PortForwardPanel';
 import CommandsInlinePanel from '../../components/CommandsInlinePanel';
 import ScriptsInlinePanel from '../../components/ScriptsInlinePanel';
+import DockerInlinePanel from '../../components/DockerInlinePanel';
 import { useAiChatStore } from '../../stores/aiChat';
 import { useTranslation } from '../../i18n';
 import type { TerminalController } from '../../components/TerminalView';
@@ -23,6 +24,7 @@ interface BottomPanelProps {
   hostIp?: string;
   sessionId?: string;
   isRemote: boolean;
+  dockerAvailable?: boolean;
   getTerminalBuffer: () => string;
   executeTerminalCommand: (command: string, options?: Parameters<TerminalController['executeCommand']>[1]) => ReturnType<TerminalController['executeCommand']> | undefined;
   insertTerminalCommand: (command: string) => ReturnType<TerminalController['insertCommand']> | undefined;
@@ -46,6 +48,7 @@ const BottomPanel = memo(function BottomPanel({
   hostIp,
   sessionId,
   isRemote,
+  dockerAvailable,
   getTerminalBuffer,
   executeTerminalCommand,
   insertTerminalCommand,
@@ -59,7 +62,10 @@ const BottomPanel = memo(function BottomPanel({
   const shellRef = useRef<HTMLDivElement>(null);
   const resizeCleanupRef = useRef<(() => void) | null>(null);
 
-  const effectiveTab = (!isRemote && bottomTab !== 'ai' && bottomTab !== 'commands' && bottomTab !== 'scripts') ? 'ai' : bottomTab;
+  const effectiveTab = (!isRemote && bottomTab !== 'ai' && bottomTab !== 'commands' && bottomTab !== 'scripts')
+    || (bottomTab === 'docker' && !dockerAvailable)
+    ? 'ai'
+    : bottomTab;
 
   useEffect(() => () => {
     resizeCleanupRef.current?.();
@@ -162,6 +168,14 @@ const BottomPanel = memo(function BottomPanel({
           >
             {t('terminal.tab.scripts')}
           </button>
+          {isRemote && dockerAvailable && (
+            <button
+              className={`sftp-tab-btn ${effectiveTab === 'docker' ? 'sftp-tab-btn-active' : ''}`}
+              onClick={() => setBottomTab('docker')}
+            >
+              Docker
+            </button>
+          )}
           <button
             className="ai-inline-trigger"
             onClick={() => setInlineVisible(!inlineVisible)}
@@ -204,6 +218,14 @@ const BottomPanel = memo(function BottomPanel({
           {effectiveTab === 'scripts' ? (
             <div className="bottom-panel-pane bottom-panel-pane-active">
               <ScriptsInlinePanel
+                insertCommand={sessionId ? (command) => insertTerminalCommand(command) : undefined}
+              />
+            </div>
+          ) : null}
+          {effectiveTab === 'docker' ? (
+            <div className="bottom-panel-pane bottom-panel-pane-active">
+              <DockerInlinePanel
+                executeCommand={sessionId ? (command, options) => executeTerminalCommand(command, options) : undefined}
                 insertCommand={sessionId ? (command) => insertTerminalCommand(command) : undefined}
               />
             </div>

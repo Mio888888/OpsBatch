@@ -96,6 +96,12 @@ pub struct HostMonitorSnapshot {
     pub filesystems: Vec<HostMonitorFilesystem>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HostDockerDetection {
+    pub installed: bool,
+    pub version: Option<String>,
+}
+
 struct HostConnectionInfo {
     config: ssh::SshConfig,
     os: String,
@@ -843,6 +849,43 @@ pub async fn get_host_monitor_snapshot(
     });
     rx.await
         .map_err(|e| format!("monitor task failed: {}", e))?
+}
+
+#[tauri::command]
+pub async fn detect_host_docker(
+    app: tauri::AppHandle,
+    id: String,
+) -> Result<HostDockerDetection, String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        let db = app.state::<Database>();
+        let pool = app.state::<SshConnectionRegistry>();
+        let result = (|| {
+            let HostConnectionInfo { config, .. } = get_host_connection_info(&db, &pool, &id)?;
+            let command = r#"
+if command -v docker >/dev/null 2>&1; then
+  printf '__DOCKER_INSTALLED__ yes\n'
+  docker --version 2>/dev/null | sed 's/^/__DOCKER_VERSION__ /'
+  docker version --format 'Server: {{.Server.Version}}' 2>/dev/null | sed 's/^/__DOCKER_VERSION__ /'
+else
+  printf '__DOCKER_INSTALLED__ no\n'
+fi
+"#;
+            let output = pool.execute(&id, &config, command, 10).unwrap_or_default();
+            let installed = output.lines().any(|line| line.trim() == "__DOCKER_INSTALLED__ yes");
+            let version = output
+                .lines()
+                .find_map(|line| line.strip_prefix("__DOCKER_VERSION__ "))
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(ToString::to_string);
+
+            Ok(HostDockerDetection { installed, version })
+        })();
+        let _ = tx.send(result);
+    });
+    rx.await
+        .map_err(|e| format!("docker detection task failed: {}", e))?
 }
 #[tauri::command]
 pub async fn list_hosts(db: tauri::State<'_, Database>) -> Result<Vec<Host>, String> {

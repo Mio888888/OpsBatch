@@ -67,10 +67,10 @@ interface AiChatState {
   conversations: Conversation[];
   inlineVisible: boolean;
   inlineInputText: string;
-  bottomTab: 'ai' | 'sftp' | 'forward' | 'commands' | 'scripts';
+  bottomTab: 'ai' | 'sftp' | 'forward' | 'commands' | 'scripts' | 'docker';
   _unlisten: UnlistenFn | null;
 
-  setBottomTab: (tab: 'ai' | 'sftp' | 'forward' | 'commands' | 'scripts') => void;
+  setBottomTab: (tab: 'ai' | 'sftp' | 'forward' | 'commands' | 'scripts' | 'docker') => void;
   setInputText: (text: string) => void;
   setInlineVisible: (visible: boolean) => void;
   setInlineInputText: (text: string) => void;

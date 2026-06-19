@@ -49,13 +49,16 @@ interface BackendQuickAction {
 }
 
 function commandFromBackend(c: BackendCommand): CommandEntry {
+  const tags = JSON.parse(c.tags || '[]') as string[];
+  const inferredKind: CommandEntry['kind'] = tags.includes('docker') ? 'docker' : 'command';
   return {
     id: c.id,
     name: c.name,
     command: c.command,
     url: c.url || '',
+    kind: inferredKind,
     category: c.category,
-    tags: JSON.parse(c.tags || '[]'),
+    tags,
     risk: c.risk as CommandEntry['risk'],
     description: c.description,
     platform: c.platform as CommandEntry['platform'],
@@ -101,12 +104,15 @@ function actionFromBackend(a: BackendQuickAction): QuickAction {
 }
 
 function commandToBackend(c: Omit<CommandEntry, 'id' | 'isBuiltin'>) {
+  const tags = c.kind === 'docker'
+    ? Array.from(new Set([...c.tags, 'docker']))
+    : c.tags.filter((tag) => tag !== 'docker');
   return {
     name: c.name,
     command: c.command,
     url: c.url || '',
     category: c.category,
-    tags: JSON.stringify(c.tags),
+    tags: JSON.stringify(tags),
     risk: c.risk,
     description: c.description,
     platform: c.platform,

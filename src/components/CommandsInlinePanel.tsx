@@ -387,7 +387,7 @@ function CommandParamsDialogInner({
     </Modal>
   );
 }
-const CommandParamsDialog = memo(CommandParamsDialogInner);
+export const CommandParamsDialog = memo(CommandParamsDialogInner);
 CommandParamsDialog.displayName = 'CommandParamsDialog';
 
 const CommandsInlinePanel = memo(function CommandsInlinePanel({ insertCommand }: Props) {

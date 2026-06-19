@@ -106,6 +106,7 @@ export interface CommandEntry {
   name: string;
   command: string;
   url: string;
+  kind?: 'command' | 'docker';
   category: string;
   tags: string[];
   risk: 'low' | 'medium' | 'high' | 'critical';

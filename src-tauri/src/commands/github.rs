@@ -853,6 +853,8 @@ fn import_commands_recursive(
     dir: &Path,
     base_dir: &Path,
     language: LibraryLanguage,
+    item_label: &str,
+    tag_hint: Option<&str>,
     result: &mut PullResult,
 ) {
     let entries = match std::fs::read_dir(dir) {
@@ -868,7 +870,16 @@ fn import_commands_recursive(
     for entry in entries.flatten() {
         let path = entry.path();
         if path.is_dir() {
-            import_commands_recursive(conn, repo_id, &path, base_dir, language, result);
+            import_commands_recursive(
+                conn,
+                repo_id,
+                &path,
+                base_dir,
+                language,
+                item_label,
+                tag_hint,
+                result,
+            );
             continue;
         }
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
@@ -917,17 +928,21 @@ fn import_commands_recursive(
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let tags = yaml
+        let mut tag_items: Vec<String> = yaml
             .get("tags")
             .and_then(|v| v.as_array())
             .map(|arr| {
-                let items: Vec<String> = arr
-                    .iter()
+                arr.iter()
                     .filter_map(|v| v.as_str().map(String::from))
-                    .collect();
-                serde_json::to_string(&items).unwrap_or_else(|_| "[]".to_string())
+                    .collect()
             })
-            .unwrap_or_else(|| "[]".to_string());
+            .unwrap_or_default();
+        if let Some(tag) = tag_hint {
+            if !tag_items.iter().any(|existing| existing == tag) {
+                tag_items.push(tag.to_string());
+            }
+        }
+        let tags = serde_json::to_string(&tag_items).unwrap_or_else(|_| "[]".to_string());
         let risk = yaml
             .get("risk")
             .and_then(|v| v.as_str())
@@ -993,10 +1008,10 @@ fn import_commands_recursive(
             "INSERT INTO commands (id, name, command, category, tags, risk, description, platform, parameters, url, starred, is_builtin, source_repo_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 0, 0, ?11)",
             params![id, name, command, category, tags, risk, description, platform, parameters, url, repo_id],
         ) {
-            Ok(_) => result.added.push(format!("command: {}", relative)),
+            Ok(_) => result.added.push(format!("{}: {}", item_label, relative)),
             Err(e) => result
                 .errors
-                .push(format!("command {}: {}", relative, e)),
+                .push(format!("{} {}: {}", item_label, relative, e)),
         }
     }
 }
@@ -1467,6 +1482,22 @@ fn sync_library_from_repo(
             &commands_dir,
             &commands_dir,
             language,
+            "command",
+            None,
+            result,
+        );
+    }
+
+    let docker_dir = repo_path.join("docker");
+    if docker_dir.exists() {
+        import_commands_recursive(
+            conn,
+            repo_id,
+            &docker_dir,
+            &docker_dir,
+            language,
+            "docker",
+            Some("docker"),
             result,
         );
     }

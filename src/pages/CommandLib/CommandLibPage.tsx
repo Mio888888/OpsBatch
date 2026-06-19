@@ -36,6 +36,12 @@ const PLATFORM_KEYS: { value: string; labelKey: TranslationKey }[] = [
   { value: 'both', labelKey: 'commandLib.platformGeneral' },
 ];
 
+const KIND_OPTIONS = [
+  { value: 'all', label: '全部' },
+  { value: 'command', label: '命令' },
+  { value: 'docker', label: 'Docker' },
+] as const;
+
 interface CommandFormValues extends Omit<CommandEntry, 'id' | 'starred' | 'isBuiltin'> {}
 
 export default function CommandLibPage() {
@@ -43,6 +49,7 @@ export default function CommandLibPage() {
   const { t, tText } = useTranslation();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [selectedKind, setSelectedKind] = useState<'all' | 'command' | 'docker'>('all');
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [form] = Form.useForm<CommandFormValues>();
 
@@ -51,6 +58,8 @@ export default function CommandLibPage() {
   }, [loadCommands]);
 
   const filtered = commands.filter((c) => {
+    const commandKind = c.kind ?? 'command';
+    if (selectedKind !== 'all' && commandKind !== selectedKind) return false;
     if (selectedCategory && c.category !== selectedCategory) return false;
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
@@ -83,6 +92,7 @@ export default function CommandLibPage() {
       const values = await form.validateFields();
       await addCommand({
         ...values,
+        kind: values.kind || 'command',
         url: values.url || '',
         tags: values.tags || [],
         parameters: values.parameters || [],
@@ -152,6 +162,12 @@ export default function CommandLibPage() {
           allowClear
           className="qa-search"
         />
+        <Select
+          value={selectedKind}
+          onChange={(value) => setSelectedKind(value as 'all' | 'command' | 'docker')}
+          options={KIND_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
+          style={{ width: 140 }}
+        />
         <span className="qa-count">{t('commandLib.count', { filtered: filtered.length, total: commands.length })}</span>
       </div>
 
@@ -167,6 +183,7 @@ export default function CommandLibPage() {
                   <span className="qa-card-name">{cmd.name}</span>
                 </div>
                 <div className="qa-card-header-badges">
+                  {cmd.kind === 'docker' && <Tag color="geekblue" className="qa-card-micro-tag">Docker</Tag>}
                   {cmd.url && <Tag color="cyan" className="qa-card-micro-tag">{t('library.remote')}</Tag>}
                   {cmd.parameters.length > 0 && <Tag color="blue" className="qa-card-micro-tag">{t('library.parameters')}</Tag>}
                   <Tooltip title={tText('library.addToQuickActions')}>
@@ -215,14 +232,21 @@ export default function CommandLibPage() {
         onCancel={() => { setAddModalOpen(false); form.resetFields(); }}
         width={580} destroyOnHidden okText={tText('common.add')} cancelText={tText('common.cancel')}>
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          {/* Row 1: Name + Category */}
+          {/* Row 1: Name + Type */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <Form.Item name="name" label={tText('commandLib.commandName')} rules={[{ required: true, message: tText('commandLib.enterCommandName') }]}>
+            <Form.Item name="name" label={tText('commandLib.commandName')} rules={[{ required: true, message: tText('commandLib.enterCommandName') }]}> 
               <Input placeholder={tText('commandLib.commandNamePlaceholder')} />
             </Form.Item>
-            <Form.Item name="category" label={tText('quickActions.category')} rules={[{ required: true, message: tText('scriptLib.selectCategoryRequired') }]}>
+            <Form.Item name="kind" label="类型" initialValue="command">
+              <Select options={KIND_OPTIONS.filter((option) => option.value !== 'all').map((option) => ({ value: option.value, label: option.label }))} />
+            </Form.Item>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <Form.Item name="category" label={tText('quickActions.category')} rules={[{ required: true, message: tText('scriptLib.selectCategoryRequired') }]}> 
               <Select options={categoryOptions} placeholder={tText('scriptLib.selectCategory')} />
             </Form.Item>
+            <div />
           </div>
 
           {/* Command content */}

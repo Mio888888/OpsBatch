@@ -4,6 +4,7 @@ import { loadThemeSettings, registerThemeSettingsSync } from "./stores/theme";
 import { loadLanguageSettings, registerLanguageSettingsSync } from "./stores/language";
 import { invoke } from "@tauri-apps/api/core";
 import { installGlobalLogHandler, emitFrontendGlobalLog } from "./utils/globalLogger";
+import { registerDevtoolsShortcut } from "./utils/devtoolsShortcut";
 import { resolveSystemLanguage, translateText } from "./i18n";
 
 function detectHostPlatform(): string {
@@ -38,6 +39,8 @@ function installDiagnosticsBridge() {
 }
 
 installDiagnosticsBridge();
+
+registerDevtoolsShortcut();
 
 registerThemeSettingsSync();
 loadThemeSettings();

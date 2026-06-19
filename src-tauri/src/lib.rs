@@ -373,6 +373,7 @@ pub fn run() {
             commands::proxyjump::cascade_disconnect,
             commands::proxyjump::import_ssh_config_hosts,
             commands::window::open_managed_window,
+            commands::devtools::toggle_devtools,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

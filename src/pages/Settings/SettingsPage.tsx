@@ -647,7 +647,6 @@ export default function SettingsPage() {
   const [fetchedModels, setFetchedModels] = useState<{ value: string; label: string }[]>([]);
   const [fetchingModels, setFetchingModels] = useState(false);
 
-  const activeSectionMeta = settingsSections.find((section) => section.key === activeSection) ?? settingsSections[0];
   const providerDefaults = AI_PROVIDER_DEFAULTS[aiProvider] ?? AI_PROVIDER_DEFAULTS.custom;
 
   const getModelOptions = (provider: string) => {
@@ -1101,13 +1100,6 @@ export default function SettingsPage() {
         </aside>
 
         <section className="settings-main-card">
-          <header className="settings-main-header">
-            <div>
-              <span className="settings-main-eyebrow">{t('settings.currentSection')}</span>
-              <h2>{t(activeSectionMeta.labelKey)}</h2>
-              <p>{t(activeSectionMeta.descriptionKey)}</p>
-            </div>
-          </header>
           <div className="settings-main-body">
             {renderSectionContent()}
           </div>

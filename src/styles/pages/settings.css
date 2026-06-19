@@ -35,8 +35,7 @@
 .settings-sidebar-card {
   display: flex;
   flex-direction: column;
-  /* 顶部留白避让窗口红绿灯 / 拖拽条，导航首项不被遮挡 */
-  padding: 50px 10px 14px;
+    padding: 50px 10px 14px;
   background: var(--color-settings-sidebar-bg);
   border-right: 1px solid var(--color-settings-border);
 }
@@ -47,34 +46,6 @@
 .settings-nav-list,
 .settings-nav-list * {
   -webkit-app-region: no-drag;
-}
-
-.settings-main-eyebrow {
-  display: block;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-support);
-  font-weight: var(--font-weight-bold);
-  line-height: var(--line-height-tight);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.settings-main-header h2 {
-  margin: 6px 0 0;
-  color: var(--color-text);
-  font-weight: var(--font-weight-bold);
-  line-height: var(--line-height-title);
-}
-
-.settings-main-header h2 {
-  font-size: var(--font-size-title-2xl);
-}
-
-.settings-main-header p {
-  margin: 8px 0 0;
-  color: var(--color-text-muted);
-  font-size: var(--font-size-small);
-  line-height: var(--line-height-body);
 }
 
 .settings-nav-list {
@@ -158,13 +129,6 @@
 .settings-main-card {
   display: flex;
   flex-direction: column;
-}
-
-.settings-main-header {
-  flex: 0 0 auto;
-  padding: 20px 24px 16px;
-  background: var(--color-settings-header-bg);
-  border-bottom: 1px solid var(--color-settings-border);
 }
 
 .settings-main-body {
@@ -282,11 +246,6 @@
   flex: 0 0 auto;
   color: var(--color-text-muted);
 }
-
-/* ==========================================================================
-   Appearance Settings
-   ========================================================================== */
-
 .appearance-content {
   max-width: 720px;
   display: flex;
@@ -327,10 +286,7 @@
   height: 8px;
   border-radius: 50%;
   flex: 0 0 auto;
-}
-
-/* Theme grid */
-.appearance-theme-grid {
+}.appearance-theme-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
   gap: 10px;
@@ -396,10 +352,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   text-align: center;
-}
-
-/* Accent color dots */
-.appearance-accent-row {
+}.appearance-accent-row {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -422,10 +375,7 @@
 .appearance-accent-dot-selected {
   box-shadow: 0 0 0 2px var(--color-surface), 0 0 0 4px currentColor;
   transform: scale(1.1);
-}
-
-/* Motion preference */
-.appearance-motion-option {
+}.appearance-motion-option {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -453,10 +403,7 @@
   color: var(--color-text-muted);
   font-size: var(--font-size-small);
   line-height: var(--line-height-body);
-}
-
-/* Terminal font fields */
-.appearance-font-panel {
+}.appearance-font-panel {
   display: flex;
   flex-direction: column;
   gap: 12px;

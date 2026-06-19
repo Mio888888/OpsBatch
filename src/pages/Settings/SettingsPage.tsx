@@ -1061,7 +1061,7 @@ export default function SettingsPage() {
       case 'commandLib':
         return (
           <Suspense fallback={<div style={{ padding: 24, color: 'var(--color-text-muted)' }}>{t('common.loadingShort')}</div>}>
-            <CommandLibPage />
+            <CommandLibPage embedded />
           </Suspense>
         );
       case 'scriptLib':

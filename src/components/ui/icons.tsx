@@ -24,12 +24,14 @@ import {
   KeyRound,
   LoaderCircle,
   Minus,
+  Palette,
   Plus,
   RefreshCw,
   Save,
   Search,
   Server,
   Settings,
+  SlidersHorizontal,
   ShieldCheck,
   Star,
   StepForward,
@@ -81,6 +83,8 @@ export const SafetyOutlined = icon(ShieldCheck);
 export const SaveOutlined = icon(Save);
 export const SearchOutlined = icon(Search);
 export const SettingOutlined = icon(Settings);
+export const AppearanceOutlined = icon(Palette);
+export const GeneralOutlined = icon(SlidersHorizontal);
 export const StarFilled = icon(Star);
 export const StarOutlined = icon(Star);
 export const StopOutlined = icon(Minus);

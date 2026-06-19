@@ -1,5 +1,8 @@
 import { useState, useEffect, lazy, Suspense, useMemo, useRef } from 'react';
-import type { KeyboardEvent } from 'react';
+import type { KeyboardEvent, CSSProperties, ComponentType } from 'react';
+
+type SectionIcon = ComponentType<{ spin?: boolean; style?: CSSProperties }>;
+
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Form, Input, Select, Switch, Button, Space, Divider, message,
@@ -8,6 +11,8 @@ import {
 import {
   SaveOutlined, DatabaseOutlined, PlusOutlined, DeleteOutlined,
   SyncOutlined,
+  GeneralOutlined, AppearanceOutlined, ThunderboltOutlined,
+  CodeOutlined, ProfileOutlined, BotOutlined, WarningOutlined,
 } from '../../components/ui/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
@@ -60,6 +65,7 @@ interface SettingsSection {
   key: string;
   labelKey: TranslationKey;
   descriptionKey: TranslationKey;
+  Icon: SectionIcon;
 }
 
 interface FontFamilyInfo {
@@ -68,14 +74,14 @@ interface FontFamilyInfo {
 }
 
 const settingsSections: SettingsSection[] = [
-  { key: 'general', labelKey: 'settings.sections.general', descriptionKey: 'settings.sections.generalDesc' },
-  { key: 'appearance', labelKey: 'settings.sections.appearance', descriptionKey: 'settings.sections.appearanceDesc' },
-  { key: 'quickActions', labelKey: 'settings.sections.quickActions', descriptionKey: 'settings.sections.quickActionsDesc' },
-  { key: 'commandLib', labelKey: 'settings.sections.commandLib', descriptionKey: 'settings.sections.commandLibDesc' },
-  { key: 'scriptLib', labelKey: 'settings.sections.scriptLib', descriptionKey: 'settings.sections.scriptLibDesc' },
-  { key: 'ai', labelKey: 'settings.sections.ai', descriptionKey: 'settings.sections.aiDesc' },
-  { key: 'danger', labelKey: 'settings.sections.danger', descriptionKey: 'settings.sections.dangerDesc' },
-  { key: 'data', labelKey: 'settings.sections.data', descriptionKey: 'settings.sections.dataDesc' },
+  { key: 'general', labelKey: 'settings.sections.general', descriptionKey: 'settings.sections.generalDesc', Icon: GeneralOutlined },
+  { key: 'appearance', labelKey: 'settings.sections.appearance', descriptionKey: 'settings.sections.appearanceDesc', Icon: AppearanceOutlined },
+  { key: 'quickActions', labelKey: 'settings.sections.quickActions', descriptionKey: 'settings.sections.quickActionsDesc', Icon: ThunderboltOutlined },
+  { key: 'commandLib', labelKey: 'settings.sections.commandLib', descriptionKey: 'settings.sections.commandLibDesc', Icon: CodeOutlined },
+  { key: 'scriptLib', labelKey: 'settings.sections.scriptLib', descriptionKey: 'settings.sections.scriptLibDesc', Icon: ProfileOutlined },
+  { key: 'ai', labelKey: 'settings.sections.ai', descriptionKey: 'settings.sections.aiDesc', Icon: BotOutlined },
+  { key: 'danger', labelKey: 'settings.sections.danger', descriptionKey: 'settings.sections.dangerDesc', Icon: WarningOutlined },
+  { key: 'data', labelKey: 'settings.sections.data', descriptionKey: 'settings.sections.dataDesc', Icon: DatabaseOutlined },
 ];
 
 const AI_PROVIDER_DEFAULTS: Record<string, { apiUrl: string; model: string; requiresKey: boolean; descriptionKey: TranslationKey }> = {
@@ -1074,17 +1080,23 @@ export default function SettingsPage() {
       <div className="settings-window-content">
         <aside className="settings-sidebar-card" aria-label={tText('settings.sidebarAria')}>
           <nav className="settings-nav-list">
-            {settingsSections.map((section) => (
-              <button
-                key={section.key}
-                type="button"
-                className={`settings-nav-item${activeSection === section.key ? ' settings-nav-item-active' : ''}`}
-                onClick={() => setActiveSection(section.key)}
-              >
-                <span className="settings-nav-title">{t(section.labelKey)}</span>
-                <span className="settings-nav-description">{t(section.descriptionKey)}</span>
-              </button>
-            ))}
+            {settingsSections.map((section) => {
+              const Icon = section.Icon;
+              const active = activeSection === section.key;
+              return (
+                <button
+                  key={section.key}
+                  type="button"
+                  className={`settings-nav-item${active ? ' settings-nav-item-active' : ''}`}
+                  onClick={() => setActiveSection(section.key)}
+                  title={tText(section.descriptionKey)}
+                >
+                  <span className="settings-nav-indicator" aria-hidden="true" />
+                  <Icon />
+                  <span className="settings-nav-title">{t(section.labelKey)}</span>
+                </button>
+              );
+            })}
           </nav>
         </aside>
 

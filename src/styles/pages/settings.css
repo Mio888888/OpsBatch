@@ -564,3 +564,102 @@
 .asset-tree input[type='checkbox'] {
   accent-color: var(--color-primary);
 }
+
+/* ===== General section: compact grouped layout ===== */
+.settings-general-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 640px;
+}
+
+.settings-general-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px;
+  background: var(--color-settings-card-bg);
+  border: 1px solid var(--color-settings-border);
+  border-radius: var(--radius-lg);
+}
+
+.settings-general-group-head h3 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--font-size-title-sm);
+  font-weight: var(--font-weight-bold);
+  line-height: var(--line-height-title);
+}
+
+.settings-general-group-head p {
+  margin: 2px 0 0;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-body);
+}
+
+.settings-general-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 2px;
+}
+
+.settings-general-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 36px;
+  padding: 6px 0;
+  border-top: 1px solid var(--color-settings-border);
+}
+
+.settings-general-rows .settings-general-row:first-child {
+  border-top: 0;
+  padding-top: 2px;
+}
+
+.settings-general-row-copy {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.settings-general-row-title {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-medium);
+  line-height: var(--line-height-ui);
+}
+
+.settings-general-row-desc {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-support);
+  line-height: var(--line-height-compact);
+}
+
+.settings-general-control {
+  flex: 0 0 auto;
+}
+
+/* addon 后缀（秒/天）需贴合控件右边缘：内部 input 上带有
+   .settings-general-control，据此定位外层 addon 容器并约束宽度，
+   让内部 input 收缩、后缀右对齐，不再溢出。作用域仅限通用页。 */
+.ui-input-addon:has(> .ui-input.settings-general-control) {
+  width: 120px;
+  max-width: 100%;
+}
+
+.ui-input-addon:has(> .ui-input.settings-general-control) > .ui-input {
+  width: auto;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.settings-general-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
+}

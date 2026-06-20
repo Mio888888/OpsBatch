@@ -903,23 +903,85 @@ export default function SettingsPage() {
     switch (activeSection) {
       case 'general':
         return (
-          <Form form={generalForm} layout="vertical" className="settings-section-form">
-            <Form.Item name="defaultConcurrency" label={t('settings.defaultConcurrency')} initialValue={10}>
-              <InputNumber min={1} max={100} style={{ width: '100%' }} />
-            </Form.Item>
-            <Form.Item name="defaultTimeout" label={t('settings.defaultTimeout')} initialValue={30}>
-              <InputNumber min={1} max={3600} style={{ width: '100%' }} />
-            </Form.Item>
-            <Form.Item name="minimizeToTray" label={t('settings.minimizeToTray')} valuePropName="checked" initialValue={true}>
-              <Switch />
-            </Form.Item>
-            <Form.Item name="logRetentionDays" label={t('settings.logRetentionDays')} initialValue={90}>
-              <InputNumber min={7} max={365} style={{ width: '100%' }} addonAfter={t('settings.days')} />
-            </Form.Item>
-            <Form.Item label={t('settings.language')} extra={t('settings.languageExtra')}>
-              <Select<LanguageMode> value={languageMode} options={languageOptions} onChange={handleLanguageChange} style={{ width: '100%' }} />
-            </Form.Item>
-            <Button type="primary" icon={<SaveOutlined />} onClick={handleSaveGeneral}>{t('common.save')}</Button>
+          <Form form={generalForm} layout="vertical" className="settings-general-form">
+            <div className="settings-general-group">
+              <div className="settings-general-group-head">
+                <h3>{t('settings.generalGroupLanguage')}</h3>
+                <p>{t('settings.languageExtra')}</p>
+              </div>
+              <div className="settings-general-rows">
+                <div className="settings-general-row">
+                  <div className="settings-general-row-copy">
+                    <span className="settings-general-row-title">{t('settings.language')}</span>
+                  </div>
+                  <Select<LanguageMode>
+                    value={languageMode}
+                    options={languageOptions}
+                    onChange={handleLanguageChange}
+                    className="settings-general-control"
+                    style={{ width: 180 }}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="settings-general-group">
+              <div className="settings-general-group-head">
+                <h3>{t('settings.generalGroupExecution')}</h3>
+                <p>{t('settings.generalGroupExecutionDesc')}</p>
+              </div>
+              <div className="settings-general-rows">
+                <div className="settings-general-row">
+                  <div className="settings-general-row-copy">
+                    <span className="settings-general-row-title">{t('settings.defaultConcurrency')}</span>
+                    <span className="settings-general-row-desc">{t('settings.defaultConcurrencyDesc')}</span>
+                  </div>
+                  <Form.Item name="defaultConcurrency" initialValue={10} noStyle>
+                    <InputNumber min={1} max={100} className="settings-general-control" style={{ width: 120 }} />
+                  </Form.Item>
+                </div>
+                <div className="settings-general-row">
+                  <div className="settings-general-row-copy">
+                    <span className="settings-general-row-title">{t('settings.defaultTimeout')}</span>
+                    <span className="settings-general-row-desc">{t('settings.defaultTimeoutDesc')}</span>
+                  </div>
+                  <Form.Item name="defaultTimeout" initialValue={30} noStyle>
+                    <InputNumber min={1} max={3600} className="settings-general-control" style={{ width: 120 }} addonAfter={t('settings.seconds')} />
+                  </Form.Item>
+                </div>
+              </div>
+            </div>
+
+            <div className="settings-general-group">
+              <div className="settings-general-group-head">
+                <h3>{t('settings.generalGroupBehavior')}</h3>
+                <p>{t('settings.generalGroupBehaviorDesc')}</p>
+              </div>
+              <div className="settings-general-rows">
+                <div className="settings-general-row">
+                  <div className="settings-general-row-copy">
+                    <span className="settings-general-row-title">{t('settings.minimizeToTray')}</span>
+                    <span className="settings-general-row-desc">{t('settings.minimizeToTrayDesc')}</span>
+                  </div>
+                  <Form.Item name="minimizeToTray" valuePropName="checked" initialValue={true} noStyle>
+                    <Switch />
+                  </Form.Item>
+                </div>
+                <div className="settings-general-row">
+                  <div className="settings-general-row-copy">
+                    <span className="settings-general-row-title">{t('settings.logRetentionDays')}</span>
+                    <span className="settings-general-row-desc">{t('settings.logRetentionDaysDesc')}</span>
+                  </div>
+                  <Form.Item name="logRetentionDays" initialValue={90} noStyle>
+                    <InputNumber min={7} max={365} className="settings-general-control" style={{ width: 120 }} addonAfter={t('settings.days')} />
+                  </Form.Item>
+                </div>
+              </div>
+            </div>
+
+            <div className="settings-general-actions">
+              <Button type="primary" icon={<SaveOutlined />} onClick={handleSaveGeneral}>{t('common.save')}</Button>
+            </div>
           </Form>
         );
       case 'appearance':

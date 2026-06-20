@@ -431,17 +431,17 @@ function ThemePreviewCard({ theme, selected, onClick }: { theme: ThemePreviewMet
   return (
     <button
       type="button"
-      className={`appearance-theme-card${selected ? ' appearance-theme-card-selected' : ''}`}
+      className={`appearance-theme-chip${selected ? ' appearance-theme-chip-selected' : ''}`}
       onClick={onClick}
       title={theme.name}
     >
-      <span className="appearance-theme-thumb" style={{ background: p.background }}>
-        <span style={{ display: 'block', height: 3, width: '70%', borderRadius: 2, background: p.lineMedium, margin: '4px 4px 0' }} />
-        <span style={{ display: 'block', height: 3, width: '50%', borderRadius: 2, background: p.lineWeak, margin: '3px 4px 0' }} />
-        <span style={{ display: 'block', height: 3, width: '80%', borderRadius: 2, background: p.accent, margin: '3px 4px 0' }} />
-        <span style={{ display: 'block', height: 3, width: '40%', borderRadius: 2, background: p.lineStrong, margin: '3px 4px 0' }} />
+      <span className="appearance-theme-chip-thumb" style={{ background: p.background }}>
+        <span style={{ display: 'block', height: 2, width: '70%', borderRadius: 1, background: p.lineMedium, marginTop: 3 }} />
+        <span style={{ display: 'block', height: 2, width: '50%', borderRadius: 1, background: p.lineWeak, marginTop: 2 }} />
+        <span style={{ display: 'block', height: 2, width: '80%', borderRadius: 1, background: p.accent, marginTop: 2 }} />
+        <span style={{ display: 'block', height: 2, width: '40%', borderRadius: 1, background: p.lineStrong, marginTop: 2 }} />
       </span>
-      <span className="appearance-theme-name">{theme.name}</span>
+      <span className="appearance-theme-chip-name">{theme.name}</span>
     </button>
   );
 }
@@ -473,123 +473,137 @@ function AppearanceSection() {
   }, []);
 
   return (
-    <div className="appearance-content">
-      {/* 终端主题 — System */}
-      <div className="appearance-group">
-        <div className="appearance-group-header">
-          <h3>{t('settings.terminalTheme')}</h3>
-          <p>{t('settings.terminalThemeDesc')}</p>
+    <div className="settings-general-form appearance-section">
+      {/* 主题 */}
+      <div className="settings-general-group">
+        <div className="settings-general-group-head">
+          <h3>{t('settings.appearanceGroupTheme')}</h3>
+          <p>{t('settings.appearanceGroupThemeDesc')}</p>
         </div>
-        <div className="appearance-theme-row">
-          <button
-            type="button"
-            className={`appearance-theme-card appearance-theme-card-system${theme.themeMode === 'system' ? ' appearance-theme-card-selected' : ''}`}
-            onClick={() => patchTheme({ themeMode: 'system' })}
-          >
-            <span className="appearance-theme-thumb appearance-theme-thumb-system">
-              <span className="appearance-system-icon">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <div className="settings-general-rows">
+          <div className="settings-general-row appearance-theme-row">
+            <div className="settings-general-row-copy">
+              <span className="settings-general-row-title">{t('settings.themeSystem')}</span>
+            </div>
+            <button
+              type="button"
+              className={`appearance-system-toggle${theme.themeMode === 'system' ? ' appearance-system-toggle-active' : ''}`}
+              onClick={() => patchTheme({ themeMode: 'system' })}
+              aria-pressed={theme.themeMode === 'system'}
+            >
+              <span className="appearance-system-toggle-icon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
                   <line x1="8" y1="21" x2="16" y2="21" />
                   <line x1="12" y1="17" x2="12" y2="21" />
                 </svg>
               </span>
-              <span className="appearance-theme-name">System</span>
-            </span>
-          </button>
-        </div>
-      </div>
-
-      {/* 深色主题 */}
-      <div className="appearance-group">
-        <div className="appearance-group-label">
-          <span className="appearance-group-label-dot" style={{ background: '#6b7a8d' }} />
-          {t('settings.dark')}
-        </div>
-        <div className="appearance-theme-grid">
-          {darkThemes.map((t) => (
-            <ThemePreviewCard
-              key={t.id}
-              theme={t}
-              selected={theme.themeMode === 'manual' && theme.terminalThemeId === t.id}
-              onClick={() => patchTheme({ themeMode: 'manual', terminalThemeId: t.id, terminalThemeTone: 'dark' })}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* 浅色主题 */}
-      <div className="appearance-group">
-        <div className="appearance-group-label">
-          <span className="appearance-group-label-dot" style={{ background: '#d4d4d6' }} />
-          {t('settings.light')}
-        </div>
-        <div className="appearance-theme-grid">
-          {lightThemes.map((t) => (
-            <ThemePreviewCard
-              key={t.id}
-              theme={t}
-              selected={theme.themeMode === 'manual' && theme.terminalThemeId === t.id}
-              onClick={() => patchTheme({ themeMode: 'manual', terminalThemeId: t.id, terminalThemeTone: 'light' })}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* 强调色 */}
-      <div className="appearance-group">
-        <div className="appearance-group-header">
-          <h3>{t('settings.accentColor')}</h3>
-          <p>{t('settings.accentColorDesc')}</p>
-        </div>
-        <div className="appearance-accent-row">
-          {accentColors.map((c) => (
-            <button
-              key={c.id}
-              type="button"
-              className={`appearance-accent-dot${theme.accentColorId === c.id ? ' appearance-accent-dot-selected' : ''}`}
-              style={{ background: c.base, borderColor: c.base }}
-              onClick={() => patchTheme({ accentColorId: c.id })}
-              title={c.name}
-            />
-          ))}
-        </div>
-      </div>
-
-      {/* 动效 */}
-      <div className="appearance-group">
-        <div className="appearance-motion-option">
-          <div className="appearance-motion-copy">
-            <h3>{t('settings.reduceMotion')}</h3>
-            <p>{t('settings.reduceMotionDesc')}</p>
+            </button>
           </div>
-          <Switch
-            checked={theme.reduceMotion}
-            onChange={(checked) => { void patchTheme({ reduceMotion: checked }); }}
-          />
+
+          <div className="settings-general-row appearance-theme-row">
+            <div className="settings-general-row-copy">
+              <span className="settings-general-row-title">{t('settings.darkThemes')}</span>
+            </div>
+            <div className="appearance-theme-chips">
+              {darkThemes.map((item) => (
+                <ThemePreviewCard
+                  key={item.id}
+                  theme={item}
+                  selected={theme.themeMode === 'manual' && theme.terminalThemeId === item.id}
+                  onClick={() => patchTheme({ themeMode: 'manual', terminalThemeId: item.id, terminalThemeTone: 'dark' })}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="settings-general-row appearance-theme-row">
+            <div className="settings-general-row-copy">
+              <span className="settings-general-row-title">{t('settings.lightThemes')}</span>
+            </div>
+            <div className="appearance-theme-chips">
+              {lightThemes.map((item) => (
+                <ThemePreviewCard
+                  key={item.id}
+                  theme={item}
+                  selected={theme.themeMode === 'manual' && theme.terminalThemeId === item.id}
+                  onClick={() => patchTheme({ themeMode: 'manual', terminalThemeId: item.id, terminalThemeTone: 'light' })}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="settings-general-row">
+            <div className="settings-general-row-copy">
+              <span className="settings-general-row-title">{t('settings.accentColor')}</span>
+              <span className="settings-general-row-desc">{t('settings.accentColorDesc')}</span>
+            </div>
+            <div className="appearance-accent-row">
+              {accentColors.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  className={`appearance-accent-dot${theme.accentColorId === c.id ? ' appearance-accent-dot-selected' : ''}`}
+                  style={{ background: c.base, borderColor: c.base }}
+                  onClick={() => patchTheme({ accentColorId: c.id })}
+                  title={c.name}
+                  aria-label={c.name}
+                />
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* 终端字号 & 历史行数 */}
-      <div className="appearance-group">
-        <div className="appearance-group-header">
-          <h3>{t('settings.terminalText')}</h3>
+      {/* 界面 */}
+      <div className="settings-general-group">
+        <div className="settings-general-group-head">
+          <h3>{t('settings.appearanceGroupInterface')}</h3>
+          <p>{t('settings.appearanceGroupInterfaceDesc')}</p>
         </div>
-        <div className="appearance-font-panel">
-          <div className="appearance-font-field">
-            <label className="appearance-number-label">{t('settings.terminalFontFamily')}</label>
-            <FontFamilySelect
-              value={currentFontFamilyLabel}
-              families={fontFamilies}
-              loading={loadingFonts}
-              placeholder={fontSelectPlaceholder}
-              searchPlaceholder={tText('settings.terminalFontSearchPlaceholder')}
-              noOptionsText={tText('common.noOptions')}
-              onChange={(family) => { void patchTheme({ terminalFontFamily: quoteFontFamilyName(family) }); }}
+        <div className="settings-general-rows">
+          <div className="settings-general-row">
+            <div className="settings-general-row-copy">
+              <span className="settings-general-row-title">{t('settings.reduceMotion')}</span>
+              <span className="settings-general-row-desc">{t('settings.reduceMotionDesc')}</span>
+            </div>
+            <Switch
+              checked={theme.reduceMotion}
+              onChange={(checked) => { void patchTheme({ reduceMotion: checked }); }}
             />
           </div>
-          <div className="appearance-font-stack-field">
-            <label className="appearance-number-label" htmlFor="terminal-font-family">{t('settings.terminalFontFamilyStack')}</label>
+        </div>
+      </div>
+
+      {/* 终端 */}
+      <div className="settings-general-group">
+        <div className="settings-general-group-head">
+          <h3>{t('settings.appearanceGroupTerminal')}</h3>
+          <p>{t('settings.appearanceGroupTerminalDesc')}</p>
+        </div>
+        <div className="settings-general-rows">
+          <div className="settings-general-row appearance-font-row">
+            <div className="settings-general-row-copy">
+              <span className="settings-general-row-title">{t('settings.terminalFontFamily')}</span>
+            </div>
+            <div className="appearance-font-control">
+              <FontFamilySelect
+                value={currentFontFamilyLabel}
+                families={fontFamilies}
+                loading={loadingFonts}
+                placeholder={fontSelectPlaceholder}
+                searchPlaceholder={tText('settings.terminalFontSearchPlaceholder')}
+                noOptionsText={tText('common.noOptions')}
+                onChange={(family) => { void patchTheme({ terminalFontFamily: quoteFontFamilyName(family) }); }}
+              />
+            </div>
+          </div>
+
+          <div className="settings-general-row appearance-font-row appearance-font-row-stack">
+            <div className="settings-general-row-copy">
+              <span className="settings-general-row-title">{t('settings.terminalFontFamilyStack')}</span>
+              <span className="settings-general-row-desc">{t('settings.terminalFontFamilyHint')}</span>
+            </div>
             <Input
               id="terminal-font-family"
               value={theme.terminalFontFamily}
@@ -597,30 +611,36 @@ function AppearanceSection() {
               onChange={(event) => { void patchTheme({ terminalFontFamily: event.target.value }); }}
               onBlur={(event) => { void patchTheme({ terminalFontFamily: normalizeTerminalFontFamily(event.target.value) }); }}
               style={{ fontFamily: theme.terminalFontFamily }}
+              className="settings-general-control appearance-font-input"
             />
           </div>
-          <p className="appearance-font-hint">{t('settings.terminalFontFamilyHint')}</p>
-        </div>
-        <div className="appearance-number-fields">
-          <div className="appearance-number-field">
-            <label className="appearance-number-label">{t('settings.terminalFontSize')}</label>
+
+          <div className="settings-general-row">
+            <div className="settings-general-row-copy">
+              <span className="settings-general-row-title">{t('settings.terminalFontSize')}</span>
+            </div>
             <InputNumber
               min={10}
               max={24}
               value={theme.terminalFontSize}
               onChange={(v) => v != null && patchTheme({ terminalFontSize: v })}
+              className="settings-general-control"
               style={{ width: 120 }}
             />
           </div>
-          <div className="appearance-number-field">
-            <label className="appearance-number-label">{t('settings.scrollback')}</label>
+
+          <div className="settings-general-row">
+            <div className="settings-general-row-copy">
+              <span className="settings-general-row-title">{t('settings.scrollback')}</span>
+            </div>
             <InputNumber
               min={500}
               max={50000}
               step={100}
               value={theme.terminalScrollback}
               onChange={(v) => v != null && patchTheme({ terminalScrollback: v })}
-              style={{ width: 120 }}
+              className="settings-general-control"
+              style={{ width: 140 }}
               addonAfter={t('settings.lines')}
             />
           </div>

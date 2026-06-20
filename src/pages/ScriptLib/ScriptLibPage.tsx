@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
-import { Tag, Input, Space, Button, Select, Tooltip, message, Modal, Form } from '../../components/ui';
+import { Input, Button, Select, Tooltip, message, Modal, Form, Tag, Space } from '../../components/ui';
 import {
   SearchOutlined, PlusOutlined,
   EyeOutlined, EditOutlined, HistoryOutlined, DeleteOutlined,
@@ -11,19 +11,29 @@ import type { TranslationKey } from '../../i18n';
 import type { ScriptEntry } from '../../types';
 import { invoke } from '@tauri-apps/api/core';
 import { logHandledError } from '../../utils/globalLogger';
-import '../../styles/pages/library.css';
-import '../../styles/pages/quick-actions.css';
+import '../../styles/pages/script-lib.css';
 
 const LazyCodeEditor = lazy(() => import('../../components/CodeEditor'));
 
-const LANGUAGES = [
-  { value: 'shell', label: 'Shell', icon: '🐚', color: 'blue' },
-  { value: 'python', label: 'Python', icon: '🐍', color: 'green' },
-  { value: 'powershell', label: 'PowerShell', icon: '⚡', color: 'purple' },
+// 语言 → 徽章配色与显示名
+const LANGUAGES: { value: ScriptEntry['language']; label: string }[] = [
+  { value: 'shell', label: 'Shell' },
+  { value: 'python', label: 'Python' },
+  { value: 'powershell', label: 'PowerShell' },
 ];
 
-const RISK_COLORS: Record<string, string> = { low: 'green', medium: 'orange', high: 'red', critical: 'magenta' };
-const RISK_LABEL_KEYS: Record<string, TranslationKey> = { low: 'library.risk.low', medium: 'library.risk.medium', high: 'library.risk.high', critical: 'library.risk.critical' };
+const LANG_LABEL: Record<string, string> = {
+  shell: 'Shell',
+  python: 'Python',
+  powershell: 'PS',
+};
+
+const RISK_LABEL_KEYS: Record<string, TranslationKey> = {
+  low: 'library.risk.low',
+  medium: 'library.risk.medium',
+  high: 'library.risk.high',
+  critical: 'library.risk.critical',
+};
 
 const RISK_OPTION_KEYS: { value: string; labelKey: TranslationKey }[] = [
   { value: 'low', labelKey: 'library.risk.lowOption' },
@@ -45,7 +55,12 @@ function CodeEditorFallback({ height = '280px' }: { height?: string }) {
   return <div style={{ height, background: 'var(--color-bg-elevated)', borderRadius: 8 }} />;
 }
 
-export default function ScriptLibPage() {
+interface ScriptLibPageProps {
+  /** 嵌入设置面板时使用，隐藏外层标题并去掉卡片边框 */
+  embedded?: boolean;
+}
+
+export default function ScriptLibPage({ embedded = false }: ScriptLibPageProps) {
   const { scripts, loadScripts, addScript, updateScript, deleteScript, addQuickAction } = useLibraryStore();
   const { t, tText } = useTranslation();
   const [searchQuery, setSearchQuery] = useState('');
@@ -62,23 +77,33 @@ export default function ScriptLibPage() {
     loadScripts();
   }, [loadScripts]);
 
-  const scriptCategories = useMemo(() => {
-    const categorySet = new Set<string>();
+  // 按类目聚合计数，供左侧导航显示
+  const categoryCounts = useMemo(() => {
+    const map = new Map<string, number>();
     for (const script of scripts) {
-      if (script.category.trim()) categorySet.add(script.category);
+      const category = script.category.trim();
+      if (category) map.set(category, (map.get(category) ?? 0) + 1);
     }
-    return Array.from(categorySet).sort();
+    return map;
   }, [scripts]);
 
-  const filtered = scripts.filter((s) => {
-    if (selectedCategory && s.category !== selectedCategory) return false;
-    if (selectedLang && s.language !== selectedLang) return false;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      return s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q) || s.tags.some((t) => t.toLowerCase().includes(q));
-    }
-    return true;
-  });
+  const categories = useMemo(() => Array.from(categoryCounts.keys()).sort(), [categoryCounts]);
+
+  const filtered = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return scripts.filter((s) => {
+      if (selectedCategory && s.category !== selectedCategory) return false;
+      if (selectedLang && s.language !== selectedLang) return false;
+      if (query) {
+        return (
+          s.name.toLowerCase().includes(query) ||
+          s.description.toLowerCase().includes(query) ||
+          s.tags.some((tag) => tag.toLowerCase().includes(query))
+        );
+      }
+      return true;
+    });
+  }, [scripts, selectedCategory, selectedLang, searchQuery]);
 
   const loadVersionHistory = async (scriptId: string) => {
     try {
@@ -108,7 +133,7 @@ export default function ScriptLibPage() {
     setEditScript(null);
   };
 
-  const handleRestoreVersion = (_scriptId: string, version: VersionRecord) => {
+  const handleRestoreVersion = (version: VersionRecord) => {
     const updated = { ...editScript!, content: version.content } as ScriptEntry;
     setEditScript(updated);
     message.success(tText('library.restoredVersion', { label: version.label }));
@@ -146,117 +171,191 @@ export default function ScriptLibPage() {
     }
   };
 
+  const categoryOptions = useMemo(
+    () => categories.map((category) => ({ value: category, label: category })),
+    [categories],
+  );
+
+  const langOptions = useMemo(
+    () => LANGUAGES.map((l) => ({ value: l.value, label: l.label })),
+    [],
+  );
+
+  const riskOptions = useMemo(
+    () => RISK_OPTION_KEYS.map((r) => ({ value: r.value, label: tText(r.labelKey) })),
+    [tText],
+  );
+
+  const renderScriptText = (script: ScriptEntry) =>
+    script.url ? `curl -sSL '${script.url}' | bash` : script.content;
+
   return (
-    <div className="page-container">
-      <div className="page-header">
-        <h2>{t('scriptLib.title')}</h2>
+    <div className={`sl${embedded ? ' sl-embedded' : ''}`}>
+      {/* 顶部：标题 / 搜索 / 语言 / 操作 */}
+      <div className="sl-topbar">
+        {!embedded && <h2 className="sl-title">{t('scriptLib.title')}</h2>}
+        <div className="sl-search">
+          <Input
+            placeholder={tText('scriptLib.searchPlaceholder')}
+            prefix={<SearchOutlined />}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            allowClear
+          />
+        </div>
+        <Select
+          value={selectedLang}
+          onChange={(value) => setSelectedLang(value || null)}
+          className="sl-lang-select"
+          allowClear
+          placeholder={tText('scriptLib.language')}
+          options={langOptions}
+        />
+        <span className="sl-count">
+          {t('scriptLib.count', { filtered: filtered.length, total: scripts.length })}
+        </span>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddModalOpen(true)}>
           {t('scriptLib.addScript')}
         </Button>
       </div>
 
-      {/* Category Tabs */}
-      <div className="qa-tabs">
-        <button
-          className={`qa-tab${!selectedCategory ? ' qa-tab-active' : ''}`}
-          onClick={() => setSelectedCategory(null)}
-        >{t('library.category.all')}</button>
-        {scriptCategories.map((category) => (
+      {/* 主体：左侧类目栏 + 右侧脚本列表 */}
+      <div className="sl-body">
+        <aside className="sl-categories" aria-label={tText('scriptLib.category')}>
           <button
-            key={category}
-            className={`qa-tab${selectedCategory === category ? ' qa-tab-active' : ''}`}
-            onClick={() => setSelectedCategory(category)}
-          >{category}</button>
-        ))}
-      </div>
+            type="button"
+            className={`sl-cat${!selectedCategory ? ' sl-cat-active' : ''}`}
+            onClick={() => setSelectedCategory(null)}
+          >
+            <span className="sl-cat-name">{t('library.category.all')}</span>
+            <span className="sl-cat-count">{scripts.length}</span>
+          </button>
+          {categories.map((cat) => (
+            <button
+              key={cat}
+              type="button"
+              className={`sl-cat${selectedCategory === cat ? ' sl-cat-active' : ''}`}
+              onClick={() => setSelectedCategory(cat)}
+              title={cat}
+            >
+              <span className="sl-cat-name">{cat}</span>
+              <span className="sl-cat-count">{categoryCounts.get(cat) ?? 0}</span>
+            </button>
+          ))}
+        </aside>
 
-      {/* Toolbar */}
-      <div className="qa-toolbar">
-        <Input placeholder={tText('scriptLib.searchPlaceholder')} prefix={<SearchOutlined />} value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)} allowClear className="qa-search" />
-        <Select value={selectedLang} onChange={(value) => setSelectedLang(value || null)}
-          className="qa-lang-select" allowClear placeholder={tText('scriptLib.language')} options={LANGUAGES.map(l => ({ value: l.value, label: l.label }))} />
-        <span className="qa-count">{t('scriptLib.count', { filtered: filtered.length, total: scripts.length })}</span>
-      </div>
+        <div className="sl-list">
+          {filtered.length === 0 ? (
+            <div className="sl-empty">{t('scriptLib.noScripts')}</div>
+          ) : (
+            filtered.map((script) => {
+              const isHighRisk = script.risk === 'high' || script.risk === 'critical';
+              return (
+                <div key={script.id} className="sl-row" title={script.description || script.name}>
+                  <div className="sl-row-main">
+                    <div className="sl-row-head">
+                      <span className="sl-row-lang" data-lang={script.language}>
+                        {LANG_LABEL[script.language]}
+                      </span>
+                      <span className="sl-row-name">{script.name}</span>
+                      {script.url && (
+                        <Tag className="sl-row-tag sl-row-tag-remote">{t('library.remote')}</Tag>
+                      )}
+                      {script.parameters.length > 0 && (
+                        <Tag className="sl-row-tag">{t('library.parameters')}</Tag>
+                      )}
+                    </div>
+                    <code className={`sl-row-code${script.url ? ' sl-row-code-remote' : ''}`} title={renderScriptText(script)}>
+                      {renderScriptText(script).length > 120
+                        ? renderScriptText(script).slice(0, 120) + '…'
+                        : renderScriptText(script)}
+                    </code>
+                  </div>
 
-      {/* Card Grid */}
-      <div className="qa-card-grid">
-        {filtered.map((script) => {
-          const lang = LANGUAGES.find((x) => x.value === script.language);
-          const isHighRisk = script.risk === 'high' || script.risk === 'critical';
-          return (
-            <div key={script.id} className="qa-card">
-              <div className="qa-card-header">
-                <div className="qa-card-title-row">
-                  <span className="qa-card-lang-icon">{lang?.icon || '🐚'}</span>
-                  <span className="qa-card-name">{script.name}</span>
-                </div>
-                <div className="qa-card-header-badges">
-                  {script.url && <Tag color="cyan" className="qa-card-micro-tag">{t('library.remote')}</Tag>}
-                  {script.parameters.length > 0 && <Tag color="blue" className="qa-card-micro-tag">{t('library.parameters')}</Tag>}
-                  <Tooltip title={tText('library.addToQuickActions')}>
-                    <button className="qa-star-btn" onClick={() => handleAddToQuickActions(script)}>
-                      <ThunderboltOutlined />
-                    </button>
-                  </Tooltip>
-                </div>
-              </div>
-              {script.description && (
-                <div className="qa-card-desc">{script.description}</div>
-              )}
-              {script.url ? (
-                <code className="qa-card-code qa-card-code-remote">{`curl -sSL '${script.url}' | bash`}</code>
-              ) : (
-                <code className="qa-card-code">{script.content.length > 120 ? script.content.slice(0, 120) + '…' : script.content}</code>
-              )}
-              <div className="qa-card-footer">
-                <div className="qa-card-status">
-                  <span className={`qa-card-risk-dot ${isHighRisk ? 'qa-card-risk-dot-high' : ''}`} />
-                  <Tag className="qa-tag">{t(RISK_LABEL_KEYS[script.risk])}</Tag>
-                  <Tag className="qa-tag">{script.category}</Tag>
-                </div>
-                <Space size={2}>
-                  <Tooltip title={tText('library.view')}>
-                    <Button type="text" size="small" icon={<EyeOutlined />} onClick={() => setViewScript(script)} />
-                  </Tooltip>
-                  {!script.isBuiltin && (
-                    <Tooltip title={tText('common.edit')}>
-                      <Button type="text" size="small" icon={<EditOutlined />} onClick={async () => {
-                        await saveVersion(script.id, script.content, tText('scriptLib.autoSaveBeforeEdit'));
-                        setEditScript({ ...script });
-                      }} />
+                  <div className="sl-row-meta">
+                    <span className={`sl-risk ${isHighRisk ? 'sl-risk-high' : `sl-risk-${script.risk}`}`}>
+                      <span className="sl-risk-dot" />
+                      {t(RISK_LABEL_KEYS[script.risk])}
+                    </span>
+                    <span className="sl-row-category">{script.category}</span>
+                  </div>
+
+                  <div className="sl-row-actions">
+                    <Tooltip title={tText('library.view')}>
+                      <button
+                        type="button"
+                        className="sl-act"
+                        onClick={() => setViewScript(script)}
+                        aria-label={tText('library.view')}
+                      >
+                        <EyeOutlined />
+                      </button>
                     </Tooltip>
-                  )}
-                  {!script.isBuiltin && (
-                    <Tooltip title={tText('common.delete')}>
-                      <Button type="text" size="small" danger icon={<DeleteOutlined />}
-                        onClick={async () => { await deleteScript(script.id); message.success(tText('library.deleted')); }} />
+                    <Tooltip title={tText('library.addToQuickActions')}>
+                      <button
+                        type="button"
+                        className="sl-act"
+                        onClick={() => handleAddToQuickActions(script)}
+                        aria-label={tText('library.addToQuickActions')}
+                      >
+                        <ThunderboltOutlined />
+                      </button>
                     </Tooltip>
-                  )}
-                </Space>
-              </div>
-            </div>
-          );
-        })}
-        {filtered.length === 0 && (
-          <div className="qa-empty">{t('scriptLib.noScripts')}</div>
-        )}
+                    {!script.isBuiltin && (
+                      <Tooltip title={tText('common.edit')}>
+                        <button
+                          type="button"
+                          className="sl-act"
+                          onClick={async () => {
+                            await saveVersion(script.id, script.content, tText('scriptLib.autoSaveBeforeEdit'));
+                            setEditScript({ ...script });
+                          }}
+                          aria-label={tText('common.edit')}
+                        >
+                          <EditOutlined />
+                        </button>
+                      </Tooltip>
+                    )}
+                    {!script.isBuiltin && (
+                      <Tooltip title={tText('common.delete')}>
+                        <button
+                          type="button"
+                          className="sl-act sl-act-danger"
+                          onClick={async () => {
+                            await deleteScript(script.id);
+                            message.success(tText('library.deleted'));
+                          }}
+                          aria-label={tText('common.delete')}
+                        >
+                          <DeleteOutlined />
+                        </button>
+                      </Tooltip>
+                    )}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
       </div>
 
       {/* 查看脚本详情 */}
-      <Modal title={viewScript?.name} open={!!viewScript} onCancel={() => setViewScript(null)}
-        footer={<Button onClick={() => setViewScript(null)}>{t('common.close')}</Button>} width={750}>
+      <Modal
+        title={viewScript?.name}
+        open={!!viewScript}
+        onCancel={() => setViewScript(null)}
+        footer={<Button onClick={() => setViewScript(null)}>{t('common.close')}</Button>}
+        width={750}
+      >
         {viewScript && (
           <div>
             <Space style={{ marginBottom: 12 }} wrap>
-              <Tag color={LANGUAGES.find((l) => l.value === viewScript.language)?.color}>
-                {viewScript.language}
-              </Tag>
-              <Tag color={RISK_COLORS[viewScript.risk]}>{t('library.riskPrefix', { risk: t(RISK_LABEL_KEYS[viewScript.risk]) })}</Tag>
+              <Tag color="blue">{viewScript.language}</Tag>
+              <Tag>{t('library.riskPrefix', { risk: t(RISK_LABEL_KEYS[viewScript.risk]) })}</Tag>
               <Tag>{viewScript.category}</Tag>
-              {viewScript.tags.map((t) => <Tag key={t}>{t}</Tag>)}
+              {viewScript.tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}
             </Space>
-            <p style={{ marginBottom: 12, color: '#666' }}>{viewScript.description}</p>
+            <p style={{ marginBottom: 12, color: 'var(--color-text-muted)' }}>{viewScript.description}</p>
             {viewScript.parameters.length > 0 && (
               <div style={{ marginBottom: 12 }}>
                 <strong>{t('scriptLib.params')}</strong>
@@ -296,14 +395,16 @@ export default function ScriptLibPage() {
         {editScript && (
           <div>
             {showVersions && versionHistory.length > 0 && (
-              <div style={{ marginBottom: 12, maxHeight: 150, overflow: 'auto', background: '#fafafa', padding: 8, borderRadius: 4 }}>
+              <div className="sl-versions">
                 {versionHistory.map((v, i) => (
-                  <div key={v.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderBottom: '1px solid #f0f0f0' }}>
+                  <div key={v.id} className="sl-version-item">
                     <span>
-                      <Tag color={i === 0 ? 'blue' : 'default'}>{i === 0 ? t('common.latest') : `v${versionHistory.length - i}`}</Tag>
-                      <span style={{ fontSize: 12, color: '#666' }}>{v.label} - {new Date(v.created_at).toLocaleString()}</span>
+                      <Tag color={i === 0 ? 'blue' : 'default'}>
+                        {i === 0 ? t('common.latest') : `v${versionHistory.length - i}`}
+                      </Tag>
+                      <span className="sl-version-meta">{v.label} - {new Date(v.created_at).toLocaleString()}</span>
                     </span>
-                    <Button size="small" onClick={() => handleRestoreVersion(editScript.id, v)}>{t('common.restoreVersion')}</Button>
+                    <Button size="small" onClick={() => handleRestoreVersion(v)}>{t('common.restoreVersion')}</Button>
                   </div>
                 ))}
               </div>
@@ -312,9 +413,10 @@ export default function ScriptLibPage() {
               <Input value={editScript.name} placeholder={tText('scriptLib.scriptName')} style={{ width: 200 }}
                 onChange={(e) => setEditScript({ ...editScript, name: e.target.value })} />
               <Select value={editScript.language} style={{ width: 120 }}
-                options={LANGUAGES.map(l => ({ value: l.value, label: l.label }))} onChange={(v) => setEditScript({ ...editScript, language: v as ScriptEntry['language'] })} />
+                options={LANGUAGES.map((l) => ({ value: l.value, label: l.label }))}
+                onChange={(v) => setEditScript({ ...editScript, language: v as ScriptEntry['language'] })} />
               <Select value={editScript.risk} style={{ width: 100 }}
-                options={RISK_OPTION_KEYS.map(r => ({ value: r.value, label: tText(r.labelKey) }))}
+                options={RISK_OPTION_KEYS.map((r) => ({ value: r.value, label: tText(r.labelKey) }))}
                 onChange={(v) => setEditScript({ ...editScript, risk: v as ScriptEntry['risk'] })} />
             </Space>
             <Suspense fallback={<CodeEditorFallback height="400px" />}>
@@ -333,27 +435,34 @@ export default function ScriptLibPage() {
       </Modal>
 
       {/* 添加脚本 */}
-      <Modal title={tText('scriptLib.addCustomScript')} open={addModalOpen} onOk={handleAdd}
+      <Modal
+        title={tText('scriptLib.addCustomScript')}
+        open={addModalOpen}
+        onOk={handleAdd}
         onCancel={() => { setAddModalOpen(false); form.resetFields(); }}
-        width={720} destroyOnHidden okText={tText('common.add')} cancelText={tText('common.cancel')}>
+        width={720}
+        destroyOnHidden
+        okText={tText('common.add')}
+        cancelText={tText('common.cancel')}
+      >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
           {/* Row 1: Name + Language */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: 12 }}>
+          <div className="sl-form-row">
             <Form.Item name="name" label={tText('scriptLib.scriptName')} rules={[{ required: true, message: tText('scriptLib.enterName') }]}>
               <Input placeholder={tText('scriptLib.namePlaceholder')} />
             </Form.Item>
             <Form.Item name="language" label={tText('scriptLib.language')} rules={[{ required: true }]} initialValue="shell">
-              <Select options={LANGUAGES.map(l => ({ value: l.value, label: l.label }))} />
+              <Select options={LANGUAGES.map((l) => ({ value: l.value, label: l.label }))} />
             </Form.Item>
           </div>
 
           {/* Row 2: Category + Risk */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 140px', gap: 12 }}>
+          <div className="sl-form-row">
             <Form.Item name="category" label={tText('scriptLib.category')} rules={[{ required: true, message: tText('scriptLib.selectCategoryRequired') }]}>
-              <Select options={scriptCategories.map((category) => ({ value: category, label: category }))} placeholder={tText('scriptLib.selectCategory')} />
+              <Select options={categoryOptions} placeholder={tText('scriptLib.selectCategory')} />
             </Form.Item>
             <Form.Item name="risk" label={tText('scriptLib.riskLevel')} initialValue="low">
-              <Select options={RISK_OPTION_KEYS.map((r) => ({ value: r.value, label: tText(r.labelKey) }))} />
+              <Select options={riskOptions} />
             </Form.Item>
           </div>
 
@@ -370,14 +479,6 @@ export default function ScriptLibPage() {
           {/* Code Editor */}
           <div style={{ marginBottom: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontWeight: 500, fontSize: 13, color: 'var(--color-text)' }}>{t('scriptLib.scriptCode')}</span>
-            <Form.Item noStyle shouldUpdate={(prev, cur) => prev.language !== cur.language}>
-              {({ getFieldValue }) => {
-                const lang = LANGUAGES.find(l => l.value === getFieldValue('language'));
-                return lang ? (
-                  <Tag color={lang.color} style={{ fontSize: 11, lineHeight: '18px' }}>{lang.icon} {lang.label}</Tag>
-                ) : null;
-              }}
-            </Form.Item>
           </div>
           <Form.Item noStyle shouldUpdate={(prev, cur) => prev.language !== cur.language}>
             {({ getFieldValue, setFieldValue }) => {
@@ -386,11 +487,11 @@ export default function ScriptLibPage() {
                 <div style={{ border: '1px solid var(--color-border)', borderRadius: 8, overflow: 'hidden' }}>
                   <Suspense fallback={<CodeEditorFallback height="280px" />}>
                     <LazyCodeEditor
-                    value={(getFieldValue('content') as string | undefined) || ''}
-                    language={lang}
-                    onChange={(value) => setFieldValue('content', value)}
-                    height="280px"
-                    placeholder={tText('scriptLib.codePlaceholder')}
+                      value={(getFieldValue('content') as string | undefined) || ''}
+                      language={lang}
+                      onChange={(value) => setFieldValue('content', value)}
+                      height="280px"
+                      placeholder={tText('scriptLib.codePlaceholder')}
                     />
                   </Suspense>
                 </div>

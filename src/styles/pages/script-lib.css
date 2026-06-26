@@ -36,11 +36,6 @@
   width: 100%;
 }
 
-.sl-lang-select {
-  width: 130px;
-  flex-shrink: 0;
-}
-
 .sl-count {
   margin-left: auto;
   color: var(--color-text-muted);

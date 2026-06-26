@@ -65,7 +65,6 @@ export default function ScriptLibPage({ embedded = false }: ScriptLibPageProps) 
   const { t, tText } = useTranslation();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [selectedLang, setSelectedLang] = useState<string | null>(null);
   const [viewScript, setViewScript] = useState<ScriptEntry | null>(null);
   const [editScript, setEditScript] = useState<ScriptEntry | null>(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -93,7 +92,6 @@ export default function ScriptLibPage({ embedded = false }: ScriptLibPageProps) 
     const query = searchQuery.trim().toLowerCase();
     return scripts.filter((s) => {
       if (selectedCategory && s.category !== selectedCategory) return false;
-      if (selectedLang && s.language !== selectedLang) return false;
       if (query) {
         return (
           s.name.toLowerCase().includes(query) ||
@@ -103,7 +101,7 @@ export default function ScriptLibPage({ embedded = false }: ScriptLibPageProps) 
       }
       return true;
     });
-  }, [scripts, selectedCategory, selectedLang, searchQuery]);
+  }, [scripts, selectedCategory, searchQuery]);
 
   const loadVersionHistory = async (scriptId: string) => {
     try {
@@ -176,11 +174,6 @@ export default function ScriptLibPage({ embedded = false }: ScriptLibPageProps) 
     [categories],
   );
 
-  const langOptions = useMemo(
-    () => LANGUAGES.map((l) => ({ value: l.value, label: l.label })),
-    [],
-  );
-
   const riskOptions = useMemo(
     () => RISK_OPTION_KEYS.map((r) => ({ value: r.value, label: tText(r.labelKey) })),
     [tText],
@@ -203,14 +196,6 @@ export default function ScriptLibPage({ embedded = false }: ScriptLibPageProps) 
             allowClear
           />
         </div>
-        <Select
-          value={selectedLang}
-          onChange={(value) => setSelectedLang(value || null)}
-          className="sl-lang-select"
-          allowClear
-          placeholder={tText('scriptLib.language')}
-          options={langOptions}
-        />
         <span className="sl-count">
           {t('scriptLib.count', { filtered: filtered.length, total: scripts.length })}
         </span>

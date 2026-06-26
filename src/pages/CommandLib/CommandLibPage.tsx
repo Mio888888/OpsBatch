@@ -59,7 +59,6 @@ export default function CommandLibPage({ embedded = false }: CommandLibPageProps
   const { t, tText } = useTranslation();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [selectedKind, setSelectedKind] = useState<'all' | 'command' | 'docker'>('all');
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [form] = Form.useForm<CommandFormValues>();
 
@@ -82,8 +81,6 @@ export default function CommandLibPage({ embedded = false }: CommandLibPageProps
   const filtered = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return commands.filter((c) => {
-      const commandKind = c.kind ?? 'command';
-      if (selectedKind !== 'all' && commandKind !== selectedKind) return false;
       if (selectedCategory && c.category !== selectedCategory) return false;
       if (query) {
         return (
@@ -95,7 +92,7 @@ export default function CommandLibPage({ embedded = false }: CommandLibPageProps
       }
       return true;
     });
-  }, [commands, selectedKind, selectedCategory, searchQuery]);
+  }, [commands, selectedCategory, searchQuery]);
 
   const handleDelete = async (id: string) => {
     await deleteCommand(id);
@@ -174,12 +171,6 @@ export default function CommandLibPage({ embedded = false }: CommandLibPageProps
             allowClear
           />
         </div>
-        <Select
-          value={selectedKind}
-          onChange={(value) => setSelectedKind(value as 'all' | 'command' | 'docker')}
-          options={KIND_OPTIONS.map((option) => ({ value: option.value, label: option.label }))}
-          className="clib-kind-select"
-        />
         <span className="clib-count">
           {t('commandLib.count', { filtered: filtered.length, total: commands.length })}
         </span>

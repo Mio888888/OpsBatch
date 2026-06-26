@@ -36,11 +36,6 @@
   width: 100%;
 }
 
-.clib-kind-select {
-  width: 110px;
-  flex-shrink: 0;
-}
-
 .clib-count {
   margin-left: auto;
   color: var(--color-text-muted);

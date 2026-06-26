@@ -271,14 +271,15 @@ fn log_startup_repo_update_summary(app: &AppHandle, results: &[StartupUpdateResu
     crate::commands::app_log::emit_log(app, level, "repo-sync", &message, "backend");
 }
 
-#[tauri::command]
-pub fn pull_repo(
-    app: AppHandle,
-    db: tauri::State<'_, Database>,
+/// 同步仓库的阻塞主体：执行 git clone/fetch 并扫描入库。
+/// 在调用方线程（spawn_blocking）内同步运行，不跨 await，避免阻塞主线程。
+fn pull_repo_blocking(
+    pool: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+    app_handle: AppHandle,
     repo_id: String,
     language: Option<String>,
 ) -> Result<PullResult, String> {
-    let conn = db.pool.get().map_err(|e| e.to_string())?;
+    let conn = pool.get().map_err(|e| e.to_string())?;
     let (url, branch, token): (String, String, Option<String>) = conn
         .query_row(
             "SELECT url, branch, token FROM github_repos WHERE id=?1",
@@ -290,7 +291,7 @@ pub fn pull_repo(
 
     let sync_language = LibraryLanguage::from_app_language(language.as_deref());
 
-    let app_data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let app_data_dir = app_handle.path().app_data_dir().map_err(|e| e.to_string())?;
     let repos_dir = app_data_dir.join("repos");
     std::fs::create_dir_all(&repos_dir).ok();
 
@@ -402,7 +403,7 @@ pub fn pull_repo(
 
     // Sync commands and scripts from the cloned repo + update last_pulled_at
     {
-        let conn2 = db.pool.get().map_err(|e| e.to_string())?;
+        let conn2 = pool.get().map_err(|e| e.to_string())?;
         sync_library_from_repo(&conn2, &repo_id, &local_path, sync_language, &mut result);
         conn2
             .execute(
@@ -413,6 +414,21 @@ pub fn pull_repo(
     }
 
     Ok(result)
+}
+
+#[tauri::command]
+pub async fn pull_repo(
+    app: AppHandle,
+    db: tauri::State<'_, Database>,
+    repo_id: String,
+    language: Option<String>,
+) -> Result<PullResult, String> {
+    // 克隆连接池与 AppHandle 后，在阻塞线程内运行 git/文件/DB 操作，
+    // 避免在主线程执行导致前端 webview 卡死。
+    let pool = db.pool.clone();
+    tokio::task::spawn_blocking(move || pull_repo_blocking(pool, app, repo_id, language))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 fn md5_hash(data: &[u8]) -> u64 {
@@ -608,6 +624,66 @@ mod git_cli_tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
 
+    // --- parse_yaml_to_json unit tests -------------------------------------
+
+    #[test]
+    fn parse_yaml_supports_strip_chomping_indicator_for_command_block() {
+        let yaml = "\
+name: \"校验 Compose 配置\"
+command: |-
+  docker compose -f ${COMPOSE_FILE} config
+";
+        let parsed = parse_yaml_to_json(yaml);
+        assert_eq!(
+            parsed.get("command").and_then(|v| v.as_str()).unwrap(),
+            "docker compose -f ${COMPOSE_FILE} config",
+            "command body should be parsed for |- block scalar"
+        );
+    }
+
+    #[test]
+    fn parse_yaml_strips_surrounding_quotes_from_simple_scalars() {
+        let yaml = "\
+name: \"校验 Compose 配置\"
+description: '解析并输出最终生效的配置'
+";
+        let parsed = parse_yaml_to_json(yaml);
+        assert_eq!(
+            parsed.get("name").and_then(|v| v.as_str()).unwrap(),
+            "校验 Compose 配置",
+            "double-quoted scalar should have its quotes stripped"
+        );
+        assert_eq!(
+            parsed.get("description").and_then(|v| v.as_str()).unwrap(),
+            "解析并输出最终生效的配置",
+            "single-quoted scalar should have its quotes stripped"
+        );
+    }
+
+    #[test]
+    fn parse_yaml_supports_folded_and_keep_block_scalar_headers() {
+        // All block-scalar headers (`>`, `>-`, `>+`, `|`, `|-`, `|+`) must be
+        // recognized rather than imported as literal garbage. Trailing blank
+        // lines are stripped uniformly — command bodies never rely on them.
+        let yaml = "\
+note: >
+  folded body
+command: |+
+  keep trailing
+";
+        let parsed = parse_yaml_to_json(yaml);
+        assert_eq!(
+            parsed.get("note").and_then(|v| v.as_str()).unwrap(),
+            "folded body",
+            "> folded block scalar header should be parsed"
+        );
+        assert_eq!(
+            parsed.get("command").and_then(|v| v.as_str()).unwrap(),
+            "keep trailing",
+            "|+ keep block scalar header should be parsed without trailing blanks"
+        );
+    }
+
     fn create_repo_sync_test_tables(conn: &rusqlite::Connection) {
         conn.execute_batch(
             "
@@ -665,6 +741,41 @@ mod git_cli_tests {
 // YAML / JSON helpers for repo library parsing
 // ---------------------------------------------------------------------------
 
+/// Recognize a YAML block-scalar header (`|` or `>`), optionally followed by a
+/// chomping indicator (`-` / `+`) and/or an explicit indentation digit (e.g.
+/// `|-`, `|+`, `|2`, `>-2`). Returns `Some(())` when `rest` is such a header,
+/// `None` otherwise. The digit only disambiguates indentation (inferred from
+/// the first content line's leading whitespace) and is otherwise ignored, as is
+/// the distinction between strip/keep/clip — command bodies never rely on
+/// trailing blank lines.
+fn block_scalar_header(rest: &str) -> Option<()> {
+    let mut chars = rest.chars();
+    let style = chars.next()?;
+    if style != '|' && style != '>' {
+        return None;
+    }
+    // Remaining characters must only be chomping indicators and digits.
+    for ch in chars {
+        match ch {
+            '-' | '+' => {}
+            c if c.is_ascii_digit() => {}
+            _ => return None,
+        }
+    }
+    Some(())
+}
+
+/// Strip a single layer of surrounding double or single quotes from a scalar
+/// value. Mirrors the inline unquoting already applied to list-item values so
+/// `name: "foo"` parses to `foo`, not `"foo"`.
+fn unquote_scalar(value: &str) -> &str {
+    value
+        .strip_prefix('"')
+        .and_then(|v| v.strip_suffix('"'))
+        .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+        .unwrap_or(value)
+}
+
 /// Simple YAML parser for command files with predictable structure.
 /// Handles: `key: value`, `key: |` (literal block), `key:` followed by `  - item`,
 /// and `key:` followed by `  - name: val\n    desc: val` (sequence of objects).
@@ -692,8 +803,11 @@ fn parse_yaml_to_json(content: &str) -> serde_json::Value {
             let key = line[..colon_pos].to_string();
             let rest = line[colon_pos + 1..].trim();
 
-            if rest == "|" {
-                // Literal block scalar — collect indented lines
+            if block_scalar_header(rest).is_some() {
+                // Literal (`|`) or folded (`>`) block scalar, optionally with a
+                // chomping indicator (`-` / `+`) and/or an explicit indentation
+                // digit (e.g. `|-`, `|+`, `|2`, `>-`). Trailing blank lines are
+                // stripped uniformly — command bodies never rely on them.
                 i += 1;
                 let mut block = Vec::new();
                 while i < lines.len() {
@@ -743,10 +857,7 @@ fn parse_yaml_to_json(content: &str) -> serde_json::Value {
                             let obj_key = &after_dash[..obj_colon];
                             let obj_val = after_dash[obj_colon + 2..].trim();
                             // Strip surrounding quotes
-                            let obj_val_unquoted = obj_val
-                                .strip_prefix('"')
-                                .and_then(|v| v.strip_suffix('"'))
-                                .unwrap_or(obj_val);
+                            let obj_val_unquoted = unquote_scalar(obj_val);
                             obj.insert(
                                 obj_key.to_string(),
                                 Value::String(obj_val_unquoted.to_string()),
@@ -771,10 +882,7 @@ fn parse_yaml_to_json(content: &str) -> serde_json::Value {
                                 if let Some(cpos) = cont_trimmed.find(": ") {
                                     let ck = cont_trimmed[..cpos].to_string();
                                     let cv = cont_trimmed[cpos + 2..].trim();
-                                    let cv_unquoted = cv
-                                        .strip_prefix('"')
-                                        .and_then(|v| v.strip_suffix('"'))
-                                        .unwrap_or(cv);
+                                    let cv_unquoted = unquote_scalar(cv);
                                     obj.insert(ck, Value::String(cv_unquoted.to_string()));
                                 }
                                 i += 1;
@@ -797,7 +905,7 @@ fn parse_yaml_to_json(content: &str) -> serde_json::Value {
                 continue;
             } else {
                 // Simple scalar
-                map.insert(key, Value::String(rest.to_string()));
+                map.insert(key, Value::String(unquote_scalar(rest).to_string()));
                 i += 1;
                 continue;
             }
@@ -1488,7 +1596,8 @@ fn sync_library_from_repo(
         );
     }
 
-    let docker_dir = repo_path.join("docker");
+    // OpsBatch-Library 仓库的 Docker 命令位于 docker-commands/ 目录
+    let docker_dir = repo_path.join("docker-commands");
     if docker_dir.exists() {
         import_commands_recursive(
             conn,
@@ -1547,12 +1656,12 @@ pub struct StartupUpdateResult {
 }
 
 /// Pull all enabled repos that are configured to update when OpsBatch starts.
-pub fn update_startup_repos(
+pub async fn update_startup_repos(
     app: AppHandle,
-    db: tauri::State<'_, Database>,
+    pool: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
 ) -> Result<Vec<StartupUpdateResult>, String> {
     let repos: Vec<(String, String)> = {
-        let conn = db.pool.get().map_err(|e| e.to_string())?;
+        let conn = pool.get().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare("SELECT id, url FROM github_repos WHERE enabled=1 AND update_on_startup=1")
             .map_err(|e| e.to_string())?;
@@ -1567,18 +1676,24 @@ pub fn update_startup_repos(
 
     let mut results = Vec::new();
     let language = {
-        let conn = db.pool.get().map_err(|e| e.to_string())?;
+        let conn = pool.get().map_err(|e| e.to_string())?;
         repo_sync_library_language(&conn)
     };
 
     for (repo_id, url) in &repos {
-        match pull_repo(
-            app.clone(),
-            db.clone(),
-            repo_id.clone(),
-            Some(language.app_language().to_string()),
-        ) {
-            Ok(_pull_result) => {
+        // 逐仓库在阻塞线程内同步，避免阻塞主线程；各仓库间串行执行。
+        let app_clone = app.clone();
+        let repo_id_clone = repo_id.clone();
+        let language_value = Some(language.app_language().to_string());
+        let pool_clone = pool.clone();
+        let pull_result = tokio::task::spawn_blocking(move || {
+            pull_repo_blocking(pool_clone, app_clone, repo_id_clone, language_value)
+        })
+        .await
+        .map_err(|e| e.to_string());
+
+        match pull_result {
+            Ok(Ok(_pull_result)) => {
                 results.push(StartupUpdateResult {
                     repo_id: repo_id.clone(),
                     url: url.clone(),
@@ -1586,11 +1701,17 @@ pub fn update_startup_repos(
                     message: "同步成功".to_string(),
                 });
             }
-            Err(e) => results.push(StartupUpdateResult {
+            Ok(Err(e)) => results.push(StartupUpdateResult {
                 repo_id: repo_id.clone(),
                 url: url.clone(),
                 pulled: false,
                 message: format!("同步失败: {}", e),
+            }),
+            Err(e) => results.push(StartupUpdateResult {
+                repo_id: repo_id.clone(),
+                url: url.clone(),
+                pulled: false,
+                message: format!("同步任务异常: {}", e),
             }),
         }
     }
@@ -1599,11 +1720,12 @@ pub fn update_startup_repos(
 }
 
 #[tauri::command]
-pub fn run_startup_repo_updates(
+pub async fn run_startup_repo_updates(
     app: AppHandle,
     db: tauri::State<'_, Database>,
 ) -> Result<Vec<StartupUpdateResult>, String> {
-    let results = update_startup_repos(app.clone(), db)?;
+    let pool = db.pool.clone();
+    let results = update_startup_repos(app.clone(), pool).await?;
     log_startup_repo_update_summary(&app, &results);
     Ok(results)
 }

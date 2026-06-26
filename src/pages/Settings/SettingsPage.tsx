@@ -1008,70 +1008,143 @@ export default function SettingsPage() {
         return <AppearanceSection />;
       case 'ai':
         return (
-          <Form form={aiForm} layout="vertical" className="settings-section-form" style={{ maxWidth: 600 }}>
-            {/* Row 1: Enabled + Provider */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, alignItems: 'end' }}>
-              <Form.Item name="enabled" label={t('settings.aiEnabled')} valuePropName="checked">
-                <Switch />
-              </Form.Item>
-              <Form.Item name="provider" label={t('settings.aiProvider')}>
-                <Select options={[
-                  { value: 'openai', label: 'OpenAI' },
-                  { value: 'ollama', label: t('settings.ollamaLocal') },
-                  { value: 'custom', label: t('settings.customApi') },
-                ]} onChange={handleAiProviderChange} />
-              </Form.Item>
-            </div>
-
-            {/* Provider hint */}
-            <div className="settings-ai-hint">{t(providerDefaults.descriptionKey)}</div>
-
-            {/* Row 2: API URL + Key */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <Form.Item name="api_url" label={t('settings.apiUrl')} rules={[{ required: true, message: tText('settings.aiMissingApiUrl') }]}>
-                <Input placeholder={providerDefaults.apiUrl || 'https://api.example.com/v1'} onBlur={(e) => aiForm.setFieldValue('api_url', normalizeApiUrl(e.target.value))} />
-              </Form.Item>
-              {providerDefaults.requiresKey ? (
-                <Form.Item name="api_key" label="API Key" rules={[{ required: true, message: tText('settings.apiKeyRequired') }]}>
-                  <Input.Password placeholder="sk-..." />
-                </Form.Item>
-              ) : (
-                <Form.Item label="API Key">
-                  <Input disabled placeholder={tText('settings.apiKeyNotRequired')} />
-                </Form.Item>
-              )}
-            </div>
-
-            {/* Row 3: Model + Fetch */}
-            <Form.Item name="model" label={t('settings.model')}>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <Select options={modelOptions} onChange={handleAiModelChange} style={{ flex: 1 }} />
-                <Button icon={<SyncOutlined spin={fetchingModels} />} onClick={handleFetchModels} loading={fetchingModels} title={tText('settings.fetchModelsTitle')}>
-                  {t('settings.fetchModels')}
-                </Button>
+          <Form form={aiForm} layout="vertical" className="settings-general-form settings-ai-form">
+            {/* 卡片一：启用与提供商 */}
+            <div className="settings-general-group">
+              <div className="settings-general-group-head">
+                <h3>{t('settings.aiGroupProvider')}</h3>
+                <p>{t('settings.aiGroupProviderDesc')}</p>
               </div>
-            </Form.Item>
-            {aiModel === 'custom' && (
-              <Form.Item label={t('settings.customModelName')}>
-                <Input
-                  value={customModel}
-                  onChange={(e) => setCustomModel(e.target.value)}
-                  placeholder={tText('settings.customModelPlaceholder')}
-                />
-              </Form.Item>
-            )}
-
-            {/* Summary */}
-            <div style={{ display: 'flex', gap: 16, marginBottom: 16, fontSize: 12, color: 'var(--color-text-muted)' }}>
-              <span>{t('settings.currentModel')}<strong style={{ color: 'var(--color-text)' }}>{selectedModelLabel}</strong></span>
-              <span>{t('settings.auth')}{providerDefaults.requiresKey ? 'Bearer API Key' : t('settings.apiKeyNotRequired')}</span>
+              <div className="settings-general-rows">
+                <div className="settings-general-row">
+                  <div className="settings-general-row-copy">
+                    <span className="settings-general-row-title">{t('settings.aiEnabled')}</span>
+                  </div>
+                  <Form.Item name="enabled" valuePropName="checked" noStyle>
+                    <Switch />
+                  </Form.Item>
+                </div>
+                <div className="settings-general-row">
+                  <div className="settings-general-row-copy">
+                    <span className="settings-general-row-title">{t('settings.aiProvider')}</span>
+                  </div>
+                  <Form.Item name="provider" noStyle>
+                    <Select
+                      className="settings-general-control settings-ai-provider-select"
+                      options={[
+                        { value: 'openai', label: 'OpenAI' },
+                        { value: 'ollama', label: t('settings.ollamaLocal') },
+                        { value: 'custom', label: t('settings.customApi') },
+                      ]}
+                      onChange={handleAiProviderChange}
+                    />
+                  </Form.Item>
+                </div>
+              </div>
+              <div className="settings-ai-hint">{t(providerDefaults.descriptionKey)}</div>
+              <div className="settings-general-rows">
+                <div className="settings-general-row settings-ai-cred-row">
+                  <div className="settings-general-row-copy">
+                    <span className="settings-general-row-title">{t('settings.apiUrl')}</span>
+                    <span className="settings-general-row-desc">{t('settings.aiGroupCredDesc')}</span>
+                  </div>
+                  <Form.Item name="api_url" rules={[{ required: true, message: tText('settings.aiMissingApiUrl') }]} noStyle>
+                    <Input
+                      className="settings-ai-cred-input"
+                      placeholder={providerDefaults.apiUrl || 'https://api.example.com/v1'}
+                      onBlur={(e) => aiForm.setFieldValue('api_url', normalizeApiUrl(e.target.value))}
+                    />
+                  </Form.Item>
+                </div>
+                <div className="settings-general-row settings-ai-cred-row">
+                  <div className="settings-general-row-copy">
+                    <span className="settings-general-row-title">API Key</span>
+                  </div>
+                  {providerDefaults.requiresKey ? (
+                    <Form.Item name="api_key" rules={[{ required: true, message: tText('settings.apiKeyRequired') }]} noStyle>
+                      <Input.Password className="settings-ai-cred-input" placeholder="sk-..." />
+                    </Form.Item>
+                  ) : (
+                    <Input className="settings-ai-cred-input" disabled placeholder={tText('settings.apiKeyNotRequired')} />
+                  )}
+                </div>
+              </div>
             </div>
 
-            {/* Actions */}
-            <Space>
-              <Button type="primary" icon={<SaveOutlined />} onClick={handleSaveAi}>{t('common.saveSettings')}</Button>
-              <Button loading={testing} onClick={handleTestAi}>{t('settings.testConnection')}</Button>
-            </Space>
+            {/* 卡片二：模型与验证 */}
+            <div className="settings-general-group">
+              <div className="settings-general-group-head">
+                <h3>{t('settings.aiGroupModel')}</h3>
+                <p>{t('settings.aiGroupModelDesc')}</p>
+              </div>
+
+              {/* 子区块 A：模型选择 */}
+              <div className="settings-ai-subsection">
+                <div className="settings-general-rows">
+                  <div className="settings-general-row settings-ai-model-row">
+                    <div className="settings-general-row-copy">
+                      <span className="settings-general-row-title">{t('settings.model')}</span>
+                      <span className="settings-general-row-desc">{t('settings.aiModelFetchDesc')}</span>
+                    </div>
+                    <div className="settings-ai-model-control">
+                      <Form.Item name="model" noStyle>
+                        <Select options={modelOptions} onChange={handleAiModelChange} />
+                      </Form.Item>
+                      <Button
+                        icon={<SyncOutlined spin={fetchingModels} />}
+                        onClick={handleFetchModels}
+                        loading={fetchingModels}
+                        title={tText('settings.fetchModelsTitle')}
+                      >
+                        {t('settings.fetchModels')}
+                      </Button>
+                    </div>
+                  </div>
+                  {aiModel === 'custom' && (
+                    <div className="settings-general-row settings-ai-cred-row">
+                      <div className="settings-general-row-copy">
+                        <span className="settings-general-row-title">{t('settings.customModelName')}</span>
+                      </div>
+                      <Input
+                        className="settings-ai-cred-input"
+                        value={customModel}
+                        onChange={(e) => setCustomModel(e.target.value)}
+                        placeholder={tText('settings.customModelPlaceholder')}
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* 测试连通性：紧邻模型选择，验证当前所选模型 */}
+                <div className="settings-ai-subsection-actions">
+                  <Button
+                    icon={<ThunderboltOutlined />}
+                    loading={testing}
+                    onClick={handleTestAi}
+                  >
+                    {t('settings.testConnection')}
+                  </Button>
+                </div>
+              </div>
+
+              {/* 子区块 B：状态摘要 + 主操作 */}
+              <div className="settings-ai-subsection">
+                <div className="settings-ai-summary">
+                  <span className="settings-ai-summary-item">
+                    <span className="settings-ai-summary-label">{t('settings.currentModel')}</span>
+                    <strong className="settings-ai-summary-value">{selectedModelLabel}</strong>
+                  </span>
+                  <span className="settings-ai-summary-item">
+                    <span className="settings-ai-summary-label">{t('settings.auth')}</span>
+                    <span className="settings-ai-summary-value">{providerDefaults.requiresKey ? 'Bearer API Key' : tText('settings.apiKeyNotRequired')}</span>
+                  </span>
+                </div>
+
+                <div className="settings-general-actions">
+                  <Button type="primary" icon={<SaveOutlined />} onClick={handleSaveAi}>{t('common.saveSettings')}</Button>
+                </div>
+              </div>
+            </div>
           </Form>
         );
       case 'danger':

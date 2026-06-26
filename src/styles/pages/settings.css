@@ -163,14 +163,13 @@
   max-width: 520px;
 }
 
-.settings-ai-hint,
-.settings-ai-summary {
-  margin: -6px 0 14px;
-  padding: 10px 12px;
+.settings-ai-hint {
+  margin: 4px 0 0;
+  padding: 8px 12px;
   color: var(--color-text-secondary);
-  background: rgba(22, 119, 255, 0.06);
-  border: 1px solid rgba(22, 119, 255, 0.12);
-  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-primary) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-primary) 12%, transparent);
+  border-radius: 8px;
   font-size: var(--font-size-small);
   line-height: var(--line-height-copy);
 }
@@ -178,11 +177,31 @@
 .settings-ai-summary {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 16px;
-  margin-top: 0;
+  gap: 6px 20px;
+  margin: 2px 0 0;
+  padding: 10px 12px;
   color: var(--color-text);
-  background: rgba(38, 48, 68, 0.04);
-  border-color: var(--color-settings-border);
+  background: color-mix(in srgb, var(--color-text-muted) 4%, transparent);
+  border: 1px solid var(--color-settings-border);
+  border-radius: 8px;
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-copy);
+}
+
+.settings-ai-summary-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.settings-ai-summary-label {
+  color: var(--color-text-muted);
+}
+
+.settings-ai-summary-value {
+  color: var(--color-text);
+  font-weight: var(--font-weight-semibold);
 }
 
 .settings-resource-list {
@@ -602,6 +621,82 @@
 }
 
 .settings-general-actions {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 2px;
+}
+
+/* ===== AI section: 紧凑卡片化布局，复用 settings-general-* 节奏 ===== */
+.settings-ai-form {
+  /* 在 settings-general-form 基础上无需额外调整 */
+}
+
+/* 提供商下拉：紧凑宽度，右对齐 */
+.settings-ai-provider-select {
+  width: 160px;
+}
+
+/* 凭证行（API 地址 / API Key / 自定义模型）：标签与输入框各占一行，
+   输入框占满宽度，比 label-control 紧凑行更适合长文本 */
+.settings-ai-cred-row {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  padding: 8px 0;
+}
+
+.settings-ai-cred-row .settings-general-row-copy {
+  width: 100%;
+}
+
+.settings-ai-cred-input {
+  width: 100%;
+}
+
+/* 模型行：标签 + 右侧「下拉 + 拉取按钮」组合 */
+.settings-ai-model-row {
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.settings-ai-model-control {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+  gap: 8px;
+}
+
+.settings-ai-model-control .ui-select {
+  width: 200px;
+  flex-shrink: 0;
+}
+
+.settings-ai-model-control .ui-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* 子区块：用轻量背景与内边距把「模型选择」与「状态摘要/主操作」分隔开 */
+.settings-ai-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--color-text-muted) 3%, transparent);
+  border: 1px solid var(--color-settings-border);
+  border-radius: var(--radius-lg);
+}
+
+/* 子区块内的行去掉各自的分隔顶线，避免与背景边框重复 */
+.settings-ai-subsection .settings-general-row {
+  border-top: 0;
+}
+
+/* 子区块操作区（测试连通性）：右对齐，与上方模型选择贴近 */
+.settings-ai-subsection-actions {
   display: flex;
   justify-content: flex-end;
   padding-top: 2px;

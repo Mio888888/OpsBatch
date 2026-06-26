@@ -3,6 +3,7 @@ import {
   AlertTriangle,
   Archive,
   Bot,
+  Boxes,
   CheckCircle,
   ChevronDown,
   ChevronUp,
@@ -50,6 +51,7 @@ function icon(Component: typeof Activity) {
 }
 
 export const BotOutlined = icon(Bot);
+export const BoxesOutlined = icon(Boxes);
 export const ApartmentOutlined = icon(Archive);
 export const CheckCircleOutlined = icon(CheckCircle);
 export const ChevronDownOutlined = icon(ChevronDown);

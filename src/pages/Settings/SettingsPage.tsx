@@ -12,7 +12,7 @@ import {
   SaveOutlined, DatabaseOutlined, PlusOutlined, DeleteOutlined,
   SyncOutlined,
   GeneralOutlined, AppearanceOutlined, ThunderboltOutlined,
-  CodeOutlined, ProfileOutlined, BotOutlined, WarningOutlined,
+  CodeOutlined, BoxesOutlined, ProfileOutlined, BotOutlined, WarningOutlined,
 } from '../../components/ui/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
@@ -78,6 +78,7 @@ const settingsSections: SettingsSection[] = [
   { key: 'appearance', labelKey: 'settings.sections.appearance', descriptionKey: 'settings.sections.appearanceDesc', Icon: AppearanceOutlined },
   { key: 'quickActions', labelKey: 'settings.sections.quickActions', descriptionKey: 'settings.sections.quickActionsDesc', Icon: ThunderboltOutlined },
   { key: 'commandLib', labelKey: 'settings.sections.commandLib', descriptionKey: 'settings.sections.commandLibDesc', Icon: CodeOutlined },
+  { key: 'dockerLib', labelKey: 'settings.sections.dockerLib', descriptionKey: 'settings.sections.dockerLibDesc', Icon: BoxesOutlined },
   { key: 'scriptLib', labelKey: 'settings.sections.scriptLib', descriptionKey: 'settings.sections.scriptLibDesc', Icon: ProfileOutlined },
   { key: 'ai', labelKey: 'settings.sections.ai', descriptionKey: 'settings.sections.aiDesc', Icon: BotOutlined },
   { key: 'danger', labelKey: 'settings.sections.danger', descriptionKey: 'settings.sections.dangerDesc', Icon: WarningOutlined },
@@ -1216,6 +1217,12 @@ export default function SettingsPage() {
         return (
           <Suspense fallback={<div style={{ padding: 24, color: 'var(--color-text-muted)' }}>{t('common.loadingShort')}</div>}>
             <CommandLibPage embedded />
+          </Suspense>
+        );
+      case 'dockerLib':
+        return (
+          <Suspense fallback={<div style={{ padding: 24, color: 'var(--color-text-muted)' }}>{t('common.loadingShort')}</div>}>
+            <CommandLibPage embedded dockerOnly />
           </Suspense>
         );
       case 'scriptLib':

@@ -52,9 +52,11 @@ interface CommandFormValues extends Omit<CommandEntry, 'id' | 'starred' | 'isBui
 interface CommandLibPageProps {
   /** 嵌入设置面板时使用，隐藏外层标题并去掉卡片边框 */
   embedded?: boolean;
+  /** 仅显示 Docker 命令（设置页 Docker 库入口使用） */
+  dockerOnly?: boolean;
 }
 
-export default function CommandLibPage({ embedded = false }: CommandLibPageProps) {
+export default function CommandLibPage({ embedded = false, dockerOnly = false }: CommandLibPageProps) {
   const { commands, loadCommands, addCommand, deleteCommand, addQuickAction } = useLibraryStore();
   const { t, tText } = useTranslation();
   const [searchQuery, setSearchQuery] = useState('');
@@ -66,21 +68,31 @@ export default function CommandLibPage({ embedded = false }: CommandLibPageProps
     loadCommands();
   }, [loadCommands]);
 
-  // 按类目聚合计数，供左侧导航显示
+  // 按类目聚合计数，供左侧导航显示（与列表保持同一套命令来源）
   const categoryCounts = useMemo(() => {
     const map = new Map<string, number>();
     for (const command of commands) {
+      if (dockerOnly !== (command.kind === 'docker')) continue;
       const category = command.category.trim();
       if (category) map.set(category, (map.get(category) ?? 0) + 1);
     }
     return map;
-  }, [commands]);
+  }, [commands, dockerOnly]);
 
   const categories = useMemo(() => Array.from(categoryCounts.keys()).sort(), [categoryCounts]);
+
+  // 当前类型的命令总数（用于左侧「全部」计数与标题统计）
+  const scopedTotal = useMemo(
+    () => commands.filter((c) => dockerOnly === (c.kind === 'docker')).length,
+    [commands, dockerOnly],
+  );
 
   const filtered = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     return commands.filter((c) => {
+      // dockerOnly 与命令库平级：各管各的命令，互不重叠
+      const isDocker = c.kind === 'docker';
+      if (dockerOnly !== isDocker) return false;
       if (selectedCategory && c.category !== selectedCategory) return false;
       if (query) {
         return (
@@ -92,7 +104,7 @@ export default function CommandLibPage({ embedded = false }: CommandLibPageProps
       }
       return true;
     });
-  }, [commands, selectedCategory, searchQuery]);
+  }, [commands, selectedCategory, searchQuery, dockerOnly]);
 
   const handleDelete = async (id: string) => {
     await deleteCommand(id);
@@ -122,7 +134,7 @@ export default function CommandLibPage({ embedded = false }: CommandLibPageProps
       const values = await form.validateFields();
       await addCommand({
         ...values,
-        kind: values.kind || 'command',
+        kind: dockerOnly ? 'docker' : values.kind || 'command',
         url: values.url || '',
         tags: values.tags || [],
         parameters: values.parameters || [],
@@ -161,10 +173,10 @@ export default function CommandLibPage({ embedded = false }: CommandLibPageProps
     <div className={`clib${embedded ? ' clib-embedded' : ''}`}>
       {/* 顶部：标题 / 搜索 / 操作 */}
       <div className="clib-topbar">
-        {!embedded && <h2 className="clib-title">{t('commandLib.title')}</h2>}
+        {!embedded && <h2 className="clib-title">{t(dockerOnly ? 'dockerLib.title' : 'commandLib.title')}</h2>}
         <div className="clib-search">
           <Input
-            placeholder={tText('commandLib.searchPlaceholder')}
+            placeholder={tText(dockerOnly ? 'dockerLib.searchPlaceholder' : 'commandLib.searchPlaceholder')}
             prefix={<SearchOutlined />}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -172,10 +184,10 @@ export default function CommandLibPage({ embedded = false }: CommandLibPageProps
           />
         </div>
         <span className="clib-count">
-          {t('commandLib.count', { filtered: filtered.length, total: commands.length })}
+          {t('commandLib.count', { filtered: filtered.length, total: scopedTotal })}
         </span>
         <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddModalOpen(true)}>
-          {t('commandLib.addCommand')}
+          {t(dockerOnly ? 'dockerLib.addCommand' : 'commandLib.addCommand')}
         </Button>
       </div>
 
@@ -188,7 +200,7 @@ export default function CommandLibPage({ embedded = false }: CommandLibPageProps
             onClick={() => setSelectedCategory(null)}
           >
             <span className="clib-cat-name">{t('library.category.all')}</span>
-            <span className="clib-cat-count">{commands.length}</span>
+            <span className="clib-cat-count">{scopedTotal}</span>
           </button>
           {categories.map((cat) => (
             <button
@@ -206,7 +218,7 @@ export default function CommandLibPage({ embedded = false }: CommandLibPageProps
 
         <div className="clib-list">
           {filtered.length === 0 ? (
-            <div className="clib-empty">{t('commandLib.noCommands')}</div>
+            <div className="clib-empty">{t(dockerOnly ? 'dockerLib.noCommands' : 'commandLib.noCommands')}</div>
           ) : (
             filtered.map((cmd) => {
               const isHighRisk = cmd.risk === 'high' || cmd.risk === 'critical';
@@ -216,7 +228,7 @@ export default function CommandLibPage({ embedded = false }: CommandLibPageProps
                     <div className="clib-row-head">
                       <CodeOutlined style={{ color: 'var(--color-text-muted)', opacity: 0.7 }} />
                       <span className="clib-row-name">{cmd.name}</span>
-                      {cmd.kind === 'docker' && (
+                      {cmd.kind === 'docker' && !dockerOnly && (
                         <Tag className="clib-row-tag clib-row-tag-docker">Docker</Tag>
                       )}
                       {cmd.url && (
@@ -303,9 +315,13 @@ export default function CommandLibPage({ embedded = false }: CommandLibPageProps
             <Form.Item name="name" label={tText('commandLib.commandName')} rules={[{ required: true, message: tText('commandLib.enterCommandName') }]}>
               <Input placeholder={tText('commandLib.commandNamePlaceholder')} />
             </Form.Item>
-            <Form.Item name="kind" label="类型" initialValue="command">
-              <Select options={KIND_OPTIONS.filter((option) => option.value !== 'all').map((option) => ({ value: option.value, label: option.label }))} />
-            </Form.Item>
+            {dockerOnly ? (
+              <div />
+            ) : (
+              <Form.Item name="kind" label="类型" initialValue="command">
+                <Select options={KIND_OPTIONS.filter((option) => option.value !== 'all').map((option) => ({ value: option.value, label: option.label }))} />
+              </Form.Item>
+            )}
           </div>
 
           <div className="clib-form-row">

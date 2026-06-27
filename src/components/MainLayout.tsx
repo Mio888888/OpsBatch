@@ -1114,18 +1114,22 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                             <span>{t('assets.proxySettings')}</span>
                             <small>{t('assets.proxySettingsExtra')}</small>
                           </div>
-                          <div className="asset-host-form-grid asset-host-form-grid-proxy">
-                            <Form.Item name="proxyEnabled" valuePropName="checked"><Switch /></Form.Item>
-                            <div className="asset-host-proxy-toggle-copy"><span>{t('assets.proxyEnabled')}</span><small>{t('assets.proxyEnabledExtra')}</small></div>
+                          <div className="asset-host-proxy-options">
+                            <Form.Item name="proxyEnabled" valuePropName="checked" className="asset-host-rdp-option"><Switch /></Form.Item>
+                            <div className="asset-host-rdp-option-copy"><span>{t('assets.proxyEnabled')}</span><small>{t('assets.proxyEnabledExtra')}</small></div>
                           </div>
                           {proxyEnabled && (
-                            <div className="asset-host-form-grid asset-host-form-grid-proxy-detail">
-                              <Form.Item name="proxyType" label={t('assets.proxyType')}><Select<ProxySettings['type']> options={[{ value: 'socks5', label: 'SOCKS5' }, { value: 'http', label: 'HTTP' }]} /></Form.Item>
-                              <Form.Item name="proxyHost" label={t('assets.proxyHost')}><Input placeholder={tText('assets.proxyHostPlaceholder')} /></Form.Item>
-                              <Form.Item name="proxyPort" label={t('assets.proxyPort')}><InputNumber min={1} max={65535} /></Form.Item>
-                              <Form.Item name="proxyUsername" label={t('assets.proxyUsername')}><Input placeholder={tText('assets.proxyUsernamePlaceholder')} /></Form.Item>
-                              <Form.Item name="proxyPassword" label={t('assets.proxyPassword')}><Input.Password placeholder={tText('assets.proxyPasswordPlaceholder')} /></Form.Item>
-                            </div>
+                            <>
+                              <div className="asset-host-form-grid asset-host-form-grid-proxy">
+                                <Form.Item name="proxyType" label={t('assets.proxyType')}><Select<ProxySettings['type']> options={[{ value: 'socks5', label: 'SOCKS5' }, { value: 'http', label: 'HTTP' }]} /></Form.Item>
+                                <Form.Item name="proxyHost" label={t('assets.proxyHost')}><Input placeholder={tText('assets.proxyHostPlaceholder')} /></Form.Item>
+                                <Form.Item name="proxyPort" label={t('assets.proxyPort')}><InputNumber min={1} max={65535} /></Form.Item>
+                              </div>
+                              <div className="asset-host-form-grid asset-host-form-grid-proxy-auth">
+                                <Form.Item name="proxyUsername" label={t('assets.proxyUsername')}><Input placeholder={tText('assets.proxyUsernamePlaceholder')} /></Form.Item>
+                                <Form.Item name="proxyPassword" label={t('assets.proxyPassword')}><Input.Password placeholder={tText('assets.proxyPasswordPlaceholder')} /></Form.Item>
+                              </div>
+                            </>
                           )}
                         </div>
                       );

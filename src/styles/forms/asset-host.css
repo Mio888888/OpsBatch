@@ -226,6 +226,14 @@
   border-top-color: var(--color-settings-border);
 }
 
+.asset-host-proxy-options {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px 12px;
+  align-items: center;
+  padding-top: 2px;
+}
+
 .asset-host-rdp-options {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

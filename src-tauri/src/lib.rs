@@ -9,7 +9,6 @@ use std::sync::Arc;
 use tauri::menu::MenuBuilder;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::webview::PageLoadEvent;
-#[cfg(debug_assertions)]
 use tauri::{AppHandle, Manager, WindowEvent};
 
 const TRAY_MENU_SHOW: &str = "tray-show";

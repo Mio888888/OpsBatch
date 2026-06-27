@@ -117,6 +117,24 @@
   grid-template-columns: minmax(0, 1fr) 96px 96px;
 }
 
+.asset-host-vnc-basic {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--color-primary) 5%, var(--color-surface));
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+[data-theme-tone="dark"] .asset-host-vnc-basic {
+  background: color-mix(in srgb, var(--color-primary) 8%, var(--color-settings-card-bg));
+  border-color: var(--color-settings-border);
+}
+
+.asset-host-form-grid-vnc {
+  grid-template-columns: 96px minmax(0, 1fr);
+}
+
 .asset-host-form-grid-proxy {
   grid-template-columns: 128px minmax(0, 1fr) 96px;
 }
@@ -277,6 +295,7 @@
   .asset-host-form-grid-auth,
   .asset-host-form-grid-meta,
   .asset-host-form-grid-rdp,
+  .asset-host-form-grid-vnc,
   .asset-host-form-grid-proxy,
   .asset-host-form-grid-proxy-auth {
     grid-template-columns: minmax(0, 1fr);

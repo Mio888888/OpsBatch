@@ -5,7 +5,7 @@ import {
 } from '../../components/ui';
 import {
   GithubOutlined, PlusOutlined, SyncOutlined, DeleteOutlined,
-  CheckCircleOutlined, DatabaseOutlined, HistoryOutlined,
+  CheckCircleOutlined, DatabaseOutlined, HistoryOutlined, CloseOutlined,
 } from '../../components/ui/icons';
 import { invoke } from '@tauri-apps/api/core';
 import { useTranslation } from '../../i18n';
@@ -234,53 +234,59 @@ export default function GitHubPage() {
             </div>
           )}
         </div>
-
-        {pullResult && pullStats && (
-          <aside className="repo-sync-result-panel">
-            <div className="repo-sync-result-header">
-              <div>
-                <span className="repo-sync-eyebrow">{t('repoSync.latestResult')}</span>
-                <h3>{t('repoSync.syncResult')}</h3>
-                <p>{pullStats.total > 0 ? t('repoSync.totalRecords', { count: pullStats.total }) : t('repoSync.noChanges')}</p>
-              </div>
-              <Tag className={`repo-sync-result-status-tag ${pullStats.errors > 0 ? 'repo-sync-result-status-error' : 'repo-sync-result-status-success'}`}>
-                {t(pullStats.errors > 0 ? 'repoSync.hasErrors' : 'repoSync.syncDone')}
-              </Tag>
-            </div>
-
-            <div className="repo-sync-result-stats">
-              {PULL_RESULT_SECTIONS.map((section) => (
-                <div key={section.key} className={`repo-sync-result-stat repo-sync-result-stat-${section.tone}`}>
-                  <span>{t(section.labelKey)}</span>
-                  <strong>{pullStats[section.key]}</strong>
-                </div>
-              ))}
-            </div>
-
-            <div className="repo-sync-result-list">
-              {PULL_RESULT_SECTIONS.flatMap((section) => (
-                pullResult[section.key].map((item, index) => (
-                  <div key={`${section.key}-${index}`} className={`repo-sync-result-item repo-sync-result-item-${section.tone}`}>
-                    <span>{section.prefix}</span>
-                    <code title={item}>{item}</code>
-                  </div>
-                ))
-              ))}
-              {pullStats.total === 0 && (
-                <div className="repo-sync-result-empty">
-                  <CheckCircleOutlined />
-                  <span>{t('repoSync.noFileChanges')}</span>
-                </div>
-              )}
-            </div>
-          </aside>
-        )}
       </main>
+
+      {pullResult && pullStats && (
+        <aside className="repo-sync-result-panel">
+          <div className="repo-sync-result-header">
+            <div>
+              <span className="repo-sync-eyebrow">{t('repoSync.latestResult')}</span>
+              <h3>{t('repoSync.syncResult')}</h3>
+              <p>{pullStats.total > 0 ? t('repoSync.totalRecords', { count: pullStats.total }) : t('repoSync.noChanges')}</p>
+            </div>
+            <Tag className={`repo-sync-result-status-tag ${pullStats.errors > 0 ? 'repo-sync-result-status-error' : 'repo-sync-result-status-success'}`}>
+              {t(pullStats.errors > 0 ? 'repoSync.hasErrors' : 'repoSync.syncDone')}
+            </Tag>
+          </div>
+
+          <div className="repo-sync-result-stats">
+            {PULL_RESULT_SECTIONS.map((section) => (
+              <div key={section.key} className={`repo-sync-result-stat repo-sync-result-stat-${section.tone}`}>
+                <span>{t(section.labelKey)}</span>
+                <strong>{pullStats[section.key]}</strong>
+              </div>
+            ))}
+          </div>
+
+          <div className="repo-sync-result-list">
+            {PULL_RESULT_SECTIONS.flatMap((section) => (
+              pullResult[section.key].map((item, index) => (
+                <div key={`${section.key}-${index}`} className={`repo-sync-result-item repo-sync-result-item-${section.tone}`}>
+                  <span>{section.prefix}</span>
+                  <code title={item}>{item}</code>
+                </div>
+              ))
+            ))}
+            {pullStats.total === 0 && (
+              <div className="repo-sync-result-empty">
+                <CheckCircleOutlined />
+                <span>{t('repoSync.noFileChanges')}</span>
+              </div>
+            )}
+          </div>
+
+          <div className="repo-sync-result-footer">
+            <Button icon={<CloseOutlined />} onClick={() => setPullResult(null)}>
+              {t('common.close')}
+            </Button>
+          </div>
+        </aside>
+      )}
 
       <Modal className="repo-sync-modal" title={tText('repoSync.addRepoModal')} open={modalOpen} onOk={handleAdd} onCancel={() => setModalOpen(false)} destroyOnHidden>
         <Form form={form} layout="vertical" className="repo-sync-form">
           <Form.Item name="url" label={tText('repoSync.repoUrl')} rules={[{ required: true, message: tText('repoSync.repoUrlRequired') }]}>
-            <Input placeholder="https://github.com/xxx/ops-library" />
+            <Input placeholder="https://github.com/Mio888888/OpsBatch-Library" />
           </Form.Item>
           <Form.Item name="branch" label={tText('repoSync.branch')} initialValue="main">
             <Input placeholder="main" />

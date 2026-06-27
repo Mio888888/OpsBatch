@@ -17,6 +17,7 @@ import {
 } from './vncProtocol';
 import { createVncClipboardBridge } from './vncClipboard';
 import '../../styles/pages/rdp.css';
+import '../../styles/terminal/terminal.css';
 
 interface VncConnectResponse {
   sessionId: string;
@@ -631,7 +632,7 @@ export default function VncPage() {
         </div>
       </header>
       <div
-        className="rdp-stage"
+        className={`rdp-stage${showConnecting || showError ? ' rdp-stage-state' : ''}`}
         tabIndex={0}
         role="application"
         aria-label={tText('vnc.canvasAria', { name: host.name })}
@@ -639,51 +640,47 @@ export default function VncPage() {
       >
         <div
           ref={screenRef}
-          className="rdp-canvas rdp-vnc-screen"
+          className={`rdp-canvas rdp-vnc-screen${showConnecting || showError ? ' rdp-render-hidden' : ''}`}
           style={{
             width: `${defaultResolution.width}px`,
             height: `${defaultResolution.height}px`,
           }}
         />
         {showConnecting ? (
-          <div className="rdp-terminal-state-overlay">
-            <div className="terminal-page-state-shell">
-              <section className="terminal-state-card" aria-live="polite">
-                <div className="terminal-state-card-header">
-                  <span className="terminal-status-light terminal-status-light-connecting" aria-hidden="true" />
-                  <span>{t('vnc.connectingTitle')}</span>
+          <div className="terminal-page-state-shell">
+            <section className="terminal-state-card" aria-live="polite">
+              <div className="terminal-state-card-header">
+                <span className="terminal-status-light terminal-status-light-connecting" aria-hidden="true" />
+                <span>{t('vnc.connectingTitle')}</span>
+              </div>
+              <div className="terminal-state-card-body">
+                <Spin size="small" />
+                <div>
+                  <div className="terminal-state-title">{t('vnc.connectTo', { target: targetLabel })}</div>
+                  <div className="terminal-state-subtitle">{t('vnc.connectingSubtitle')}</div>
                 </div>
-                <div className="terminal-state-card-body">
-                  <Spin size="small" />
-                  <div>
-                    <div className="terminal-state-title">{t('vnc.connectTo', { target: targetLabel })}</div>
-                    <div className="terminal-state-subtitle">{t('vnc.connectingSubtitle')}</div>
-                  </div>
-                </div>
-                <div className="terminal-state-command" aria-hidden="true">
-                  <span>$</span>
-                  <span className="terminal-state-command-text">opsbatch vnc connect --target {targetLabel}</span>
-                </div>
-              </section>
-            </div>
+              </div>
+              <div className="terminal-state-command" aria-hidden="true">
+                <span>$</span>
+                <span className="terminal-state-command-text">opsbatch vnc connect --target {targetLabel}</span>
+              </div>
+            </section>
           </div>
         ) : null}
         {showError ? (
-          <div className="rdp-terminal-state-overlay">
-            <div className="terminal-page-state-shell">
-              <section className="terminal-state-card terminal-state-card-error" role="alert">
-                <div className="terminal-state-card-header">
-                  <span className="terminal-status-light terminal-status-light-error" aria-hidden="true" />
-                  <span>{t('vnc.connectFailed')}</span>
-                </div>
-                <div className="terminal-state-title">{t('vnc.sessionStartFailed')}</div>
-                <p className="terminal-state-subtitle">{statusMessage || t('vnc.errorFallback')}</p>
-                <div className="terminal-state-actions">
-                  <Button type="primary" onClick={reconnectVncSession}>{t('vnc.reconnect')}</Button>
-                  <Button onClick={() => navigate('/terminal?assets=1')}>{t('vnc.openAssets')}</Button>
-                </div>
-              </section>
-            </div>
+          <div className="terminal-page-state-shell">
+            <section className="terminal-state-card terminal-state-card-error" role="alert">
+              <div className="terminal-state-card-header">
+                <span className="terminal-status-light terminal-status-light-error" aria-hidden="true" />
+                <span>{t('vnc.connectFailed')}</span>
+              </div>
+              <div className="terminal-state-title">{t('vnc.sessionStartFailed')}</div>
+              <p className="terminal-state-subtitle">{statusMessage || t('vnc.errorFallback')}</p>
+              <div className="terminal-state-actions">
+                <Button type="primary" onClick={reconnectVncSession}>{t('vnc.reconnect')}</Button>
+                <Button onClick={() => navigate('/terminal?assets=1')}>{t('vnc.openAssets')}</Button>
+              </div>
+            </section>
           </div>
         ) : null}
       </div>

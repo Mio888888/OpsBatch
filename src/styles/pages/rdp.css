@@ -217,14 +217,10 @@
   text-align: center;
 }
 
-.rdp-terminal-state-overlay {
-  position: absolute;
-  inset: 0;
-  background: rgba(245, 247, 246, 0.82);
-}
-
-.rdp-terminal-state-overlay .terminal-page-state-shell {
-  height: 100%;
+/* 连接/错误状态：与 Linux 终端连接态保持一致的 shell 外观 */
+.rdp-stage.rdp-stage-state {
+  background: var(--terminal-bg);
+  background-size: auto;
 }
 
 [data-theme-tone="dark"] .rdp-page {
@@ -243,11 +239,12 @@
     #111416;
 }
 
-[data-theme-tone="dark"] .rdp-overlay {
-  background: rgba(17, 20, 22, 0.84);
+[data-theme-tone="dark"] .rdp-stage.rdp-stage-state {
+  background: var(--terminal-bg);
+  background-size: auto;
 }
 
-[data-theme-tone="dark"] .rdp-terminal-state-overlay {
+[data-theme-tone="dark"] .rdp-overlay {
   background: rgba(17, 20, 22, 0.84);
 }
 

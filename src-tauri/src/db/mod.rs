@@ -7,13 +7,21 @@ use crate::security::SECRET_PLACEHOLDER;
 const SCHEMA_MIGRATION_ID: &str = "opsbatch_schema";
 const CURRENT_SCHEMA_VERSION: i64 = 1;
 
+/// 内置默认仓库：首次启动（github_repos 为空）时自动注入，无需用户手动添加。
+pub const DEFAULT_LIBRARY_REPO_URL: &str = "https://github.com/Mio888888/OpsBatch-Library";
+pub const DEFAULT_LIBRARY_REPO_BRANCH: &str = "main";
+const DEFAULT_LIBRARY_REPO_ID: &str = "opsbatch-default-library-repo";
+
 pub struct Database {
     pub pool: Pool<SqliteConnectionManager>,
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Database, CURRENT_SCHEMA_VERSION};
+    use super::{
+        Database, CURRENT_SCHEMA_VERSION, DEFAULT_LIBRARY_REPO_BRANCH,
+        DEFAULT_LIBRARY_REPO_ID, DEFAULT_LIBRARY_REPO_URL,
+    };
 
     fn temp_db_path(name: &str) -> std::path::PathBuf {
         let unique = format!(
@@ -186,6 +194,98 @@ mod tests {
 
         let _ = std::fs::remove_file(db_path);
     }
+
+    #[test]
+    fn init_tables_seeds_default_library_repo_on_empty_database() {
+        let db_path = temp_db_path("default-repo-seed");
+        let database = Database::new(&db_path).expect("open db");
+
+        database.init_tables().expect("init tables");
+
+        let conn = database.pool.get().expect("get db conn");
+        let (url, branch, enabled, update_on_startup): (String, String, i32, i32) = conn
+            .query_row(
+                "SELECT url, branch, enabled, update_on_startup FROM github_repos WHERE id=?1",
+                rusqlite::params![DEFAULT_LIBRARY_REPO_ID],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .expect("default library repo");
+
+        assert_eq!(url, DEFAULT_LIBRARY_REPO_URL);
+        assert_eq!(branch, DEFAULT_LIBRARY_REPO_BRANCH);
+        assert_eq!(enabled, 1, "default repo should be enabled");
+        assert_eq!(
+            update_on_startup, 1,
+            "default repo should update on startup"
+        );
+
+        drop(conn);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn init_tables_does_not_seed_default_repo_when_user_has_repos() {
+        let db_path = temp_db_path("default-repo-skip");
+        {
+            let conn = rusqlite::Connection::open(&db_path).expect("open fixture db");
+            conn.execute_batch(
+                "
+                CREATE TABLE github_repos (
+                    id TEXT PRIMARY KEY,
+                    url TEXT NOT NULL,
+                    branch TEXT DEFAULT 'main',
+                    token TEXT,
+                    last_pulled_at TEXT,
+                    update_on_startup INTEGER DEFAULT 0,
+                    enabled INTEGER DEFAULT 1
+                );
+                INSERT INTO github_repos (id, url) VALUES ('user-repo', 'https://example.com/lib.git');
+                ",
+            )
+            .expect("seed fixture db");
+        }
+
+        let database = Database::new(&db_path).expect("open db");
+        database.init_tables().expect("init tables");
+
+        let conn = database.pool.get().expect("get db conn");
+        let count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM github_repos WHERE id=?1",
+                rusqlite::params![DEFAULT_LIBRARY_REPO_ID],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        assert_eq!(
+            0, count,
+            "default repo must not be injected when the user already has repos"
+        );
+
+        drop(conn);
+        let _ = std::fs::remove_file(db_path);
+    }
+
+    #[test]
+    fn init_tables_re_seed_default_repo_idempotent() {
+        let db_path = temp_db_path("default-repo-idempotent");
+        let database = Database::new(&db_path).expect("open db");
+
+        database.init_tables().expect("first init");
+        database.init_tables().expect("second init");
+
+        let conn = database.pool.get().expect("get db conn");
+        let count: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM github_repos WHERE id=?1",
+                rusqlite::params![DEFAULT_LIBRARY_REPO_ID],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        assert_eq!(1, count, "default repo should not be duplicated on re-init");
+
+        drop(conn);
+        let _ = std::fs::remove_file(db_path);
+    }
 }
 
 fn migrate_json_secret_to_keychain<F>(
@@ -255,6 +355,9 @@ impl Database {
     pub fn init_tables(&self) -> Result<(), String> {
         let conn = self.pool.get().map_err(|e| e.to_string())?;
         Self::ensure_schema_migrations_table(&conn)?;
+        // 内置默认仓库的注入与 schema 版本无关：只要 github_repos 为空就补齐，
+        // 因此放在快速路径之前，确保已初始化的旧库也能拿到默认仓库。
+        Self::ensure_default_library_repo(&conn)?;
         if Self::applied_schema_version(&conn)? >= CURRENT_SCHEMA_VERSION {
             return Ok(());
         }
@@ -861,6 +964,9 @@ impl Database {
         // App logs table
         crate::commands::app_log::init_app_logs_table(&conn)?;
 
+        // 建表完成后再次确认默认仓库（覆盖全新建库的情况）
+        Self::ensure_default_library_repo(&conn)?;
+
         Self::record_schema_version(&conn)?;
 
         Ok(())
@@ -877,6 +983,38 @@ impl Database {
             ",
         )
         .map_err(|e| e.to_string())
+    }
+
+    /// 若 github_repos 表存在且为空，注入内置默认仓库。
+    /// 表不存在（尚未建表）时跳过，留待后续建表完成后的下一次初始化补齐。
+    fn ensure_default_library_repo(conn: &Connection) -> Result<(), String> {
+        let exists: i32 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='github_repos'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+        if exists == 0 {
+            return Ok(());
+        }
+        let repo_count: i32 = conn
+            .query_row("SELECT COUNT(*) FROM github_repos", [], |row| row.get(0))
+            .unwrap_or(0);
+        if repo_count > 0 {
+            return Ok(());
+        }
+        conn.execute(
+            "INSERT INTO github_repos (id, url, branch, token, last_pulled_at, update_on_startup, enabled)
+             VALUES (?1, ?2, ?3, NULL, NULL, 1, 1)",
+            rusqlite::params![
+                DEFAULT_LIBRARY_REPO_ID,
+                DEFAULT_LIBRARY_REPO_URL,
+                DEFAULT_LIBRARY_REPO_BRANCH,
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(())
     }
 
     fn applied_schema_version(conn: &Connection) -> Result<i64, String> {

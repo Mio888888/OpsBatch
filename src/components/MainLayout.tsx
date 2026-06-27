@@ -428,6 +428,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
   }, [hostForm]);
 
   const handleHostOsChange = useCallback((nextOs: Host['os']) => {
+    hostForm.setFieldValue('os', nextOs);
     const currentPort = hostForm.getFieldValue('port') as number | undefined;
     const currentUsername = hostForm.getFieldValue('username') as string | undefined;
 
@@ -1106,6 +1107,28 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                             <Form.Item name="groupId" label={t('assets.group')}><TreeSelect options={groupTreeData} placeholder={tText('assets.selectGroup')} /></Form.Item>
                             <Form.Item name="remark" label={t('assets.remark')}><Input placeholder={tText('assets.remarkPlaceholder')} /></Form.Item>
                           </div>
+                          {os === 'vnc' ? (
+                            <div className="asset-host-vnc-basic">
+                              <div className="asset-host-rdp-settings-header"><span>{t('assets.vncSettings')}</span><small>{t('assets.vncSettingsExtra')}</small></div>
+                              <div className="asset-host-form-grid asset-host-form-grid-vnc">
+                                <Form.Item name="vncPort" label={t('assets.vncPort')}><InputNumber min={1} max={65535} /></Form.Item>
+                                <Form.Item name="vncAuthMethod" label={t('assets.vncAuthMethod')}>
+                                  <Select options={[
+                                    { value: 'vnc', label: t('assets.vncAuthMethodVnc') },
+                                    { value: 'ard', label: t('assets.vncAuthMethodArd') },
+                                  ]} />
+                                </Form.Item>
+                                <Form.Item name="vncUsername" label={t('assets.vncUsername')}><Input placeholder={tText('assets.vncUsernamePlaceholder')} /></Form.Item>
+                                <Form.Item name="vncPassword" label={t('assets.vncPassword')}><Input.Password placeholder={tText('assets.vncPasswordPlaceholder')} /></Form.Item>
+                              </div>
+                              <div className="asset-host-rdp-options">
+                                <Form.Item name="vncViewOnly" valuePropName="checked" className="asset-host-rdp-option"><Switch /></Form.Item>
+                                <div className="asset-host-rdp-option-copy"><span>{t('assets.vncViewOnly')}</span><small>{t('assets.vncViewOnlyExtra')}</small></div>
+                                <Form.Item name="vncShared" valuePropName="checked" className="asset-host-rdp-option"><Switch /></Form.Item>
+                                <div className="asset-host-rdp-option-copy"><span>{t('assets.vncShared')}</span><small>{t('assets.vncSharedExtra')}</small></div>
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
                       );
                       const proxySettingsBlock = (
@@ -1143,25 +1166,8 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                           {proxySettingsBlock}
                         </div>
                       );
-                      const vncTab = (
+                      const vncAdvancedTab = (
                         <div className="asset-host-tab-pane">
-                          <div className="asset-host-form-grid asset-host-form-grid-vnc">
-                            <Form.Item name="vncPort" label={t('assets.vncPort')}><InputNumber min={1} max={65535} /></Form.Item>
-                            <Form.Item name="vncAuthMethod" label={t('assets.vncAuthMethod')}>
-                              <Select options={[
-                                { value: 'vnc', label: t('assets.vncAuthMethodVnc') },
-                                { value: 'ard', label: t('assets.vncAuthMethodArd') },
-                              ]} />
-                            </Form.Item>
-                            <Form.Item name="vncUsername" label={t('assets.vncUsername')}><Input placeholder={tText('assets.vncUsernamePlaceholder')} /></Form.Item>
-                            <Form.Item name="vncPassword" label={t('assets.vncPassword')}><Input.Password placeholder={tText('assets.vncPasswordPlaceholder')} /></Form.Item>
-                            <div className="asset-host-vnc-options">
-                              <Form.Item name="vncViewOnly" valuePropName="checked" className="asset-host-rdp-option"><Switch /></Form.Item>
-                              <div className="asset-host-rdp-option-copy"><span>{t('assets.vncViewOnly')}</span><small>{t('assets.vncViewOnlyExtra')}</small></div>
-                              <Form.Item name="vncShared" valuePropName="checked" className="asset-host-rdp-option"><Switch /></Form.Item>
-                              <div className="asset-host-rdp-option-copy"><span>{t('assets.vncShared')}</span><small>{t('assets.vncSharedExtra')}</small></div>
-                            </div>
-                          </div>
                           {proxySettingsBlock}
                         </div>
                       );
@@ -1194,7 +1200,7 @@ export default function MainLayout({ children }: { children: ReactNode }) {
                             { key: 'basic', label: t('assets.hostBasicInfo'), children: basicTab },
                             ...(os === 'linux' ? [{ key: 'linux-advanced', label: t('assets.linuxAdvancedTab'), children: linuxAdvancedTab }] : []),
                             ...(os === 'windows' ? [{ key: 'rdp', label: t('assets.rdpAdvancedTab'), children: rdpTab }] : []),
-                            ...(os === 'vnc' ? [{ key: 'vnc', label: t('assets.vncAdvancedTab'), children: vncTab }] : []),
+                            ...(os === 'vnc' ? [{ key: 'vnc-advanced', label: t('assets.vncAdvancedTab'), children: vncAdvancedTab }] : []),
                           ]}
                         />
                       );

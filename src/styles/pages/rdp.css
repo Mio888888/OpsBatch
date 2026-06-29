@@ -217,6 +217,14 @@
   text-align: center;
 }
 
+.rdp-overlay-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
 /* 连接/错误状态：与 Linux 终端连接态保持一致的 shell 外观 */
 .rdp-stage.rdp-stage-state {
   background: var(--terminal-bg);

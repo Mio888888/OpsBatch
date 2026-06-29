@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, WheelEvent as ReactWheelEvent } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
-import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { Button, Empty, Spin } from '../../components/ui';
 import { CloseOutlined, ReloadOutlined, UploadOutlined } from '../../components/ui/icons';
 import WindowControls from '../../components/WindowControls';
+import { OPEN_ASSET_MANAGER_EVENT } from '../../utils/windowEvents';
 import { useAssetsStore } from '../../stores/assets';
 import { useTranslation } from '../../i18n';
 import { clamp, getOpenHostRequest, getRdpKeyboardInputEvents, getRdpOverlayText, uploadFilesToRdp, type OpenHostRequest } from './rdpProtocol';
@@ -24,7 +25,6 @@ const RDP_AI_SCREENSHOT_QUALITY = 0.72;
 export default function RdpPage() {
   const { t, tText } = useTranslation();
   const location = useLocation();
-  const navigate = useNavigate();
   const hosts = useAssetsStore((s) => s.hosts);
   const hostsLoading = useAssetsStore((s) => s.loading);
   const loadHosts = useAssetsStore((s) => s.loadHosts);
@@ -297,6 +297,19 @@ export default function RdpPage() {
     return tText('rdp.state.idle');
   }, [connectionState, tText]);
 
+  // 关闭当前 RDP 窗口，并请求主窗口打开资产管理面板。
+  const closeAndOpenAssets = useCallback(() => {
+    disconnectActive();
+    void emit(OPEN_ASSET_MANAGER_EVENT, {
+      sourceWindowLabel: getCurrentWindow().label,
+    }).catch((e) => {
+      console.warn('[rdp] emit open-asset-manager failed:', e);
+    });
+    void getCurrentWindow().destroy().catch((e) => {
+      console.warn('[rdp] destroy window failed:', e);
+    });
+  }, [disconnectActive]);
+
   if (!hostRequest) {
     return (
       <section className="rdp-page rdp-page-empty">
@@ -320,7 +333,7 @@ export default function RdpPage() {
             <div className="rdp-empty-copy">
               <strong>{hostsLoading ? t('rdp.loadingHost') : t('rdp.emptyTitle')}</strong>
               <span>{hostsLoading ? t('rdp.loadingHostSubtitle') : t('rdp.emptySubtitle')}</span>
-              <Button type="primary" onClick={() => navigate('/terminal?assets=1')}>
+              <Button type="primary" onClick={closeAndOpenAssets}>
                 {t('rdp.openAssets')}
               </Button>
             </div>
@@ -426,9 +439,12 @@ export default function RdpPage() {
               <strong>{statusMessage || t('rdp.connectFailed')}</strong>
               <span>{t('rdp.errorFallback')}</span>
             </div>
-            <Button type="primary" icon={<ReloadOutlined />} onClick={() => setConnectNonce((value) => value + 1)}>
-              {t('rdp.reconnect')}
-            </Button>
+            <div className="rdp-overlay-actions">
+              <Button type="primary" icon={<ReloadOutlined />} onClick={() => setConnectNonce((value) => value + 1)}>
+                {t('rdp.reconnect')}
+              </Button>
+              <Button onClick={closeAndOpenAssets}>{t('rdp.openAssets')}</Button>
+            </div>
           </div>
         )}
         {isDragOver && (

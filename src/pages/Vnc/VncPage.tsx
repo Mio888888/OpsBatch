@@ -2,11 +2,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
+import { emit } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import RFB from '@novnc/novnc';
 import { Button, Empty, Spin } from '../../components/ui';
 import { CloseOutlined, ReloadOutlined } from '../../components/ui/icons';
 import WindowControls from '../../components/WindowControls';
+import { OPEN_ASSET_MANAGER_EVENT } from '../../utils/windowEvents';
 import { useAssetsStore } from '../../stores/assets';
 import { useTranslation } from '../../i18n';
 import {
@@ -387,6 +389,26 @@ export default function VncPage() {
     setConnectNonce((value) => value + 1);
   }, [activeHostId, updateStatus]);
 
+  // 连接失败时：关闭当前 VNC 窗口，并请求主窗口打开资产管理面板。
+  const closeAndOpenAssets = useCallback(() => {
+    if (sessionIdRef.current) {
+      rfbRef.current?.disconnect();
+      rfbRef.current = null;
+      clearElement(screenRef.current);
+      void invoke('close_vnc_session', {
+        request: { sessionId: sessionIdRef.current },
+      }).catch(() => undefined);
+    }
+    void emit(OPEN_ASSET_MANAGER_EVENT, {
+      sourceWindowLabel: getCurrentWindow().label,
+    }).catch((e) => {
+      console.warn('[vnc] emit open-asset-manager failed:', e);
+    });
+    void getCurrentWindow().destroy().catch((e) => {
+      console.warn('[vnc] destroy window failed:', e);
+    });
+  }, []);
+
   useEffect(() => {
     if (queryHostId && hosts.length === 0) void loadHosts();
   }, [hosts.length, loadHosts, queryHostId]);
@@ -678,7 +700,7 @@ export default function VncPage() {
               <p className="terminal-state-subtitle">{statusMessage || t('vnc.errorFallback')}</p>
               <div className="terminal-state-actions">
                 <Button type="primary" onClick={reconnectVncSession}>{t('vnc.reconnect')}</Button>
-                <Button onClick={() => navigate('/terminal?assets=1')}>{t('vnc.openAssets')}</Button>
+                <Button onClick={closeAndOpenAssets}>{t('vnc.openAssets')}</Button>
               </div>
             </section>
           </div>

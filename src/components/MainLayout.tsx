@@ -3,6 +3,7 @@ import type { Key, ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import gsap from 'gsap';
 import { useGSAP } from '@gsap/react';
 import {
@@ -65,6 +66,7 @@ import {
   MAX_RDP_DESKTOP_HEIGHT,
 } from '../utils/rdpSettings';
 import { buildProxySettings, DEFAULT_PROXY_PORTS } from '../utils/proxySettings';
+import { OPEN_ASSET_MANAGER_EVENT, type OpenAssetManagerPayload } from '../utils/windowEvents';
 // Extracted modules
 import TitlebarPerformanceMonitor from './asset/TitlebarPerformanceMonitor';
 import { DroppableGroupTitle, DraggableHostTitle } from './asset/DragDropItems';
@@ -181,6 +183,28 @@ export default function MainLayout({ children }: { children: ReactNode }) {
       void loadHosts();
     }
   }, [assetPanelVisible, hosts.length, loadHosts]);
+
+  // 监听独立窗口（VNC/RDP 等）发出的“打开资产管理”请求：
+  // 在主窗口打开资产管理面板并把主窗口拉到前台。
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    const currentWindowLabel = getCurrentWindow().label;
+    listen<OpenAssetManagerPayload>(OPEN_ASSET_MANAGER_EVENT, (event) => {
+      // 忽略自身发出的请求
+      if (event.payload?.sourceWindowLabel === currentWindowLabel) return;
+      setAssetPanelVisible(true);
+      void getCurrentWindow().setFocus().catch((e) => {
+        console.warn('[assets] setFocus failed:', e);
+      });
+    }).then((fn) => {
+      unlisten = fn;
+    }).catch((e) => {
+      console.warn('[assets] listen open-asset-manager failed:', e);
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   // ── Search & Tree ──
   const [assetSearchText, setAssetSearchText] = useState('');

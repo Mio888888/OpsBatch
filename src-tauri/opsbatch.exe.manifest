@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <!-- 启用 Windows 主题化公共控件（保留 Tauri 默认 manifest 的依赖） -->
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
+  <!--
+    声明 PerMonitorV2 DPI 感知，修复 Windows 高分屏(>100% 缩放)下字体/画面模糊的问题。
+    - dpiAware=true/pm        : 旧版 Windows(<=8.1) 的 per-monitor DPI 感知
+    - dpiAwareness=PerMonitorV2,PerMonitor : Win10 1703+ 优先使用 PerMonitorV2，回退到 PerMonitor
+    新系统读取 dpiAwareness 并优先于 dpiAware。
+  -->
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2,PerMonitor</dpiAwareness>
+    </windowsSettings>
+  </application>
+</assembly>

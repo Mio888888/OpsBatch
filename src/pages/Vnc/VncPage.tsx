@@ -389,6 +389,13 @@ export default function VncPage() {
     setConnectNonce((value) => value + 1);
   }, [activeHostId, updateStatus]);
 
+  const disconnectAndCloseWindow = useCallback(() => {
+    closeVncSession(sessionIdRef.current);
+    void getCurrentWindow().destroy().catch((e) => {
+      console.warn('[vnc] destroy window failed:', e);
+    });
+  }, [closeVncSession]);
+
   // 连接失败时：关闭当前 VNC 窗口，并请求主窗口打开资产管理面板。
   const closeAndOpenAssets = useCallback(() => {
     if (sessionIdRef.current) {
@@ -650,7 +657,7 @@ export default function VncPage() {
           >
             Ctrl Alt Del
           </Button>
-          <Button size="small" icon={<CloseOutlined />} onClick={() => closeVncSession(sessionId)}>{t('vnc.disconnect')}</Button>
+          <Button size="small" icon={<CloseOutlined />} onClick={disconnectAndCloseWindow}>{t('vnc.disconnect')}</Button>
         </div>
       </header>
       <div

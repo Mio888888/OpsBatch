@@ -297,6 +297,13 @@ export default function RdpPage() {
     return tText('rdp.state.idle');
   }, [connectionState, tText]);
 
+  const disconnectAndCloseWindow = useCallback(() => {
+    disconnectActive();
+    void getCurrentWindow().destroy().catch((e) => {
+      console.warn('[rdp] destroy window failed:', e);
+    });
+  }, [disconnectActive]);
+
   // 关闭当前 RDP 窗口，并请求主窗口打开资产管理面板。
   const closeAndOpenAssets = useCallback(() => {
     disconnectActive();
@@ -391,7 +398,7 @@ export default function RdpPage() {
           <Button
             size="small"
             icon={<CloseOutlined />}
-            onClick={disconnectActive}
+            onClick={disconnectAndCloseWindow}
           >
             {t('rdp.disconnect')}
           </Button>

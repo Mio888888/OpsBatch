@@ -682,6 +682,7 @@ const FileContextMenu: FC<{
   const remotePath = useSftpStore((s) => s.remotePath);
   const localMkdir = useSftpStore((s) => s.localMkdir);
   const remoteMkdir = useSftpStore((s) => s.remoteMkdir);
+  const remoteCreateFile = useSftpStore((s) => s.remoteCreateFile);
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(() => ({ left: menu.x, top: menu.y }));
 
@@ -744,6 +745,14 @@ const FileContextMenu: FC<{
     onClose();
   };
 
+  const handleCreateFile = async () => {
+    const name = prompt(tText('sftp.newFilePrompt'));
+    if (!name) return;
+    const newPath = joinPath(remotePath, name);
+    await remoteCreateFile(hostId, newPath);
+    onClose();
+  };
+
   const handleIdeOpen = async () => {
     onClose();
     if (!menu.entry.is_dir && isPreviewable(menu.entry)) {
@@ -769,7 +778,12 @@ const FileContextMenu: FC<{
 
   items.push({ label: tText('sftp.rename'), action: handleRename });
   items.push({ label: tText('common.delete'), action: handleDelete });
-  items.push({ label: tText('sftp.newFolder'), action: handleMkdir, separator: true });
+  if (menu.side === 'remote') {
+    items.push({ label: tText('sftp.newFile'), action: handleCreateFile, separator: true });
+    items.push({ label: tText('sftp.newFolder'), action: handleMkdir });
+  } else {
+    items.push({ label: tText('sftp.newFolder'), action: handleMkdir, separator: true });
+  }
 
   useLayoutEffect(() => {
     const element = menuRef.current;

@@ -65,6 +65,7 @@ interface SftpState {
   refreshLocal: () => Promise<void>;
   upload: (hostId: string, localPath: string, remoteDir: string) => Promise<void>;
   download: (hostId: string, remotePath: string, localDir: string) => Promise<void>;
+  remoteCreateFile: (hostId: string, path: string) => Promise<void>;
   remoteMkdir: (hostId: string, path: string) => Promise<void>;
   remoteRename: (hostId: string, oldPath: string, newPath: string) => Promise<void>;
   remoteRemove: (hostId: string, path: string, isDir: boolean) => Promise<void>;
@@ -388,6 +389,11 @@ export const useSftpStore = create<SftpState>((set, get) => ({
 
   remoteMkdir: async (hostId, path) => {
     await invoke('sftp_mkdir', { hostId, path });
+    await get().refreshRemote(hostId);
+  },
+
+  remoteCreateFile: async (hostId, path) => {
+    await invoke('sftp_write_file', { hostId, path, content: '' });
     await get().refreshRemote(hostId);
   },
 

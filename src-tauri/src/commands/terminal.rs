@@ -74,11 +74,27 @@ struct LocalActorResources {
 struct SessionHandle {
     sender: async_mpsc::Sender<TerminalCommand>,
     actor_thread: std::thread::JoinHandle<()>,
+    ssh_connection_key: Option<String>,
     /// For local sessions, the master PTY is needed for resize operations.
     /// For SSH sessions, resize goes through the actor.
     local_master: Option<Arc<Mutex<Box<dyn MasterPty + Send>>>>,
     /// For local sessions, the child process handle for kill/wait on disconnect.
     local_child: Option<Arc<Mutex<Box<dyn portable_pty::Child + Send + Sync>>>>,
+}
+
+fn touch_ssh_connection_by_host(app: &tauri::AppHandle, host_id: Option<&str>) {
+    let Some(host_id) = host_id else {
+        return;
+    };
+    let registry = app.state::<ssh::SshConnectionRegistry>();
+    registry.touch_connection(host_id);
+}
+
+fn touch_terminal_connection(pool: &ssh::SshConnectionRegistry, host_id: Option<&str>) {
+    let Some(host_id) = host_id else {
+        return;
+    };
+    pool.touch_connection(host_id);
 }
 
 // ---------------------------------------------------------------------------
@@ -396,12 +412,13 @@ fn flush_terminal_batch(
 fn spawn_ssh_reader(
     app_handle: tauri::AppHandle,
     session_id: String,
+    host_id: Option<String>,
     lease: ssh::SharedSshChannelLease,
     mut read_half: ChannelReadHalf,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let event_name = format!("terminal-output-{}", session_id);
-        let emitter = create_terminal_output_emitter(app_handle, event_name);
+        let emitter = create_terminal_output_emitter(app_handle.clone(), event_name);
         let mut batch = Vec::with_capacity(OUTPUT_BATCH_MAX_BYTES);
         let mut batch_started_at: Option<Instant> = None;
         let mut closed = false;
@@ -417,6 +434,7 @@ fn spawn_ssh_reader(
             match msg {
                 Some(Some(ChannelMsg::Data { data }))
                 | Some(Some(ChannelMsg::ExtendedData { data, .. })) => {
+                    touch_ssh_connection_by_host(&app_handle, host_id.as_deref());
                     if batch_started_at.is_none() {
                         batch_started_at = Some(Instant::now());
                     }
@@ -782,10 +800,17 @@ pub async fn terminal_connect(
         read_half,
         write_half,
         lease,
+        connection_key,
     } = channel_result;
 
     let reader_lease = lease.clone();
-    let _reader_handle = spawn_ssh_reader(app.clone(), session_id.clone(), reader_lease, read_half);
+    let _reader_handle = spawn_ssh_reader(
+        app.clone(),
+        session_id.clone(),
+        Some(connection_key.clone()),
+        reader_lease,
+        read_half,
+    );
 
     let (actor_sender, actor_thread) = spawn_ssh_actor(SshActorResources { lease, write_half });
 
@@ -795,6 +820,7 @@ pub async fn terminal_connect(
         SessionHandle {
             sender: actor_sender,
             actor_thread,
+            ssh_connection_key: Some(connection_key),
             local_master: None,
             local_child: None,
         },
@@ -879,6 +905,7 @@ pub fn terminal_connect_local(
         SessionHandle {
             sender: actor_sender,
             actor_thread,
+            ssh_connection_key: None,
             local_master: Some(master),
             local_child: Some(child),
         },
@@ -922,15 +949,16 @@ pub async fn terminal_spawn_background_process(
 #[tauri::command]
 pub async fn terminal_write(
     manager: tauri::State<'_, TerminalManager>,
+    pool: tauri::State<'_, ssh::SshConnectionRegistry>,
     session_id: String,
     data: String,
 ) -> Result<(), String> {
-    let sender = {
+    let (sender, host_id) = {
         let handle = manager
             .sessions
             .get(&session_id)
             .ok_or("session not found")?;
-        handle.sender.clone()
+        (handle.sender.clone(), handle.ssh_connection_key.clone())
     };
 
     sender
@@ -941,23 +969,31 @@ pub async fn terminal_write(
                 let _ = manager.sessions.remove(&session_id);
                 "session write channel closed".to_string()
             }
-        })
+        })?;
+    touch_terminal_connection(&pool, host_id.as_deref());
+    Ok(())
 }
 
 #[tauri::command]
 pub async fn terminal_batch_write(
     manager: tauri::State<'_, TerminalManager>,
+    pool: tauri::State<'_, ssh::SshConnectionRegistry>,
     writes: Vec<(String, String)>,
 ) -> Result<(), String> {
     for (session_id, data) in writes {
-        let sender = {
+        let (sender, host_id) = {
             let handle = match manager.sessions.get(&session_id) {
                 Some(h) => h,
                 None => continue,
             };
-            handle.sender.clone()
+            (handle.sender.clone(), handle.ssh_connection_key.clone())
         };
-        let _ = sender.try_send(TerminalCommand::Write(data.into_bytes()));
+        if sender
+            .try_send(TerminalCommand::Write(data.into_bytes()))
+            .is_ok()
+        {
+            touch_terminal_connection(&pool, host_id.as_deref());
+        }
     }
     Ok(())
 }
@@ -965,6 +1001,7 @@ pub async fn terminal_batch_write(
 #[tauri::command]
 pub async fn terminal_resize(
     manager: tauri::State<'_, TerminalManager>,
+    pool: tauri::State<'_, ssh::SshConnectionRegistry>,
     session_id: String,
     cols: u16,
     rows: u16,
@@ -992,6 +1029,7 @@ pub async fn terminal_resize(
     } else {
         // SSH resize: send through actor channel.
         let sender = handle.sender.clone();
+        let host_id = handle.ssh_connection_key.clone();
         drop(handle); // Release DashMap ref before blocking send.
         sender
             .try_send(TerminalCommand::Resize { cols, rows })
@@ -1003,6 +1041,7 @@ pub async fn terminal_resize(
                     "session resize channel closed".to_string()
                 }
             })?;
+        touch_terminal_connection(&pool, host_id.as_deref());
     }
 
     Ok(())

@@ -786,6 +786,7 @@ pub struct PooledTerminalChannel {
     pub read_half: ChannelReadHalf,
     pub write_half: ChannelWriteHalf<client::Msg>,
     pub lease: SharedSshChannelLease,
+    pub connection_key: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -820,6 +821,18 @@ impl ConnectionEntry {
 struct CachedSshConfig {
     config: SshConfig,
     stored_at: Instant,
+}
+
+fn jump_connection_key(host_id: &str, jump_configs: &[SshConfig]) -> String {
+    format!(
+        "{}:jump:{}",
+        host_id,
+        jump_configs
+            .iter()
+            .map(|c| c.host.as_str())
+            .collect::<Vec<_>>()
+            .join(",")
+    )
 }
 
 pub struct SshConnectionRegistry {
@@ -895,7 +908,7 @@ impl SshConnectionRegistry {
         let status = match state {
             ConnectionState::Connecting => "connecting",
             ConnectionState::Active => "active",
-            ConnectionState::Idle => "idle",
+            ConnectionState::Idle => "idle_disconnected",
             ConnectionState::LinkDown => "link_down",
             ConnectionState::Reconnecting => "reconnecting",
         };
@@ -1068,7 +1081,7 @@ impl SshConnectionRegistry {
         rows: u16,
     ) -> Result<PooledTerminalChannel, String> {
         let conn = self.get_or_connect(host_id, config, timeout_secs)?;
-        match Self::open_terminal_on_shared(conn.clone(), cols, rows) {
+        match Self::open_terminal_on_shared(conn.clone(), host_id.to_string(), cols, rows) {
             Ok(channel) => Ok(channel),
             Err(err) => {
                 eprintln!(
@@ -1077,7 +1090,7 @@ impl SshConnectionRegistry {
                 );
                 self.remove_if_same(host_id, &conn);
                 let conn = self.reconnect_and_store(host_id, config, timeout_secs)?;
-                Self::open_terminal_on_shared(conn, cols, rows)
+                Self::open_terminal_on_shared(conn, host_id.to_string(), cols, rows)
             }
         }
     }
@@ -1101,6 +1114,7 @@ impl SshConnectionRegistry {
 
     fn open_terminal_on_shared(
         conn: SharedSshConnection,
+        connection_key: String,
         cols: u16,
         rows: u16,
     ) -> Result<PooledTerminalChannel, String> {
@@ -1125,6 +1139,7 @@ impl SshConnectionRegistry {
             read_half,
             write_half,
             lease: SharedSshChannelLease { connection: conn },
+            connection_key,
         })
     }
 
@@ -1268,6 +1283,14 @@ impl SshConnectionRegistry {
         self.connections.remove(host_id).is_some()
     }
 
+    pub fn touch_connection(&self, host_id: &str) -> bool {
+        let Some(entry) = self.connections.get(host_id) else {
+            return false;
+        };
+        entry.touch();
+        true
+    }
+
     pub fn get_shared_connection_via_jump(
         &self,
         host_id: &str,
@@ -1279,15 +1302,7 @@ impl SshConnectionRegistry {
             return self.get_or_connect(host_id, target_config, timeout_secs);
         }
 
-        let pool_key = format!(
-            "{}:jump:{}",
-            host_id,
-            jump_configs
-                .iter()
-                .map(|c| c.host.as_str())
-                .collect::<Vec<_>>()
-                .join(",")
-        );
+        let pool_key = jump_connection_key(host_id, jump_configs);
 
         if let Some(conn) = self.get_existing(&pool_key) {
             return Ok(conn);
@@ -1322,27 +1337,19 @@ impl SshConnectionRegistry {
         cols: u16,
         rows: u16,
     ) -> Result<PooledTerminalChannel, String> {
+        let pool_key = jump_connection_key(host_id, jump_configs);
         let conn = self.get_shared_connection_via_jump(
             host_id,
             target_config,
             jump_configs,
             timeout_secs,
         )?;
-        match Self::open_terminal_on_shared(conn.clone(), cols, rows) {
+        match Self::open_terminal_on_shared(conn.clone(), pool_key.clone(), cols, rows) {
             Ok(channel) => Ok(channel),
             Err(err) => {
                 eprintln!(
                     "[SSH Registry] Failed to open terminal via jump for {}: {}; reconnecting once",
                     host_id, err
-                );
-                let pool_key = format!(
-                    "{}:jump:{}",
-                    host_id,
-                    jump_configs
-                        .iter()
-                        .map(|c| c.host.as_str())
-                        .collect::<Vec<_>>()
-                        .join(",")
                 );
                 self.connections.remove(&pool_key);
                 let conn = self.get_shared_connection_via_jump(
@@ -1351,7 +1358,7 @@ impl SshConnectionRegistry {
                     jump_configs,
                     timeout_secs,
                 )?;
-                Self::open_terminal_on_shared(conn, cols, rows)
+                Self::open_terminal_on_shared(conn, pool_key, cols, rows)
             }
         }
     }

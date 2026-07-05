@@ -14,6 +14,8 @@ export function joinPath(base: string, name: string): string {
 }
 
 export function dirnameFromPath(path: string): string {
+  const driveRoot = path.match(/^([A-Za-z]:)[\\/]$/);
+  if (driveRoot) return `${driveRoot[1]}\\`;
   const trimmed = path.replace(/[\\/]+$/, '');
   if (!trimmed) return '/';
   const separator = trimmed.includes('\\') && !trimmed.includes('/') ? '\\' : '/';

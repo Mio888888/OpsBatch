@@ -25,4 +25,5 @@ test('joins POSIX directory paths with slash separators', () => {
 test('returns Windows parent directories', () => {
   assert.equal(dirnameFromPath('C:\\Users\\me\\Downloads'), 'C:\\Users\\me');
   assert.equal(dirnameFromPath('C:\\Users\\'), 'C:\\');
+  assert.equal(dirnameFromPath('C:\\'), 'C:\\');
 });

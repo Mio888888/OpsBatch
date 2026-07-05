@@ -156,6 +156,7 @@ jobs:
           prerelease: false
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+          assetNamePattern: OpsBatch_[version]_win_[arch][_setup][ext]
           args: --config src-tauri/tauri.updater.conf.json
 
       - name: Upload Windows artifacts
@@ -210,6 +211,7 @@ jobs:
           prerelease: false
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+          assetNamePattern: OpsBatch_[version]_mac_[arch][ext]
           args: --config src-tauri/tauri.updater.conf.json
 
       - name: Upload macOS artifacts
@@ -277,6 +279,7 @@ jobs:
           prerelease: false
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+          assetNamePattern: OpsBatch_[version]_linux_[arch][ext]
           args: --config src-tauri/tauri.updater.conf.json
 
       - name: Upload Linux artifacts

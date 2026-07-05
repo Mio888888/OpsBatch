@@ -17,6 +17,18 @@ test('release builds upload the Tauri updater JSON for each desktop platform', (
   }
 });
 
+test('release package asset names include platform identifiers', () => {
+  const expectedPatterns = [
+    /assetNamePattern:\s+OpsBatch_\[version\]_win_\[arch\]\[_setup\]\[ext\]/,
+    /assetNamePattern:\s+OpsBatch_\[version\]_mac_\[arch\]\[ext\]/,
+    /assetNamePattern:\s+OpsBatch_\[version\]_linux_\[arch\]\[ext\]/,
+  ];
+
+  for (const pattern of expectedPatterns) {
+    assert.match(workflow, pattern);
+  }
+});
+
 test('release updater config generates signed updater artifacts', () => {
   assert.equal(updaterConfig.bundle.createUpdaterArtifacts, true);
 });

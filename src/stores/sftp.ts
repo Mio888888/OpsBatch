@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { basenameFromPath } from '../utils/pathNames';
+import { basenameFromPath, dirnameFromPath, joinPath } from '../utils/pathNames';
 
 export interface FileEntry {
   name: string;
@@ -216,10 +216,7 @@ export const useSftpStore = create<SftpState>((set, get) => ({
 
   goLocalUp: async () => {
     const { localPath } = get();
-    const parts = localPath.replace(/\/$/, '').split('/');
-    parts.pop();
-    const parent = parts.join('/') || '/';
-    await get().navigateLocal(parent);
+    await get().navigateLocal(dirnameFromPath(localPath));
   },
 
   setSelectedRemote: (entry) => set({ selectedRemote: entry }),
@@ -237,9 +234,7 @@ export const useSftpStore = create<SftpState>((set, get) => ({
 
   upload: async (hostId, localFilePath, remoteDir) => {
     const fileName = basenameFromPath(localFilePath);
-    const remotePath = remoteDir.endsWith('/')
-      ? `${remoteDir}${fileName}`
-      : `${remoteDir}/${fileName}`;
+    const remotePath = joinPath(remoteDir, fileName);
     const transferId = `upload-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
     const transfer: TransferItem = {
@@ -313,9 +308,7 @@ export const useSftpStore = create<SftpState>((set, get) => ({
 
   download: async (hostId, remoteFilePath, localDir) => {
     const fileName = basenameFromPath(remoteFilePath);
-    const localPath = localDir.endsWith('/')
-      ? `${localDir}${fileName}`
-      : `${localDir}/${fileName}`;
+    const localPath = joinPath(localDir, fileName);
     const transferId = `download-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
     const transfer: TransferItem = {

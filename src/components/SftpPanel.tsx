@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef, memo, useMemo, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import { useSftpStore, type FileEntry } from '../stores/sftp';
@@ -11,6 +12,7 @@ import {
   isPointInsideRectInEitherCoordinateSpace,
   shouldAcceptExternalFileDrop,
 } from '../utils/dragDropTarget';
+import { basenameFromPath, dirnameFromPath, joinPath } from '../utils/pathNames';
 import type { FC, ReactNode } from 'react';
 import '../styles/panels/sftp.css';
 import '../styles/panels/sftp-skeleton.css';
@@ -120,11 +122,6 @@ function toHexDump(bytes: Uint8Array, maxLines = 16): string {
     lines.push(`${i.toString(16).padStart(8, '0')}  ${hex.padEnd(47)}  |${ascii}|`);
   }
   return lines.join('\n');
-}
-
-function joinPath(base: string, name: string): string {
-  if (base.endsWith('/')) return `${base}${name}`;
-  return `${base}/${name}`;
 }
 
 const CONTEXT_MENU_VIEWPORT_MARGIN = 8;
@@ -281,12 +278,20 @@ const FilePane: FC<FilePaneProps> = memo(({ side, hostId, onContextMenu }) => {
   }, [pathInput, navigate]);
 
   const openInIde = useCallback(async (entry: FileEntry) => {
-    if (isPreviewable(entry)) {
-      if (side === 'local') {
-        await useSftpStore.getState().previewLocal(entry);
-      } else {
-        await useSftpStore.getState().previewRemote(hostId, entry);
-      }
+    if (side === 'remote') {
+      await invoke('open_managed_window', {
+        kind: 'editor',
+        hostIds: [hostId],
+        query: {
+          mode: entry.is_dir ? 'dir' : 'file',
+          path: entry.path,
+        },
+      });
+      return;
+    }
+
+    if (!entry.is_dir && isPreviewable(entry)) {
+      await useSftpStore.getState().previewLocal(entry);
     }
   }, [hostId, side]);
 
@@ -718,7 +723,7 @@ const FileContextMenu: FC<{
   const handleRename = async () => {
     const newName = prompt(tText('sftp.renamePrompt'), menu.entry.name);
     if (!newName || newName === menu.entry.name) return;
-    const parent = menu.entry.path.replace(/\/[^/]*$/, '');
+    const parent = dirnameFromPath(menu.entry.path);
     const newPath = joinPath(parent, newName);
     if (menu.side === 'local') {
       await localRename(menu.entry.path, newPath);
@@ -755,15 +760,24 @@ const FileContextMenu: FC<{
 
   const handleIdeOpen = async () => {
     onClose();
-    if (!menu.entry.is_dir && isPreviewable(menu.entry)) {
-      await previewRemote(hostId, menu.entry);
-    }
+    if (menu.side !== 'remote') return;
+    await invoke('open_managed_window', {
+      kind: 'editor',
+      hostIds: [hostId],
+      query: {
+        mode: menu.entry.is_dir ? 'dir' : 'file',
+        path: menu.entry.path,
+      },
+    });
   };
 
   const items: { label: string; action: () => void; separator?: boolean }[] = [];
 
-  if (menu.side === 'remote' && !menu.entry.is_dir && isPreviewable(menu.entry)) {
-    items.push({ label: tText('sftp.ideOpenFile'), action: handleIdeOpen });
+  if (menu.side === 'remote') {
+    items.push({
+      label: menu.entry.is_dir ? tText('sftp.ideOpenDir') : tText('sftp.ideOpenFile'),
+      action: handleIdeOpen,
+    });
   }
 
   if (!menu.entry.is_dir) {
@@ -849,7 +863,7 @@ const BookmarkBar: FC<{ hostId: string }> = memo(({ hostId }) => {
 
   const addCurrent = (side: 'local' | 'remote') => {
     const path = side === 'local' ? localPath : remotePath;
-    const name = path.split('/').pop() || path;
+    const name = basenameFromPath(path, path);
     addBookmark({ id: '', name, path, side });
     setShowAdd(false);
   };

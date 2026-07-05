@@ -108,8 +108,7 @@ export default function EditorWindow() {
       if (answer) {
         await save();
       }
-      const win = await WebviewWindow.getByLabel('editor');
-      if (win) win.destroy();
+      await WebviewWindow.getCurrent().destroy();
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
@@ -126,14 +125,11 @@ export default function EditorWindow() {
   const sidebarTitle = fileName || (shellMode === 'dir' && path ? getBaseName(path) : '远程目录');
 
   useEffect(() => {
-    WebviewWindow.getByLabel('editor').then((win) => {
-      if (!win) return;
-      const titleFileName = shellMode === 'dir'
-        ? (currentFileName || '未选择文件')
-        : (fileName || fallbackName);
-      const prefix = dirty ? '● ' : '';
-      void win.setTitle(`${prefix}${titleFileName} - 远程编辑`);
-    });
+    const titleFileName = shellMode === 'dir'
+      ? (currentFileName || '未选择文件')
+      : (fileName || fallbackName);
+    const prefix = dirty ? '● ' : '';
+    void WebviewWindow.getCurrent().setTitle(`${prefix}${titleFileName} - 远程编辑`);
   }, [dirty, fileName, currentFileName, shellMode, fallbackName]);
 
   const handleChange = useCallback((value: string) => {

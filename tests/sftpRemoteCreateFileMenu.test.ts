@@ -17,6 +17,23 @@ test('SFTP store creates a remote file through the backend write command and ref
   assert.match(source, /remoteCreateFile: async \(hostId, path\) => \{[\s\S]*await invoke\('sftp_write_file', \{ hostId, path, content: '' \}\);[\s\S]*await get\(\)\.refreshRemote\(hostId\);[\s\S]*\}/);
 });
 
+test('SFTP download uses cross-platform local path joining', () => {
+  const source = readFileSync('src/stores/sftp.ts', 'utf8');
+
+  assert.match(source, /import \{ basenameFromPath, dirnameFromPath, joinPath \} from '\.\.\/utils\/pathNames'/);
+  assert.match(source, /download: async \(hostId, remoteFilePath, localDir\) => \{[\s\S]*const localPath = joinPath\(localDir, fileName\);[\s\S]*invoke\('sftp_download'/);
+});
+
+test('remote SFTP files and folders open through the editor window', () => {
+  const source = readFileSync('src/components/SftpPanel.tsx', 'utf8');
+  const capabilities = readFileSync('src-tauri/capabilities/default.json', 'utf8');
+
+  assert.match(source, /invoke\('open_managed_window', \{[\s\S]*kind: 'editor'[\s\S]*mode: entry\.is_dir \? 'dir' : 'file'[\s\S]*path: entry\.path/);
+  assert.match(source, /if \(menu\.side === 'remote'\) \{[\s\S]*label: menu\.entry\.is_dir \? tText\('sftp\.ideOpenDir'\) : tText\('sftp\.ideOpenFile'\)[\s\S]*action: handleIdeOpen/);
+  assert.doesNotMatch(source, /menu\.side === 'remote' && !menu\.entry\.is_dir && isPreviewable\(menu\.entry\)/);
+  assert.match(capabilities, /"editor-\*"/);
+});
+
 test('SFTP dictionaries include create file labels for zh and en', () => {
   const source = readFileSync('src/i18n/dictionaries.ts', 'utf8');
 

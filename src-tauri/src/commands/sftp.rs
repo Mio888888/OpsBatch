@@ -438,18 +438,39 @@ pub async fn sftp_read_file(
 
 #[tauri::command]
 pub fn sftp_mkdir(
+    db: tauri::State<'_, Database>,
     manager: tauri::State<'_, SftpManager>,
+    pool: tauri::State<'_, ssh::SshConnectionRegistry>,
     host_id: String,
     path: String,
 ) -> Result<(), String> {
+    let mkdir_result = attempt_sftp_mkdir(&db, &manager, &pool, &host_id, &path);
+    if mkdir_result.is_ok() {
+        return Ok(());
+    }
+
+    let first_error = mkdir_result.unwrap_err();
+    drop(manager.sessions.remove(&host_id));
+    let retry_result = attempt_sftp_mkdir(&db, &manager, &pool, &host_id, &path);
+    retry_result.map_err(|e| format!("{} (重试后仍失败: {})", first_error, e))
+}
+
+fn attempt_sftp_mkdir(
+    db: &Database,
+    manager: &SftpManager,
+    pool: &ssh::SshConnectionRegistry,
+    host_id: &str,
+    path: &str,
+) -> Result<(), String> {
+    ensure_sftp_session(db, manager, pool, host_id)?;
     let entry = manager
         .sessions
-        .get(&host_id)
+        .get(host_id)
         .ok_or("sftp session not found")?;
     let sftp = entry.sftp.lock().map_err(|e| e.to_string())?;
     entry
         .lease
-        .block_on(sftp.create_dir(&path))
+        .block_on(sftp.create_dir(path))
         .map_err(|e| format!("mkdir failed: {}", e))
 }
 

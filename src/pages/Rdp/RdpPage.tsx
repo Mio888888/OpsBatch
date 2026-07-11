@@ -3,6 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent
 import { useLocation } from 'react-router-dom';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { emit, listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { Button, Empty, Spin } from '../../components/ui';
 import { CloseOutlined, ReloadOutlined, UploadOutlined } from '../../components/ui/icons';
@@ -299,7 +300,7 @@ export default function RdpPage() {
 
   const disconnectAndCloseWindow = useCallback(() => {
     disconnectActive();
-    void getCurrentWindow().destroy().catch((e) => {
+    void WebviewWindow.getCurrent().destroy().catch((e) => {
       console.warn('[rdp] destroy window failed:', e);
     });
   }, [disconnectActive]);
@@ -312,7 +313,7 @@ export default function RdpPage() {
     }).catch((e) => {
       console.warn('[rdp] emit open-asset-manager failed:', e);
     });
-    void getCurrentWindow().destroy().catch((e) => {
+    void WebviewWindow.getCurrent().destroy().catch((e) => {
       console.warn('[rdp] destroy window failed:', e);
     });
   }, [disconnectActive]);

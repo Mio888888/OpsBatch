@@ -6,6 +6,7 @@ import { getCurrentWebview } from '@tauri-apps/api/webview';
 import type { UnlistenFn } from '@tauri-apps/api/event';
 import { useSftpStore, type FileEntry } from '../stores/sftp';
 import PortForwardPanel from './PortForwardPanel';
+import { Button, Input, Modal, message } from './ui';
 import { useTranslation } from '../i18n';
 import { CloudServerOutlined, FolderOpenOutlined } from './ui/icons';
 import {
@@ -672,7 +673,8 @@ const FileContextMenu: FC<{
   menu: ContextMenuState;
   hostId: string;
   onClose: () => void;
-}> = ({ menu, hostId, onClose }) => {
+  onCreateRemoteEntry: (kind: 'file' | 'folder') => void;
+}> = ({ menu, hostId, onClose, onCreateRemoteEntry }) => {
   const { tText } = useTranslation();
   const previewLocal = useSftpStore((s) => s.previewLocal);
   const previewRemote = useSftpStore((s) => s.previewRemote);
@@ -686,8 +688,6 @@ const FileContextMenu: FC<{
   const localPath = useSftpStore((s) => s.localPath);
   const remotePath = useSftpStore((s) => s.remotePath);
   const localMkdir = useSftpStore((s) => s.localMkdir);
-  const remoteMkdir = useSftpStore((s) => s.remoteMkdir);
-  const remoteCreateFile = useSftpStore((s) => s.remoteCreateFile);
   const menuRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(() => ({ left: menu.x, top: menu.y }));
 
@@ -739,23 +739,24 @@ const FileContextMenu: FC<{
   };
 
   const handleMkdir = async () => {
+    if (menu.side === 'remote') {
+      onCreateRemoteEntry('folder');
+      return;
+    }
+
     const name = prompt(tText('sftp.newFolderPrompt'));
     if (!name) return;
-    const newPath = joinPath(menu.side === 'local' ? localPath : remotePath, name);
-    if (menu.side === 'local') {
+    const newPath = joinPath(localPath, name);
+    try {
       await localMkdir(newPath);
-    } else {
-      await remoteMkdir(hostId, newPath);
+      onClose();
+    } catch (error: unknown) {
+      message.error(tText('common.operationFailed', { error: String(error) }));
     }
-    onClose();
   };
 
-  const handleCreateFile = async () => {
-    const name = prompt(tText('sftp.newFilePrompt'));
-    if (!name) return;
-    const newPath = joinPath(remotePath, name);
-    await remoteCreateFile(hostId, newPath);
-    onClose();
+  const handleCreateFile = () => {
+    onCreateRemoteEntry('file');
   };
 
   const handleIdeOpen = async () => {
@@ -906,6 +907,9 @@ export const SftpPanel: FC<SftpPanelProps> = ({ hostId, hideTabBar, forceTab }) 
   const { tText } = useTranslation();
   const initSession = useSftpStore((s) => s.initSession);
   const navigateRemote = useSftpStore((s) => s.navigateRemote);
+  const remotePath = useSftpStore((s) => s.remotePath);
+  const remoteMkdir = useSftpStore((s) => s.remoteMkdir);
+  const remoteCreateFile = useSftpStore((s) => s.remoteCreateFile);
   const transfers = useSftpStore((s) => s.transfers);
   const [initialized, setInitialized] = useState(false);
   const [initError, setInitError] = useState('');
@@ -913,6 +917,9 @@ export const SftpPanel: FC<SftpPanelProps> = ({ hostId, hideTabBar, forceTab }) 
   const [splitRatio, setSplitRatio] = useState(0.5);
   const [showTransfers, setShowTransfers] = useState(true);
   const [activeTab, setActiveTab] = useState<'sftp' | 'forward'>(forceTab || 'sftp');
+  const [createEntryType, setCreateEntryType] = useState<'file' | 'folder' | null>(null);
+  const [createEntryName, setCreateEntryName] = useState('');
+  const [createEntrySubmitting, setCreateEntrySubmitting] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const draggingSplit = useRef(false);
 
@@ -956,6 +963,39 @@ export const SftpPanel: FC<SftpPanelProps> = ({ hostId, hideTabBar, forceTab }) 
     e.stopPropagation();
     setContextMenu({ x: e.clientX, y: e.clientY, side, entry });
   }, []);
+
+  const openRemoteCreateDialog = useCallback((kind: 'file' | 'folder') => {
+    setContextMenu(null);
+    setCreateEntryName('');
+    setCreateEntryType(kind);
+  }, []);
+
+  const closeRemoteCreateDialog = useCallback(() => {
+    if (createEntrySubmitting) return;
+    setCreateEntryName('');
+    setCreateEntryType(null);
+  }, [createEntrySubmitting]);
+
+  const handleCreateRemoteEntry = useCallback(async () => {
+    const name = createEntryName.trim();
+    if (!name || !createEntryType) return;
+
+    const newPath = joinPath(remotePath, name);
+    setCreateEntrySubmitting(true);
+    try {
+      if (createEntryType === 'folder') {
+        await remoteMkdir(hostId, newPath);
+      } else {
+        await remoteCreateFile(hostId, newPath);
+      }
+      setCreateEntryName('');
+      setCreateEntryType(null);
+    } catch (error: unknown) {
+      message.error(tText('common.operationFailed', { error: String(error) }));
+    } finally {
+      setCreateEntrySubmitting(false);
+    }
+  }, [createEntryName, createEntryType, hostId, remoteCreateFile, remoteMkdir, remotePath, tText]);
 
   const transferStats = useMemo(() => transfers.reduce(
     (stats, transfer) => {
@@ -1104,8 +1144,42 @@ export const SftpPanel: FC<SftpPanelProps> = ({ hostId, hideTabBar, forceTab }) 
               menu={contextMenu}
               hostId={hostId}
               onClose={() => setContextMenu(null)}
+              onCreateRemoteEntry={openRemoteCreateDialog}
             />
           )}
+          <Modal
+            title={createEntryType === 'file' ? tText('sftp.newFile') : tText('sftp.newFolder')}
+            open={createEntryType !== null}
+            onCancel={closeRemoteCreateDialog}
+            footer={(
+              <>
+                <Button onClick={closeRemoteCreateDialog} disabled={createEntrySubmitting}>
+                  {tText('common.cancel')}
+                </Button>
+                <Button
+                  type="primary"
+                  loading={createEntrySubmitting}
+                  disabled={!createEntryName.trim()}
+                  onClick={() => { void handleCreateRemoteEntry(); }}
+                >
+                  {tText('common.ok')}
+                </Button>
+              </>
+            )}
+          >
+            <Input
+              autoFocus
+              value={createEntryName}
+              placeholder={createEntryType === 'file' ? tText('sftp.newFilePrompt') : tText('sftp.newFolderPrompt')}
+              onChange={(event) => setCreateEntryName(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  void handleCreateRemoteEntry();
+                }
+              }}
+            />
+          </Modal>
         </>
       ) : (
         <PortForwardPanel hostId={hostId} />

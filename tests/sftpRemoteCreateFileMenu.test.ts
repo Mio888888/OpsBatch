@@ -5,9 +5,13 @@ import test from 'node:test';
 test('remote SFTP context menu exposes create file for files and folders', () => {
   const source = readFileSync('src/components/SftpPanel.tsx', 'utf8');
 
-  assert.match(source, /const remoteCreateFile = useSftpStore\(\(s\) => s\.remoteCreateFile\)/);
-  assert.match(source, /const handleCreateFile = async \(\) => \{[\s\S]*prompt\(tText\('sftp\.newFilePrompt'\)\)[\s\S]*remoteCreateFile\(hostId, newPath\)/);
+  assert.match(source, /onCreateRemoteEntry: \(kind: 'file' \| 'folder'\) => void/);
+  assert.match(source, /const handleCreateFile = \(\) => \{\s*onCreateRemoteEntry\('file'\);\s*\}/);
+  assert.match(source, /if \(menu\.side === 'remote'\) \{\s*onCreateRemoteEntry\('folder'\);\s*return;/);
   assert.match(source, /if \(menu\.side === 'remote'\) \{[\s\S]*items\.push\(\{ label: tText\('sftp\.newFile'\), action: handleCreateFile, separator: true \}\);[\s\S]*items\.push\(\{ label: tText\('sftp\.newFolder'\), action: handleMkdir \}\);[\s\S]*\}/);
+  assert.match(source, /const \[createEntryType, setCreateEntryType\] = useState<'file' \| 'folder' \| null>\(null\)/);
+  assert.match(source, /<Modal[\s\S]*open=\{createEntryType !== null\}[\s\S]*<Input[\s\S]*autoFocus/);
+  assert.doesNotMatch(source, /const handleCreateFile = async \(\) => \{[\s\S]*prompt\(/);
 });
 
 test('SFTP store creates a remote file through the backend write command and refreshes', () => {
@@ -15,6 +19,16 @@ test('SFTP store creates a remote file through the backend write command and ref
 
   assert.match(source, /remoteCreateFile: \(hostId: string, path: string\) => Promise<void>/);
   assert.match(source, /remoteCreateFile: async \(hostId, path\) => \{[\s\S]*await invoke\('sftp_write_file', \{ hostId, path, content: '' \}\);[\s\S]*await get\(\)\.refreshRemote\(hostId\);[\s\S]*\}/);
+});
+
+test('remote SFTP create operations reconnect and surface errors', () => {
+  const panelSource = readFileSync('src/components/SftpPanel.tsx', 'utf8');
+  const commandSource = readFileSync('src-tauri/src/commands/sftp.rs', 'utf8');
+
+  assert.match(panelSource, /import \{[^}]*message[^}]*\} from '\.\/ui';/);
+  assert.match(panelSource, /const handleCreateRemoteEntry = useCallback\(async \(\) => \{[\s\S]*if \(createEntryType === 'folder'\) \{[\s\S]*await remoteMkdir\(hostId, newPath\);[\s\S]*await remoteCreateFile\(hostId, newPath\);[\s\S]*catch \(error: unknown\) \{[\s\S]*message\.error\(tText\('common\.operationFailed', \{ error: String\(error\) \}\)\);/);
+  assert.match(commandSource, /pub fn sftp_mkdir\([\s\S]*attempt_sftp_mkdir\(&db, &manager, &pool, &host_id, &path\)[\s\S]*drop\(manager\.sessions\.remove\(&host_id\)\);[\s\S]*attempt_sftp_mkdir\(&db, &manager, &pool, &host_id, &path\)/);
+  assert.match(commandSource, /fn attempt_sftp_mkdir\([\s\S]*ensure_sftp_session\(db, manager, pool, host_id\)\?[\s\S]*sftp\.create_dir\(path\)/);
 });
 
 test('SFTP download uses cross-platform local path joining', () => {

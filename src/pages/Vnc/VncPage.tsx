@@ -4,6 +4,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { invoke } from '@tauri-apps/api/core';
 import { emit } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { WebviewWindow } from '@tauri-apps/api/webviewWindow';
 import RFB from '@novnc/novnc';
 import { Button, Empty, Spin } from '../../components/ui';
 import { CloseOutlined, ReloadOutlined } from '../../components/ui/icons';
@@ -391,7 +392,7 @@ export default function VncPage() {
 
   const disconnectAndCloseWindow = useCallback(() => {
     closeVncSession(sessionIdRef.current);
-    void getCurrentWindow().destroy().catch((e) => {
+    void WebviewWindow.getCurrent().destroy().catch((e) => {
       console.warn('[vnc] destroy window failed:', e);
     });
   }, [closeVncSession]);
@@ -411,7 +412,7 @@ export default function VncPage() {
     }).catch((e) => {
       console.warn('[vnc] emit open-asset-manager failed:', e);
     });
-    void getCurrentWindow().destroy().catch((e) => {
+    void WebviewWindow.getCurrent().destroy().catch((e) => {
       console.warn('[vnc] destroy window failed:', e);
     });
   }, []);

@@ -681,7 +681,7 @@ export function Popconfirm({ children, title, onConfirm }: { children?: ReactNod
           <AlertDialogPrimitive.Title className="ui-dialog-title">{title}</AlertDialogPrimitive.Title>
           <div className="ui-dialog-footer">
             <AlertDialogPrimitive.Cancel asChild><Button>{t('common.cancel')}</Button></AlertDialogPrimitive.Cancel>
-            <AlertDialogPrimitive.Action asChild><Button type="primary" danger onClick={onConfirm}>{t('common.ok')}</Button></AlertDialogPrimitive.Action>
+            <AlertDialogPrimitive.Action asChild><Button type="primary" danger onClick={(event) => { event.stopPropagation(); onConfirm?.(); }}>{t('common.ok')}</Button></AlertDialogPrimitive.Action>
           </div>
         </AlertDialogPrimitive.Content>
       </AlertDialogPrimitive.Portal>

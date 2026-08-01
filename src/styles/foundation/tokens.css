@@ -47,7 +47,7 @@
   --font-sans-macos: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
     'HarmonyOS Sans SC', 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji',
     'Segoe UI Emoji', 'Segoe UI Symbol';
-  --font-sans-windows: 'HarmonyOS Sans SC', 'Segoe UI Variable', 'Segoe UI',
+  --font-sans-windows: 'Segoe UI Variable Text', 'Segoe UI',
     'Microsoft YaHei UI', 'Microsoft YaHei', Arial, sans-serif, 'Apple Color Emoji',
     'Segoe UI Emoji', 'Segoe UI Symbol';
   --font-mono: 'Menlo', 'Monaco', 'Courier New', monospace;

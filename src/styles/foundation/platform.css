@@ -4,8 +4,20 @@
 
 :root[data-platform="windows"] {
   --window-radius: 0;
+  --font-size-micro: 10px;
+  --font-size-caption: 11px;
+  --font-size-support: 12px;
+  --font-size-small: 13px;
+  --font-size-window-title: 13px;
+  --font-size-body: 14px;
+  --font-weight-strong: 600;
+  --font-weight-title: 600;
+  --font-weight-display: 700;
+  --font-weight-display-strong: 700;
+  --font-weight-hero: 700;
   font-family: var(--font-sans-windows);
-  text-rendering: optimizeLegibility;
+  font-synthesis: none;
+  text-rendering: auto;
   -webkit-font-smoothing: auto;
   background-color: var(--color-workbench-bg);
   -webkit-text-size-adjust: 100%;

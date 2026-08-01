@@ -27,6 +27,7 @@ import { requestKeychainNotice } from '../../utils/keychainNotice';
 import { logHandledError } from '../../utils/globalLogger';
 import { darkThemes, lightThemes, accentColors } from '../../data/themes';
 import type { ThemePreviewMeta } from '../../data/themes';
+import { UI_SCALE_OPTIONS } from '../../utils/uiScale';
 import '../../styles/pages/settings.css';
 
 const QuickActionsPage = lazy(() => import('../QuickActions/QuickActionsPage'));
@@ -563,6 +564,25 @@ function AppearanceSection() {
           <p>{t('settings.appearanceGroupInterfaceDesc')}</p>
         </div>
         <div className="settings-general-rows">
+          <div className="settings-general-row">
+            <div className="settings-general-row-copy">
+              <span className="settings-general-row-title">{t('settings.uiScale')}</span>
+              <span className="settings-general-row-desc">{t('settings.uiScaleDesc')}</span>
+            </div>
+            <Select<number>
+              value={theme.uiScale}
+              options={UI_SCALE_OPTIONS.map((value) => ({
+                value,
+                label: value === 115
+                  ? tText('settings.uiScaleRecommended', { scale: value })
+                  : `${value}%`,
+              }))}
+              onChange={(value) => { void patchTheme({ uiScale: value }); }}
+              className="settings-general-control"
+              style={{ width: 150 }}
+            />
+          </div>
+
           <div className="settings-general-row">
             <div className="settings-general-row-copy">
               <span className="settings-general-row-title">{t('settings.reduceMotion')}</span>

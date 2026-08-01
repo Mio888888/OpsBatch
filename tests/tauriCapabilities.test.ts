@@ -10,6 +10,7 @@ test('default Tauri capability allows dynamic RDP windows to listen for events',
 
   assert.ok(capability.windows?.includes('rdp-*'));
   assert.ok(capability.permissions?.includes('core:event:allow-listen'));
+  assert.ok(capability.permissions?.includes('core:webview:allow-set-webview-zoom'));
 });
 
 test('backend does not register direct keychain read commands for AI secrets', () => {

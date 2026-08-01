@@ -2,10 +2,13 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { emit, listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 import type { ITheme } from '@xterm/xterm';
 import { allThemes, darkThemes, lightThemes, accentColors, getThemeById, getAccentById } from '../data/themes';
 import type { ThemePreviewMeta, AccentColorMeta } from '../data/themes';
 import { logHandledError } from '../utils/globalLogger';
+import { defaultUiScaleForPlatform, normalizeUiScale } from '../utils/uiScale';
+import { getUiTextPalette } from '../utils/uiReadability';
 
 export interface ThemeState {
   themeMode: 'system' | 'manual';
@@ -15,6 +18,7 @@ export interface ThemeState {
   terminalFontSize: number;
   terminalFontFamily: string;
   terminalScrollback: number;
+  uiScale: number;
   reduceMotion: boolean;
   loaded: boolean;
 }
@@ -31,6 +35,7 @@ const defaults: ThemeState = {
   terminalFontSize: 14,
   terminalFontFamily: DEFAULT_TERMINAL_FONT_FAMILY,
   terminalScrollback: 2000,
+  uiScale: defaultUiScaleForPlatform(),
   reduceMotion: false,
   loaded: false,
 };
@@ -62,6 +67,7 @@ function getThemeEventPayload(): Omit<ThemeState, 'loaded'> & { sourceWindowLabe
     terminalFontSize: s.terminalFontSize,
     terminalFontFamily: s.terminalFontFamily,
     terminalScrollback: s.terminalScrollback,
+    uiScale: s.uiScale,
     reduceMotion: s.reduceMotion,
     sourceWindowLabel: getCurrentWindow().label,
   };
@@ -76,10 +82,11 @@ function applyThemeSettings(settings: Omit<ThemeState, 'loaded'>) {
     terminalFontSize: Number.isFinite(settings.terminalFontSize) ? settings.terminalFontSize : defaults.terminalFontSize,
     terminalFontFamily: normalizeTerminalFontFamily(settings.terminalFontFamily),
     terminalScrollback: Number.isFinite(settings.terminalScrollback) ? settings.terminalScrollback : defaults.terminalScrollback,
+    uiScale: normalizeUiScale(settings.uiScale, defaults.uiScale),
     reduceMotion: settings.reduceMotion ?? defaults.reduceMotion,
     loaded: true,
   });
-  applyThemeToDOM();
+  void applyThemeToDOM();
   notify();
 }
 
@@ -102,14 +109,14 @@ export function registerThemeSettingsSync() {
     const colorSchemeMql = window.matchMedia('(prefers-color-scheme: dark)');
     colorSchemeMql.addEventListener('change', () => {
       if (useThemeStore.getState().themeMode === 'system') {
-        applyThemeToDOM();
+        void applyThemeToDOM();
         notify();
       }
     });
 
     const motionMql = window.matchMedia('(prefers-reduced-motion: reduce)');
     motionMql.addEventListener('change', () => {
-      applyThemeToDOM();
+      void applyThemeToDOM();
       notify();
     });
   }
@@ -126,6 +133,7 @@ export async function loadThemeSettings() {
       terminalFontSize: settings.terminalFontSize ? parseInt(settings.terminalFontSize) : defaults.terminalFontSize,
       terminalFontFamily: normalizeTerminalFontFamily(settings.terminalFontFamily),
       terminalScrollback: settings.terminalScrollback ? parseInt(settings.terminalScrollback) : defaults.terminalScrollback,
+      uiScale: normalizeUiScale(settings.uiScale, defaults.uiScale),
       reduceMotion: settings.reduceMotion === 'true',
       loaded: true,
     });
@@ -133,7 +141,7 @@ export async function loadThemeSettings() {
     void logHandledError('theme.loadSettings', error, 'warn');
     useThemeStore.setState({ loaded: true });
   }
-  applyThemeToDOM();
+  await applyThemeToDOM();
   notify();
 }
 
@@ -151,6 +159,7 @@ export async function patchTheme(patch: Partial<Omit<ThemeState, 'loaded'>>) {
         terminalFontSize: String(s.terminalFontSize),
         terminalFontFamily: s.terminalFontFamily,
         terminalScrollback: String(s.terminalScrollback),
+        uiScale: String(normalizeUiScale(s.uiScale, defaults.uiScale)),
         reduceMotion: String(s.reduceMotion),
       },
     });
@@ -158,7 +167,7 @@ export async function patchTheme(patch: Partial<Omit<ThemeState, 'loaded'>>) {
   } catch (error) {
     void logHandledError('theme.saveSettings', error, 'warn');
   }
-  applyThemeToDOM();
+  await applyThemeToDOM();
   notify();
   if (saved) {
     emit(THEME_SETTINGS_CHANGED_EVENT, getThemeEventPayload()).catch((e) => {
@@ -184,7 +193,8 @@ export function shouldReduceMotion(): boolean {
 export function normalizeTerminalFontFamily(value?: string | null): string {
   const trimmed = value?.trim();
   if (trimmed === LEGACY_TERMINAL_FONT_FAMILY) return defaults.terminalFontFamily;
-  return trimmed || defaults.terminalFontFamily;
+  if (!trimmed) return defaults.terminalFontFamily;
+  return trimmed.replace(/(["']?)consolai\1/gi, '"Consolas"');
 }
 
 /** Pick a theme that matches the given tone, preferring the stored ID if its tone matches. */
@@ -195,7 +205,19 @@ function resolveThemeForTone(preferredTone: 'dark' | 'light', storedId: string):
   return pool[0];
 }
 
-export function applyThemeToDOM() {
+async function applyUiScaleToWebview(uiScale: number) {
+  const normalizedScale = normalizeUiScale(uiScale, defaults.uiScale);
+  const root = document.documentElement;
+  root.dataset.uiScale = String(normalizedScale);
+  root.style.setProperty('--ui-scale', `${normalizedScale}%`);
+  try {
+    await getCurrentWebview().setZoom(normalizedScale / 100);
+  } catch (error) {
+    void logHandledError('theme.applyUiScale', error, 'warn');
+  }
+}
+
+export async function applyThemeToDOM() {
   const s = useThemeStore.getState();
   const root = document.documentElement;
   const accent = getAccentById(s.accentColorId) || accentColors[0];
@@ -225,8 +247,12 @@ export function applyThemeToDOM() {
 
     root.style.setProperty('--terminal-bg', bg);
     root.style.setProperty('--terminal-fg', fg);
-    root.style.setProperty('--terminal-muted', med);
-    root.style.setProperty('--terminal-weak', weak);
+    const uiText = root.dataset.platform === 'windows'
+      ? getUiTextPalette(isDark)
+      : { primary: fg, secondary: med, muted: weak };
+
+    root.style.setProperty('--terminal-muted', uiText.secondary);
+    root.style.setProperty('--terminal-weak', uiText.muted);
     root.style.setProperty('--terminal-accent', acc);
 
     const rgb = hexToRgb(bg);
@@ -235,9 +261,9 @@ export function applyThemeToDOM() {
     root.style.setProperty('--terminal-border', isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.08)');
     root.style.setProperty('--terminal-panel-bg', isDark ? darken(bg, 8) : lighten(bg, 4));
 
-    root.style.setProperty('--color-text', fg);
-    root.style.setProperty('--color-text-secondary', med);
-    root.style.setProperty('--color-text-muted', weak);
+    root.style.setProperty('--color-text', uiText.primary);
+    root.style.setProperty('--color-text-secondary', uiText.secondary);
+    root.style.setProperty('--color-text-muted', uiText.muted);
     root.style.setProperty('--color-border', theme.ui.border);
     root.style.setProperty('--color-border-strong', theme.ui.borderStrong);
     root.style.setProperty('--color-surface', theme.ui.cardBg);
@@ -269,6 +295,7 @@ export function applyThemeToDOM() {
   if (theme) {
     win.setBackgroundColor(theme.ui.pageBg).catch((e) => console.warn('[theme] setBackgroundColor failed:', e));
   }
+  await applyUiScaleToWebview(s.uiScale);
 }
 
 function hexToRgb(hex: string): string {

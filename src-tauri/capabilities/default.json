@@ -18,6 +18,7 @@
     "core:window:allow-set-focus",
     "core:window:allow-set-theme",
     "core:window:allow-set-background-color",
+    "core:webview:allow-set-webview-zoom",
     "dialog:default",
     "dialog:allow-open",
     "dialog:allow-save",

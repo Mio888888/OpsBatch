@@ -81,13 +81,13 @@ interface AiChatState {
   newConversation: () => void;
   deleteConversation: (id: string) => Promise<void>;
   sendMessage: (context?: string, images?: ChatMessageImage[]) => Promise<void>;
-  sendDirectMessage: (text: string, context?: string, images?: ChatMessageImage[]) => Promise<void>;
+  sendDirectMessage: (text: string, context?: string, images?: ChatMessageImage[], targetSessionId?: string) => Promise<void>;
   sendMessageInline: () => Promise<void>;
   initStreamListener: () => Promise<void>;
   destroyStreamListener: () => void;
   setRdpContext: (ctx: { width: number; height: number; sessionId?: string } | null) => void;
   setRdpExecutor: (executor: ((operations: import('../utils/aiActionParser').RdpOperation[]) => Promise<void>) | null) => void;
-  approveAction: (actionId: string, sessionId?: string) => Promise<void>;
+  approveAction: (actionId: string, sessionId?: string, targetSessionId?: string) => Promise<void>;
   rejectAction: (actionId: string) => void;
 }
 
@@ -481,9 +481,9 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
     }
   },
 
-  sendDirectMessage: async (text: string, context?: string, images?: ChatMessageImage[]) => {
+  sendDirectMessage: async (text, context, images, targetSessionId) => {
     const state = get();
-    const sid = state.activeSessionId;
+    const sid = targetSessionId ?? state.activeSessionId;
     if (!sid) return;
     const session = getSession(state.sessions, sid);
     if (session.streamingMessageId) return;
@@ -660,8 +660,11 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
               },
             };
           });
-          const rdpCtx = getSession(get().sessions, sid).rdpContext;
-          void parseAiPendingActionsAsync(rawContent, rdpCtx).then(({ displayContent, actions, commandPlanNotice, rdpParseError, rdpParseDiagnostic }) => {
+          const parsedSession = getSession(get().sessions, sid);
+          const rdpCtx = parsedSession.rdpContext;
+          const singleCommand = parsedSession.scope.scope === 'ssh_host'
+            || parsedSession.scope.scope === 'terminal_session';
+          void parseAiPendingActionsAsync(rawContent, rdpCtx, singleCommand).then(({ displayContent, actions, commandPlanNotice, rdpParseError, rdpParseDiagnostic }) => {
             if (rdpParseError) {
               void logHandledError(
                 'rdp.ai.parse',
@@ -738,9 +741,9 @@ export const useAiChatStore = create<AiChatState>((set, get) => ({
     // Keep listener alive for app lifetime
   },
 
-  approveAction: async (actionId: string, sessionId?: string) => {
+  approveAction: async (actionId, sessionId, targetSessionId) => {
     const state = get();
-    const sid = state.activeSessionId;
+    const sid = targetSessionId ?? state.activeSessionId;
     if (!sid) return;
     const session = getSession(state.sessions, sid);
     const msg = session.messages.find((m) => m.pendingActions?.some((a) => a.id === actionId));

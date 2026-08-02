@@ -159,6 +159,7 @@ interface CommandPlanCandidate {
 export async function parseAiPendingActionsAsync(
   content: string,
   rdpContext?: { width: number; height: number },
+  singleCommand = false,
 ): Promise<ParsedAiActionsResult> {
   // RDP 场景：优先尝试解析 RDP 操作计划
   if (rdpContext) {
@@ -174,7 +175,7 @@ export async function parseAiPendingActionsAsync(
   }
 
   const candidate = extractCommandPlanCandidate(content);
-  if (!candidate) return parseAiPendingActions(content);
+  if (!candidate) return constrainCommandActions(parseAiPendingActions(content), singleCommand);
 
   const commandPlanNotice = parseEmptyCommandPlanNotice(candidate.rawPlan);
   if (commandPlanNotice) {
@@ -189,7 +190,7 @@ export async function parseAiPendingActionsAsync(
     const plan = await invoke<ValidatedCommandPlan>('ai_validate_command_plan', {
       rawPlan: candidate.rawPlan,
     });
-    return {
+    return constrainCommandActions({
       displayContent: removeCommandPlanFromDisplay(content, candidate).trim(),
       actions: plan.steps.map((step) => ({
         id: step.id,
@@ -202,10 +203,14 @@ export async function parseAiPendingActionsAsync(
         approved: false,
         executed: false,
       })),
-    };
+    }, singleCommand);
   } catch {
-    return parseAiPendingActions(content);
+    return constrainCommandActions(parseAiPendingActions(content), singleCommand);
   }
+}
+
+export function parseSshPendingActions(content: string): ParsedAiActionsResult {
+  return constrainCommandActions(parseAiPendingActions(content), true);
 }
 
 export function parseAiPendingActions(content: string): ParsedAiActionsResult {
@@ -234,6 +239,14 @@ export function parseAiPendingActions(content: string): ParsedAiActionsResult {
   }
 
   return { displayContent, actions };
+}
+
+function constrainCommandActions(
+  result: ParsedAiActionsResult,
+  singleCommand: boolean,
+): ParsedAiActionsResult {
+  if (!singleCommand || result.actions.length <= 1) return result;
+  return { ...result, actions: result.actions.slice(0, 1) };
 }
 
 export function extractEmptyCommandPlanNotice(content: string): ParsedAiActionsResult | null {

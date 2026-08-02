@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useMemo, memo, useCallback } from 'react';
 import { useAiChatStore, selectMessages, selectActiveConversationId, selectInputText, selectStreamingMessageId, type AiChatScope, type ChatMessage, type PendingAction } from '../stores/aiChat';
-import { classifyTerminalFollowUp, stripTerminalControl } from '../utils/terminalFollowUp';
+import { classifyTerminalFollowUp, formatTerminalCommandResult } from '../utils/terminalFollowUp';
 import { extractEmptyCommandPlanNotice, stripCommandPlanBlock } from '../utils/aiActionParser';
 import { useTranslation } from '../i18n';
 import type { TerminalCommandExecutionResult } from './TerminalView';
@@ -185,117 +185,7 @@ const CmdDoneItem: FC<{ action: PendingAction; idx: number }> = memo(({ action, 
 });
 CmdDoneItem.displayName = 'CmdDoneItem';
 
-// Shell prompt: root@host:path# / user@host:path$ etc.
-const SHELL_PROMPT_RE = /[\w.-]+@[\w.-]+:[^\n]*[#$]\s*$/;
-
-// Interactive prompt: waiting for user input — ends with : or ? or [y/n] etc.
-const INTERACTIVE_PROMPT_RE = /[:?]\s*$|\[y\/n\]\s*$|\(yes\/no\)\s*$|>\s*$|password\s*$/i;
-
-function getLastNonEmptyLine(buffer: string): string {
-  const clean = stripTerminalControl(buffer);
-  const lines = clean.split(/\r?\n/);
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const trimmed = lines[i].trim();
-    if (trimmed) return trimmed;
-  }
-  return '';
-}
-
-function isShellPromptPresent(buffer: string): boolean {
-  const clean = stripTerminalControl(buffer);
-  const lines = clean.split(/\r?\n/);
-  const tail = lines.slice(-5);
-  for (let i = tail.length - 1; i >= 0; i--) {
-    const trimmed = tail[i].trim();
-    if (!trimmed) continue;
-    return SHELL_PROMPT_RE.test(trimmed);
-  }
-  return false;
-}
-
-function isInteractivePrompt(buffer: string): boolean {
-  const lastLine = getLastNonEmptyLine(buffer);
-  return INTERACTIVE_PROMPT_RE.test(lastLine);
-}
-
 const AUTO_COMMAND_TIMEOUT_MS = 45 * 60 * 1000;
-
-function waitForCommandComplete(
-  getBuffer: () => string,
-  pollMs = 400,
-): Promise<string> {
-  return new Promise((resolve) => {
-    let lastClean = stripTerminalControl(getBuffer());
-    let stableStart: number | null = null;
-
-    const poll = setInterval(() => {
-      const currentRaw = getBuffer();
-      const currentClean = stripTerminalControl(currentRaw);
-      const hasPrompt = isShellPromptPresent(currentRaw);
-      const waitingInput = isInteractivePrompt(currentRaw);
-      const changed = currentClean !== lastClean;
-
-      if (changed) {
-        stableStart = null;
-        lastClean = currentClean;
-        return;
-      }
-
-      // Output is stable
-      if (stableStart === null) stableStart = Date.now();
-      const elapsed = Date.now() - stableStart;
-
-      if (hasPrompt && elapsed >= 800) {
-        clearInterval(poll);
-        resolve(currentRaw);
-        return;
-      }
-
-      // Only use timeout fallback when NOT waiting for interactive input
-      if (!waitingInput && !hasPrompt && elapsed >= 2000) {
-        clearInterval(poll);
-        resolve(currentRaw);
-        return;
-      }
-
-      // Waiting for interactive input or no prompt detected → keep waiting
-      lastClean = currentClean;
-    }, pollMs);
-  });
-}
-
-function getExecutionOutputForFollowUp(result: TerminalCommandExecutionResult): string {
-  const output = result.output.trim();
-  if (result.status === 'timeout') {
-    return `${output}\n\n[OpsBatch] 命令仍未收到完成信号，已等待到超时，可能仍在运行或等待交互。`.trim();
-  }
-  if (result.status === 'closed') {
-    return `${output}\n\n[OpsBatch] 终端会话已关闭，命令执行被中断或会话结束。`.trim();
-  }
-  if (result.status === 'write_failed') {
-    return `${output}\n\n[OpsBatch] 命令写入终端失败。`.trim();
-  }
-  if (typeof result.exitCode === 'number' && result.exitCode !== 0) {
-    return `${output}\n\n[OpsBatch] 命令退出码：${result.exitCode}`.trim();
-  }
-  return output;
-}
-
-function shouldForceFollowUpForExecution(result: TerminalCommandExecutionResult): boolean {
-  return result.status !== 'completed' || (typeof result.exitCode === 'number' && result.exitCode !== 0);
-}
-
-function combineExecutionOutputs(results: TerminalCommandExecutionResult[]): string {
-  return results
-    .map((result, index) => {
-      const output = getExecutionOutputForFollowUp(result);
-      if (!output) return '';
-      const exitText = typeof result.exitCode === 'number' ? `，退出码 ${result.exitCode}` : '';
-      return `[命令 ${index + 1}：${result.status}${exitText}]\n${output}`;
-    })
-    .filter(Boolean)
-    .join('\n\n');
-}
 
 function getTerminalBufferText(
   getBuffer?: () => string,
@@ -346,11 +236,8 @@ const AiChatPanel: FC<AiChatPanelProps> = ({
   const sendDirectMessage = useAiChatStore((s) => s.sendDirectMessage);
   const activateSession = useAiChatStore((s) => s.activateSession);
   const [showHistory, setShowHistory] = useState(false);
-  const [waitingForOutput, setWaitingForOutput] = useState(false);
   const [executingActionIds, setExecutingActionIds] = useState<Set<string>>(new Set());
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const autoFollowUpDoneRef = useRef(false);
-  const commandResultsRef = useRef<TerminalCommandExecutionResult[]>([]);
   const executingActionIdsRef = useRef<Set<string>>(new Set());
 
   const allActions = useMemo(
@@ -369,14 +256,12 @@ const AiChatPanel: FC<AiChatPanelProps> = ({
     () => pendingActions.filter((a) => !executingActionIds.has(a.id)),
     [pendingActions, executingActionIds],
   );
-  const executableWaitingActions = useMemo(
-    () => waitingActions.filter((a) => !a.assessmentLoading && a.assessment?.decision !== 'BLOCK'),
-    [waitingActions],
-  );
   const executedActions = useMemo(
     () => allActions.filter((a) => a.executed),
     [allActions],
   );
+  const hasUnfinishedAction = pendingActions.length > 0
+    || executingActions.length > 0;
 
   // Split messages: historical (rendered with content-visibility) + active (last N)
   const { historical, active } = useMemo(() => {
@@ -388,43 +273,6 @@ const AiChatPanel: FC<AiChatPanelProps> = ({
       active: messages.slice(messages.length - MESSAGE_BUFFER),
     };
   }, [messages]);
-
-  // Auto-follow-up: AI-approved commands are executed through TerminalView's
-  // command completion signal. Do not infer completion from idle output alone;
-  // installers can be quiet for a long time before the shell prompt returns.
-  useEffect(() => {
-    const hasActions = allActions.length > 0;
-    const allDone = hasActions && pendingActions.length === 0;
-
-    if (hasActions && allDone && !autoFollowUpDoneRef.current && getTerminalBuffer) {
-      autoFollowUpDoneRef.current = true;
-      setWaitingForOutput(true);
-      let cancelled = false;
-      void (async () => {
-        if (commandResultsRef.current.length === 0) {
-          await waitForCommandComplete(getTerminalBuffer);
-        }
-        if (cancelled) return;
-        setWaitingForOutput(false);
-
-        const commandOutput = combineExecutionOutputs(commandResultsRef.current);
-        const sourceOutput = commandOutput || getTerminalBuffer();
-        const decision = classifyTerminalFollowUp(sourceOutput);
-        if (decision.shouldFollowUp || commandResultsRef.current.some(shouldForceFollowUpForExecution)) {
-          void sendDirectMessage(
-            `[自动跟进] 以下命令已全部执行完毕，请分析输出结果，判断是否需要后续操作：\n\n${decision.output || commandOutput}`,
-            buildContext(),
-          );
-        }
-      })();
-      return () => { cancelled = true; setWaitingForOutput(false); };
-    }
-
-    if (!hasActions || !allDone) {
-      autoFollowUpDoneRef.current = false;
-      commandResultsRef.current = [];
-    }
-  }, [allActions.length, pendingActions.length, executedActions.length]);
 
   useEffect(() => {
     const scope: AiChatScope = hostId
@@ -451,6 +299,10 @@ const AiChatPanel: FC<AiChatPanelProps> = ({
 4. **风险提示**：涉及数据删除、服务重启、配置修改等操作时，先说明影响再提议命令。
 
 ## 命令格式
+1. **选择与命令互斥**：需要用户在多个方案、目标、范围或风险选项中选择时，只解释选项并等待用户决定，不输出任何命令、COMMAND_PLAN、ACTION 或 shell 代码块。
+2. **每轮一个动作**：需要执行操作时，每次回复只提供一个可审批命令动作，COMMAND_PLAN 的 steps 必须恰好包含一个步骤。一个动作内部允许使用 &&、;、换行、管道和重定向。
+3. **等待结果再继续**：不要提前给出后续命令。收到当前命令的执行结果、退出码或异常状态后，再分析并决定下一步。
+
 当需要执行命令时，优先在回复末尾输出结构化计划：
 <COMMAND_PLAN>
 {
@@ -471,7 +323,7 @@ const AiChatPanel: FC<AiChatPanelProps> = ({
 [ACTION:命令描述]
 实际命令内容
 [/ACTION]
-可以提议多个命令。用户可以在右侧命令确认栏审批这些命令，所有命令执行前都会经过 Rust 策略评估。`);
+用户可以在右侧命令确认栏审批这一条命令，命令执行前会经过 Rust 策略评估。`);
 
     if (hostName && hostIp) {
       parts.push(`当前连接: ${hostName} (${hostIp})`);
@@ -500,6 +352,7 @@ const AiChatPanel: FC<AiChatPanelProps> = ({
 
   const handleApproveAction = useCallback(async (actionId: string) => {
     const action = pendingActions.find((item) => item.id === actionId);
+    const aiSessionId = sessionId;
     if (executingActionIdsRef.current.has(actionId)) {
       return;
     }
@@ -516,6 +369,7 @@ const AiChatPanel: FC<AiChatPanelProps> = ({
     executingActionIdsRef.current.add(actionId);
     setExecutingActionIds(new Set(executingActionIdsRef.current));
     try {
+      const followUpContext = buildContext();
       const execution = executeTerminalCommand(action.command, { timeoutMs: AUTO_COMMAND_TIMEOUT_MS });
       if (!execution) {
         await approveAction(actionId, sessionId);
@@ -523,25 +377,20 @@ const AiChatPanel: FC<AiChatPanelProps> = ({
       }
 
       const result = await execution;
-      if (result) {
-        commandResultsRef.current = [...commandResultsRef.current, result];
-      }
-      await approveAction(actionId);
+      await approveAction(actionId, undefined, aiSessionId);
+      const commandOutput = formatTerminalCommandResult(result);
+      const decision = classifyTerminalFollowUp(commandOutput);
+      void sendDirectMessage(
+        `[自动跟进] 当前命令已执行完毕，请分析这条命令的输出和退出状态，判断是否需要下一步操作：\n\n${decision.output || commandOutput}`,
+        followUpContext,
+        undefined,
+        aiSessionId,
+      );
     } finally {
       executingActionIdsRef.current.delete(actionId);
       setExecutingActionIds(new Set(executingActionIdsRef.current));
     }
-  }, [approveAction, executeTerminalCommand, pendingActions, sessionId]);
-
-  const handleApproveAllActions = useCallback(async () => {
-    for (const action of executableWaitingActions) {
-      await handleApproveAction(action.id);
-      const latestResult = commandResultsRef.current[commandResultsRef.current.length - 1];
-      if (latestResult?.status === 'timeout') {
-        break;
-      }
-    }
-  }, [executableWaitingActions, handleApproveAction]);
+  }, [approveAction, executeTerminalCommand, pendingActions, sendDirectMessage, sessionId]);
 
   return (
     <div className="ai-chat-panel">
@@ -614,11 +463,6 @@ const AiChatPanel: FC<AiChatPanelProps> = ({
           {active.map((msg) => (
             <MessageBubble key={msg.id} msg={msg} />
           ))}
-          {waitingForOutput && (
-            <div className="ai-msg ai-msg-system">
-              <span className="ai-msg-waiting-dots">{t('ai.waitingForOutput')}</span>
-            </div>
-          )}
           <div ref={messagesEndRef} />
         </div>
 
@@ -629,12 +473,13 @@ const AiChatPanel: FC<AiChatPanelProps> = ({
             onChange={(e) => setInputText(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={tText('ai.inputPlaceholder')}
+            disabled={streaming || hasUnfinishedAction}
             rows={1}
           />
           <button
             className="ai-chat-send"
             onClick={handleSend}
-            disabled={streaming || !inputText.trim()}
+            disabled={streaming || hasUnfinishedAction || !inputText.trim()}
           >
             {streaming ? '…' : '➤'}
           </button>
@@ -655,14 +500,6 @@ const AiChatPanel: FC<AiChatPanelProps> = ({
               <div className="ai-cmd-empty-icon">⏳</div>
               <div>{t('ai.waitingForCommand')}</div>
             </div>
-          )}
-          {executableWaitingActions.length > 1 && (
-            <button
-              className="ai-cmd-exec-all"
-              onClick={() => { void handleApproveAllActions(); }}
-            >
-              ▶ {t('ai.executeAll', { count: executableWaitingActions.length })}
-            </button>
           )}
           {executingActions.map((action, idx) => (
             <CmdExecutingItem

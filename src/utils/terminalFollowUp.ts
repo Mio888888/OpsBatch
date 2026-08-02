@@ -23,6 +23,30 @@ export interface TerminalFollowUpDecision {
   reason: 'empty' | 'noise' | 'error' | 'interactive' | 'meaningful';
 }
 
+interface TerminalCommandResultLike {
+  status: string;
+  output: string;
+  exitCode?: number;
+}
+
+export function formatTerminalCommandResult(result: TerminalCommandResultLike): string {
+  const exitText = typeof result.exitCode === 'number' ? `，退出码 ${result.exitCode}` : '';
+  const output = result.output.trim();
+  let detail = output;
+  if (result.status === 'timeout') {
+    detail = `${output}\n\n[OpsBatch] 命令仍未收到完成信号，已等待到超时，可能仍在运行或等待交互。`.trim();
+  } else if (result.status === 'closed') {
+    detail = `${output}\n\n[OpsBatch] 终端会话已关闭，命令执行被中断或会话结束。`.trim();
+  } else if (result.status === 'write_failed') {
+    detail = `${output}\n\n[OpsBatch] 命令写入终端失败。`.trim();
+  } else if (typeof result.exitCode === 'number' && result.exitCode !== 0) {
+    detail = `${output}\n\n[OpsBatch] 命令退出码：${result.exitCode}`.trim();
+  } else if (!output) {
+    detail = '[OpsBatch] 命令执行完成，但没有产生输出。';
+  }
+  return `[当前命令：${result.status}${exitText}]\n${detail}`;
+}
+
 function cleanTerminalText(text: string): string {
   return text
     .replace(ANSI_SEQUENCE_RE, '')

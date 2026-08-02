@@ -52,9 +52,13 @@ test('Windows UI uses native fonts and avoids synthetic fractional weights', asy
   const { readFile } = await import('node:fs/promises');
   const tokens = await readFile('src/styles/foundation/tokens.css', 'utf8');
   const platform = await readFile('src/styles/foundation/platform.css', 'utf8');
+  const commandExecution = await readFile('src/styles/dialogs/command-execution.css', 'utf8');
 
+  assert.match(tokens, /--font-sans:\s*system-ui,/);
+  assert.match(tokens, /--font-sans-macos:\s*-apple-system,/);
   assert.match(tokens, /--font-sans-windows:\s*'Segoe UI Variable Text',\s*'Segoe UI'/);
-  assert.doesNotMatch(tokens, /--font-sans-windows:[^;]*HarmonyOS Sans SC/);
+  assert.doesNotMatch(tokens, /HarmonyOS(?: Sans SC|_Sans)/);
+  assert.doesNotMatch(commandExecution, /font-family:\s*var\(--font-sans\)/);
   assert.match(platform, /font-synthesis:\s*none/);
   assert.match(platform, /--font-size-body:\s*14px/);
   assert.match(platform, /--font-weight-strong:\s*600/);

@@ -14,7 +14,6 @@
 }
 
 .command-exec-dialog-content {
-  font-family: var(--font-sans);
   font-size: var(--font-size-body);
   color: var(--terminal-fg, #e0e0e0);
   padding: 20px 24px 16px;

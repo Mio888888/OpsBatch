@@ -1,11 +1,3 @@
-@font-face {
-  font-family: 'HarmonyOS Sans SC';
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url('../../assets/font/HarmonyOS_Sans_SC_Medium.woff2') format('woff2');
-}
-
 :root {
   --workbench-topbar-height: 38px;
   --workbench-titlebar-side-width: 236px;
@@ -41,12 +33,11 @@
   --radius-lg: 14px;
   --radius-xl: 18px;
   --window-radius: 20px;
-  --font-sans: 'HarmonyOS Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-    'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Ubuntu, Cantarell,
+    'Noto Sans', 'Liberation Sans', Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
     'Segoe UI Symbol';
   --font-sans-macos: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB',
-    'HarmonyOS Sans SC', 'Helvetica Neue', Arial, 'Noto Sans', sans-serif, 'Apple Color Emoji',
-    'Segoe UI Emoji', 'Segoe UI Symbol';
+    'Helvetica Neue', Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
   --font-sans-windows: 'Segoe UI Variable Text', 'Segoe UI',
     'Microsoft YaHei UI', 'Microsoft YaHei', Arial, sans-serif, 'Apple Color Emoji',
     'Segoe UI Emoji', 'Segoe UI Symbol';

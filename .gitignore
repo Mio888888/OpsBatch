@@ -26,3 +26,4 @@ dist-ssr
 docs/
 /.trellis/
 .claude/
+skills-lock.json

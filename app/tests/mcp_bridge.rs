@@ -144,12 +144,14 @@ fn auto_mode_runs_commands_in_the_terminal_and_the_window_shows_the_server(cx: &
     assert_eq!(status, 200);
     assert_eq!(v["result"]["isError"], false, "{v}");
     assert!(text_of(&v).contains("mcp-mark-7"), "{}", text_of(&v));
+    assert!(!text_of(&v).contains('\x1b'), "answers carry no terminal escape codes");
 
     let activity = act(cx);
     cx.update(|cx| {
         let a = activity.read(cx);
         let r = &a.records()[0];
         assert_eq!((r.tool.as_str(), r.summary.as_str(), r.status), ("terminal_execute", "echo mcp-mark-7", Status::Done));
+        assert_eq!(r.detail, "mcp-mark-7", "the record shows the first output line, not the echoed command or escape codes");
         assert_eq!(a.target().map(|t| t.local), Some(true));
     });
     // the header shows the server and a preview of its terminal

@@ -239,10 +239,55 @@ fn tail(text: &str, max_chars: usize) -> String {
     format!("…{}", text.chars().skip(count - max_chars).collect::<String>())
 }
 
+/// Removes terminal control sequences (colours, reverse video from the shell's paste highlight, OSC titles, ...) and
+/// carriage returns, so records and answers contain readable text only.
+pub fn strip_ansi(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\x1b' => match chars.peek().copied() {
+                // CSI: parameters, intermediates, one final byte
+                Some('[') => {
+                    chars.next();
+                    for n in chars.by_ref() {
+                        if ('\u{40}'..='\u{7e}').contains(&n) {
+                            break;
+                        }
+                    }
+                }
+                // OSC: up to BEL or ST (ESC \)
+                Some(']') => {
+                    chars.next();
+                    while let Some(n) = chars.next() {
+                        if n == '\u{7}' {
+                            break;
+                        }
+                        if n == '\x1b' {
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
+                Some(_) => {
+                    chars.next();
+                }
+                None => {}
+            },
+            '\r' => {}
+            c if c.is_control() && c != '\n' && c != '\t' => {}
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// The line of an answer worth showing in the record: the first output line, else the status note.
-fn detail_of(text: &str) -> String {
-    let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
-    let line = lines.iter().find(|l| !l.starts_with('[')).or_else(|| lines.first()).copied().unwrap_or("");
+fn detail_of(text: &str, command: &str) -> String {
+    let clean = strip_ansi(text);
+    let lines: Vec<&str> = clean.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    // the terminal echoes the command first, and the record already shows it; status notes come last
+    let line = lines.iter().find(|l| !l.starts_with('[') && !command.trim().is_empty() && !l.ends_with(command.trim()) && **l != command.trim()).or_else(|| lines.iter().find(|l| !l.starts_with('['))).or_else(|| lines.first()).copied().unwrap_or("");
     line.chars().take(300).collect()
 }
 
@@ -293,7 +338,7 @@ fn dispatch(call: BridgeCall, cx: &mut App) {
             let lines = arguments.get("lines").and_then(|v| v.as_u64()).unwrap_or(50).clamp(1, 500) as usize;
             match resolve(wanted, cx) {
                 Ok(s) => {
-                    let text = last_lines(&s.pane.read(cx).buffer_text(), lines);
+                    let text = strip_ansi(&last_lines(&s.pane.read(cx).buffer_text(), lines));
                     let detail = text.lines().last().unwrap_or("").to_string();
                     finish_now(cx, &activity, reply, "terminal_read", t!("mcpwin.detail.readLines", count = lines), Some(s.target()), ToolOutcome::ok(text), detail);
                 }
@@ -314,9 +359,10 @@ fn dispatch(call: BridgeCall, cx: &mut App) {
             };
             let id = activity.update(cx, |a, cx| a.begin("terminal_execute", command.clone(), Some(session.target()), cx));
             cx.spawn(async move |cx| {
+                let summary_for_detail = command.clone();
                 let outcome = execute(&id, session, command, timeout, cx).await;
                 let status = if outcome.is_error { if outcome.text.starts_with("Refused") || outcome.text.starts_with("Rejected") { Status::Denied } else { Status::Failed } } else { Status::Done };
-                cx.update(|cx| activity.update(cx, |a, cx| a.finish(&id, status, detail_of(&outcome.text), cx)));
+                cx.update(|cx| activity.update(cx, |a, cx| a.finish(&id, status, detail_of(&outcome.text, &summary_for_detail), cx)));
                 let _ = reply.send(outcome);
             })
             .detach();
@@ -378,8 +424,34 @@ async fn execute(id: &str, session: Session, command: String, timeout: Option<u6
         Ok(result) => {
             let formatted = ops_ai::follow_up::format_terminal_command_result(&ops_ai::follow_up::TerminalCommandResult { status: exec_status(result.status).into(), output: result.output, exit_code: result.exit_code });
             let failed = result.exit_code.is_some_and(|c| c != 0) || result.status != ExecStatus::Completed;
-            ToolOutcome { text: tail(&formatted, 20_000), is_error: failed }
+            ToolOutcome { text: tail(&strip_ansi(&formatted), 20_000), is_error: failed }
         }
         Err(_) => ToolOutcome::error("The terminal session closed before the command finished."),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{detail_of, strip_ansi};
+
+    #[test]
+    fn control_sequences_are_removed() {
+        assert_eq!(strip_ansi("\x1b[7muname -a\x1b[27m"), "uname -a");
+        assert_eq!(strip_ansi("\x1b[1;32mok\x1b[0m done\r\n"), "ok done\n");
+        assert_eq!(strip_ansi("\x1b]0;title\x07text"), "text");
+        assert_eq!(strip_ansi("\x1b]0;title\x1b\\text"), "text");
+        assert_eq!(strip_ansi("a\tb\x07c"), "a\tbc");
+        assert_eq!(strip_ansi("\x1b[?2004hprompt\x1b[?2004l"), "prompt");
+        assert_eq!(strip_ansi("plain 中文"), "plain 中文");
+        assert_eq!(strip_ansi("trailing \x1b"), "trailing ");
+    }
+
+    #[test]
+    fn the_record_detail_skips_the_echo_and_status_notes() {
+        let out = "\x1b[7muname -a && df -h /\x1b[27m\nDarwin Mac-mini.local 25.6.0\n\n[当前命令：completed，退出码 0]";
+        assert_eq!(detail_of(out, "uname -a && df -h /"), "Darwin Mac-mini.local 25.6.0");
+        assert_eq!(detail_of("macuser@Mac ~ % echo hi\nhi", "echo hi"), "hi");
+        assert_eq!(detail_of("[当前命令：completed，退出码 0]", "true"), "[当前命令：completed，退出码 0]");
+        assert_eq!(detail_of("", "true"), "");
     }
 }

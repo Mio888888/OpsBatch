@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 
 use gpui_kit::{App, AppContext as _, Context, Entity, EventEmitter, Global, Task};
+use ops_i18n::t;
 use ops_ai::client::{
     ai_assess_action, ai_chat_stream, ai_delete_conversation, ai_get_conversation, ai_list_conversations,
     ai_record_action_event, AiActionAssessment, AiActionAuditEvent, AiActionDecision, AiActionRiskLevel, ChatMessage,
@@ -101,11 +102,13 @@ pub struct SessionState {
     pub active_request_id: Option<String>,
     /// Size of the remote desktop when this chat drives an RDP session (enables `<RDP_PLAN>` parsing).
     pub rdp_desktop: Option<(u32, u32)>,
+    /// Automatic follow-ups since the user's last message (capped by the "max iterations" safety setting).
+    pub follow_ups: u32,
 }
 
 impl SessionState {
     fn new(scope: AiScope) -> Self {
-        Self { messages: Vec::new(), active_conversation_id: None, streaming_message_id: None, input_text: String::new(), scope, active_request_id: None, rdp_desktop: None }
+        Self { messages: Vec::new(), active_conversation_id: None, streaming_message_id: None, input_text: String::new(), scope, active_request_id: None, rdp_desktop: None, follow_ups: 0 }
     }
 
     fn reset_conversation(&mut self) {
@@ -340,8 +343,32 @@ impl AiChatStore {
         if session.streaming() || text.is_empty() {
             return false;
         }
+        if let Some(session) = self.sessions.get_mut(sid) {
+            session.follow_ups = 0;
+        }
         self.start_stream(sid, text, context, images, true, cx);
         true
+    }
+
+    /// The automatic message after a command ran. Refuses (with a note in the chat) once `max_iterations` follow-ups
+    /// happened since the user's last message, so a model that keeps proposing commands cannot loop forever.
+    pub fn send_follow_up(&mut self, sid: &str, text: String, context: Option<String>, max_iterations: u32, cx: &mut Context<Self>) -> bool {
+        let Some(session) = self.sessions.get_mut(sid) else { return false };
+        if session.follow_ups >= max_iterations {
+            session.messages.push(ChatMsg::new(Role::System, t!("ai.maxIterationsReached", count = max_iterations)));
+            cx.notify();
+            return false;
+        }
+        session.follow_ups += 1;
+        self.send_direct_message(sid, text, context, Vec::new(), cx);
+        true
+    }
+
+    /// A fresh turn that was not typed (e.g. "analyze selection") starts the iteration count over.
+    pub fn reset_follow_ups(&mut self, sid: &str) {
+        if let Some(session) = self.sessions.get_mut(sid) {
+            session.follow_ups = 0;
+        }
     }
 
     /// Send `text` into session `sid` without touching its input box.
@@ -530,7 +557,11 @@ impl AiChatStore {
     }
 
     /// Remote-desktop actions are not audited (the original only records shell commands).
-    pub fn begin_rdp_approval(&mut self, sid: &str, action_id: &str) -> Option<ParsedPendingAction> {
+    pub fn begin_rdp_approval(&mut self, sid: &str, action_id: &str, cx: &App) -> Option<ParsedPendingAction> {
+        // observer mode is read-only: the assistant may look at the desktop but not operate it
+        if crate::ai::runtime::limits(cx).permission_mode == ops_ai::prefs::PermissionMode::Observer {
+            return None;
+        }
         let action = self.find_action(sid, action_id)?;
         (action.kind == ActionKind::RdpAction && !action.approved && !action.executed && !action.rejected).then(|| action.clone())
     }

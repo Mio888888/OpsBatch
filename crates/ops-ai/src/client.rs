@@ -25,7 +25,6 @@ impl Drop for StreamRegistration {
 }
 
 const AI_REQUEST_TIMEOUT_SECS: u64 = 60;
-const AI_STREAM_IDLE_TIMEOUT_SECS: u64 = 120;
 
 fn normalize_api_url(provider: &str, api_url: &str) -> String {
     let trimmed = api_url.trim().trim_end_matches('/');
@@ -103,13 +102,27 @@ fn build_chat_body(
     temperature: Option<f32>,
     max_tokens: Option<u32>,
     stream: bool,
+    opts: &crate::prefs::RequestOptions,
 ) -> serde_json::Value {
+    // an explicit request value wins over the provider's setting, which wins over the built-in default
     let mut body = serde_json::json!({
         "model": model,
         "messages": messages.iter().map(build_chat_message_json).collect::<Vec<_>>(),
-        "temperature": temperature.unwrap_or(0.7),
-        "max_tokens": max_tokens.unwrap_or(2048),
+        "temperature": temperature.map(f64::from).or(opts.temperature).unwrap_or(0.7),
+        "max_tokens": max_tokens.or(opts.max_tokens).unwrap_or(2048),
     });
+    if let Some(v) = opts.top_p {
+        body["top_p"] = serde_json::json!(v);
+    }
+    if let Some(v) = opts.frequency_penalty {
+        body["frequency_penalty"] = serde_json::json!(v);
+    }
+    if let Some(v) = opts.presence_penalty {
+        body["presence_penalty"] = serde_json::json!(v);
+    }
+    if let Some(v) = &opts.reasoning_effort {
+        body["reasoning_effort"] = serde_json::json!(v);
+    }
     if stream {
         body["stream"] = serde_json::Value::Bool(true);
     }
@@ -192,6 +205,19 @@ pub async fn get_ai_config(db: &Database) -> Result<AiConfig, String> {
 }
 
 pub async fn save_ai_config(
+    db: &Database,
+    config: AiConfig,
+) -> Result<(), String> {
+    save_ai_config_blocking(db, config)
+}
+
+/// The `ai_config` row as stored, with the real API key (used by the AI preferences to list a legacy provider).
+pub fn load_ai_config_for_prefs(db: &Database) -> Result<AiConfig, String> {
+    load_ai_config_raw(db)
+}
+
+/// Synchronous body of [`save_ai_config`] (nothing in it awaits).
+pub fn save_ai_config_blocking(
     db: &Database,
     config: AiConfig,
 ) -> Result<(), String> {
@@ -665,7 +691,53 @@ pub fn ai_assess_action(
     command: String,
 ) -> Result<AiActionAssessment, String> {
     let custom_patterns = load_enabled_danger_patterns(&db)?;
-    Ok(assess_ai_action(&command, &custom_patterns))
+    let assessment = assess_ai_action(&command, &custom_patterns);
+    Ok(apply_prefs_policy(assessment, &command, &crate::prefs::runtime_limits(db)))
+}
+
+/// Layers the AI safety settings over the built-in assessment: observer mode refuses everything, the command
+/// blocklist refuses matches, and a permission grant lifts a plain "needs confirmation" to safe.
+pub fn apply_prefs_policy(
+    assessment: AiActionAssessment,
+    command: &str,
+    limits: &crate::prefs::RuntimeLimits,
+) -> AiActionAssessment {
+    use crate::prefs::safety::{blocklist_match, match_grant, MatchContext};
+    use crate::prefs::PermissionMode;
+    if assessment.decision == AiActionDecision::Block {
+        return assessment;
+    }
+    if limits.permission_mode == PermissionMode::Observer {
+        return AiActionAssessment {
+            decision: AiActionDecision::Block,
+            risk_score: assessment.risk_score.max(90),
+            matched_rule: "AI_OBSERVER_MODE".to_string(),
+            reason: "当前为观察者模式（只读），AI 不能执行任何命令。可在 设置 → AI → 安全 中修改权限模式。".to_string(),
+            ..assessment
+        };
+    }
+    if let Some(pattern) = blocklist_match(&limits.command_blocklist, command.trim()) {
+        return AiActionAssessment {
+            decision: AiActionDecision::Block,
+            risk_level: assessment.risk_level.max(AiActionRiskLevel::High),
+            risk_score: assessment.risk_score.max(90),
+            matched_rule: "AI_COMMAND_BLOCKLIST".to_string(),
+            reason: format!("命令命中 AI 安全黑名单：{pattern}"),
+            ..assessment
+        };
+    }
+    if assessment.decision == AiActionDecision::Confirm && assessment.risk_level <= AiActionRiskLevel::Low {
+        let ctx = MatchContext { capability_id: "terminal.execute".into(), args: std::collections::BTreeMap::from([("command".to_string(), command.trim().to_string())]), ..Default::default() };
+        if let Some(rule) = match_grant(&limits.permission_grants, &ctx) {
+            return AiActionAssessment {
+                decision: AiActionDecision::Safe,
+                matched_rule: "PERMISSION_GRANT".to_string(),
+                reason: format!("命中权限授权规则{}，无需再次确认。", rule.command_pattern.as_deref().map(|p| format!("（{p}）")).unwrap_or_default()),
+                ..assessment
+            };
+        }
+    }
+    assessment
 }
 
 pub fn ai_record_action_event(
@@ -706,7 +778,7 @@ pub fn ai_validate_command_plan(raw_plan: String) -> Result<ValidatedCommandPlan
 // Internal synchronous chat helper (used by both Tauri command and other commands)
 // ---------------------------------------------------------------------------
 
-fn send_chat_request(config: &AiConfig, request: &ChatRequest) -> Result<ChatResponse, String> {
+fn send_chat_request(config: &AiConfig, request: &ChatRequest, opts: &crate::prefs::RequestOptions) -> Result<ChatResponse, String> {
     if !config.enabled || (config.provider != "ollama" && config.api_key.trim().is_empty()) {
         return Err("AI功能未启用或API Key未配置".to_string());
     }
@@ -723,10 +795,12 @@ fn send_chat_request(config: &AiConfig, request: &ChatRequest) -> Result<ChatRes
         request.temperature,
         request.max_tokens,
         false,
+        opts,
     );
 
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(AI_REQUEST_TIMEOUT_SECS))
+        .danger_accept_invalid_certs(opts.skip_tls_verify)
         .build()
         .map_err(|e| format!("初始化请求失败: {}", e))?;
     let mut builder = client
@@ -735,6 +809,9 @@ fn send_chat_request(config: &AiConfig, request: &ChatRequest) -> Result<ChatRes
         .json(&body);
     if let Some(auth) = auth_header_value(config) {
         builder = builder.header("Authorization", auth);
+    }
+    for (name, value) in &opts.headers {
+        builder = builder.header(name.as_str(), value.as_str());
     }
     let resp = builder.send().map_err(|e| format!("请求失败: {}", e))?;
 
@@ -769,9 +846,22 @@ pub async fn ai_chat(
     request: ChatRequest,
 ) -> Result<ChatResponse, String> {
     let config = load_ai_config(&db)?;
-    std::thread::spawn(move || send_chat_request(&config, &request))
+    // one-shot requests get their own placeholder map, dropped with the answer
+    let mut redactor = crate::prefs::privacy::Redactor::new(&crate::prefs::runtime_limits(db).privacy);
+    let mut request = request;
+    if let Some(r) = redactor.as_mut() {
+        for m in &mut request.messages {
+            m.content = r.redact(&m.content);
+        }
+    }
+    let opts = crate::prefs::request_options(db);
+    let mut response = std::thread::spawn(move || send_chat_request(&config, &request, &opts))
         .join()
-        .map_err(|e| format!("AI 请求线程异常: {:?}", e))?
+        .map_err(|e| format!("AI 请求线程异常: {:?}", e))??;
+    if let Some(r) = &redactor {
+        response.content = r.restore(&response.content);
+    }
+    Ok(response)
 }
 
 // ---------------------------------------------------------------------------
@@ -897,16 +987,30 @@ pub async fn ai_chat_stream(
         }
     }
 
+    let opts = crate::prefs::request_options(db);
+    // privacy protection: private IPs / configured ranges / patterns leave as placeholders
+    let limits = crate::prefs::runtime_limits(db);
+    let redactor = crate::prefs::privacy::session(&conversation_id, &limits.privacy);
+    let mut outgoing = request.messages.clone();
+    if let Some(r) = &redactor {
+        let mut r = r.lock().unwrap_or_else(|e| e.into_inner());
+        for m in &mut outgoing {
+            m.content = r.redact(&m.content);
+        }
+    }
     let body = build_chat_body(
         &model,
-        &request.messages,
+        &outgoing,
         request.temperature,
         request.max_tokens,
         true,
+        &opts,
     );
 
+    let idle_timeout = limits.response_idle_timeout.max(1) as u64;
     let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(AI_STREAM_IDLE_TIMEOUT_SECS))
+        .timeout(std::time::Duration::from_secs(idle_timeout))
+        .danger_accept_invalid_certs(opts.skip_tls_verify)
         .build()
         .map_err(|e| format!("初始化请求失败: {}", e))?;
     let mut builder = client
@@ -915,6 +1019,9 @@ pub async fn ai_chat_stream(
         .json(&body);
     if let Some(auth) = auth_header_value(&config) {
         builder = builder.header("Authorization", auth);
+    }
+    for (name, value) in &opts.headers {
+        builder = builder.header(name.as_str(), value.as_str());
     }
     let resp = builder
         .send()
@@ -936,6 +1043,14 @@ pub async fn ai_chat_stream(
     let mut buffer = String::new();
     let resp_model = model.clone();
     let mut finished = false;
+    // how much of the (restored) text the UI has been given
+    let mut emitted = 0usize;
+    let restore_ready = |full: &str| -> String {
+        match &redactor {
+            Some(r) => r.lock().unwrap_or_else(|e| e.into_inner()).restore_ready(full),
+            None => full.to_string(),
+        }
+    };
 
     loop {
         if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
@@ -959,6 +1074,15 @@ pub async fn ai_chat_stream(
             }
             let data = &line[6..];
             if data == "[DONE]" {
+                // anything held back for an unfinished placeholder is complete now
+                let rest = redactor.as_ref().map(|r| r.lock().unwrap_or_else(|e| e.into_inner()).restore(&full_content)).unwrap_or_else(|| full_content.clone());
+                if rest.len() > emitted {
+                    core.emit(
+                        "ai-stream-chunk",
+                        &StreamChunk { delta: rest[emitted..].to_string(), done: false, model: resp_model.clone(), conversation_id: conversation_id.clone(), message_id: message_id.clone(), client_request_id: client_request_id.clone() },
+                    );
+                    emitted = rest.len();
+                }
                 let chunk = StreamChunk {
                     delta: String::new(),
                     done: true,
@@ -978,8 +1102,14 @@ pub async fn ai_chat_stream(
                     .unwrap_or("");
                 if !delta.is_empty() {
                     full_content.push_str(delta);
+                    let ready = restore_ready(&full_content);
+                    let shown = ready.get(emitted..).unwrap_or("").to_string();
+                    emitted = ready.len().max(emitted);
+                    if shown.is_empty() {
+                        continue;
+                    }
                     let chunk = StreamChunk {
-                        delta: delta.to_string(),
+                        delta: shown,
                         done: false,
                         model: parsed["model"].as_str().unwrap_or(&resp_model).to_string(),
                         conversation_id: conversation_id.clone(),
@@ -993,6 +1123,15 @@ pub async fn ai_chat_stream(
     }
 
     if !finished {
+        if let Some(r) = &redactor {
+            let rest = r.lock().unwrap_or_else(|e| e.into_inner()).restore(&full_content);
+            if rest.len() > emitted {
+                core.emit(
+                    "ai-stream-chunk",
+                    &StreamChunk { delta: rest[emitted..].to_string(), done: false, model: resp_model.clone(), conversation_id: conversation_id.clone(), message_id: message_id.clone(), client_request_id: client_request_id.clone() },
+                );
+            }
+        }
         // Cancelled (or the server closed without [DONE]): tell the UI the stream is over.
         core.emit(
             "ai-stream-chunk",
@@ -1000,7 +1139,10 @@ pub async fn ai_chat_stream(
         );
     }
 
-    // Save assistant message to DB
+    // Save assistant message to DB (with the real values, not the placeholders)
+    if let Some(r) = &redactor {
+        full_content = r.lock().unwrap_or_else(|e| e.into_inner()).restore(&full_content);
+    }
     {
         let conn = db.pool.get().map_err(|e| e.to_string())?;
         conn.execute(
@@ -1179,6 +1321,7 @@ pub fn ai_generate_script(
     );
 
     let config = load_ai_config(&db)?;
+    let opts = crate::prefs::request_options(db);
     let result = send_chat_request(
         &config,
         &ChatRequest {
@@ -1191,6 +1334,7 @@ pub fn ai_generate_script(
             temperature: Some(0.7),
             max_tokens: Some(2048),
         },
+        &opts,
     )?;
 
     Ok(result.content)
@@ -1207,6 +1351,7 @@ pub fn ai_analyze_results(
     );
 
     let config = load_ai_config(&db)?;
+    let opts = crate::prefs::request_options(db);
     let result = send_chat_request(
         &config,
         &ChatRequest {
@@ -1219,6 +1364,7 @@ pub fn ai_analyze_results(
             temperature: Some(0.5),
             max_tokens: Some(1024),
         },
+        &opts,
     )?;
 
     Ok(result.content)
@@ -1235,6 +1381,7 @@ pub fn ai_diagnose_error(
     );
 
     let config = load_ai_config(&db)?;
+    let opts = crate::prefs::request_options(db);
     let result = send_chat_request(
         &config,
         &ChatRequest {
@@ -1247,6 +1394,7 @@ pub fn ai_diagnose_error(
             temperature: Some(0.5),
             max_tokens: Some(1024),
         },
+        &opts,
     )?;
 
     Ok(result.content)
@@ -1269,6 +1417,7 @@ pub fn ai_risk_assessment(
     );
 
     let config = load_ai_config(&db)?;
+    let opts = crate::prefs::request_options(db);
     let result = send_chat_request(
         &config,
         &ChatRequest {
@@ -1281,6 +1430,7 @@ pub fn ai_risk_assessment(
             temperature: Some(0.3),
             max_tokens: Some(512),
         },
+        &opts,
     )?;
 
     Ok(result.content)
@@ -1313,8 +1463,10 @@ pub async fn ai_list_models(
     let effective_provider = provider.as_deref().unwrap_or(&config.provider);
     let key = api_key.as_deref().unwrap_or(&config.api_key);
 
+    let opts = crate::prefs::request_options(db);
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(15))
+        .danger_accept_invalid_certs(opts.skip_tls_verify)
         .build()
         .map_err(|e| format!("初始化请求失败: {}", e))?;
 
@@ -1324,6 +1476,9 @@ pub async fn ai_list_models(
         builder = builder.header("Authorization", format!("Bearer {}", key.trim()));
     }
 
+    for (name, value) in &opts.headers {
+        builder = builder.header(name.as_str(), value.as_str());
+    }
     let resp = builder
         .send()
         .await
@@ -1424,6 +1579,7 @@ mod ai_action_tests {
             None,
             None,
             false,
+            &crate::prefs::RequestOptions::default(),
         );
 
         let content = body["messages"][0]["content"]

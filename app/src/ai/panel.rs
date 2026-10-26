@@ -14,16 +14,17 @@ use gpui_kit::*;
 use crate::scale::px;
 use ops_ai::client::{AiActionDecision, AiActionRiskLevel};
 use ops_ai::follow_up::{classify_terminal_follow_up, format_terminal_command_result, TerminalCommandResult};
-use ops_ai::parser::{extract_empty_command_plan_notice, strip_command_plan_block, ParsedPendingAction};
+use ops_ai::parser::{extract_empty_command_plan_notice, strip_command_plan_block, ActionKind, ParsedPendingAction};
 use ops_i18n::t;
 
+use ops_ai::prefs::quick::{self, SlashItem, SlashKind};
+use ops_ai::prefs::user_skills::{self, UserSkill};
 use super::prompt;
 use super::store::{ai_store, AiChatStore, AiScope, ChatMsg, Role};
 use crate::terminal::executions::ExecStatus;
 use crate::terminal::pane::TerminalPane;
 
 /// A terminal command started from the AI may run this long before it is reported as timed out.
-const AUTO_COMMAND_TIMEOUT: Duration = Duration::from_secs(45 * 60);
 
 /// What the panel is currently attached to: the active terminal tab.
 #[derive(Clone)]
@@ -44,6 +45,8 @@ pub struct AiChatPanel {
     show_history: bool,
     executing: HashSet<String>,
     scroll: ScrollHandle,
+    /// User skills offered by the `/` list (read when the list opens).
+    skills: Vec<UserSkill>,
     _subs: Vec<Subscription>,
 }
 
@@ -63,12 +66,17 @@ impl AiChatPanel {
         let subs = vec![
             cx.observe(&store, |this, _, cx| {
                 this.scroll.scroll_to_bottom();
+                this.auto_approve(cx);
                 cx.notify();
             }),
             cx.observe(&input, |_, _, cx| cx.notify()),
             cx.subscribe_in(&input, window, |this, input, ev: &InputEvent, window, cx| match ev {
                 InputEvent::Change => {
                     let text = input.read(cx).value().to_string();
+                    // the `/` list shows the skills as they are on disk right now
+                    if text == "/" {
+                        this.reload_skills(cx);
+                    }
                     if let Some(t) = this.target.as_ref() {
                         let sid = t.session_id.clone();
                         this.store.update(cx, |s, cx| s.set_input_text(&sid, text, cx));
@@ -78,7 +86,7 @@ impl AiChatPanel {
                 _ => {}
             }),
         ];
-        Self { store, target: None, input, show_history: false, executing: HashSet::new(), scroll: ScrollHandle::new(), _subs: subs }
+        Self { store, target: None, input, show_history: false, executing: HashSet::new(), scroll: ScrollHandle::new(), skills: Vec::new(), _subs: subs }
     }
 
     pub fn target(&self) -> Option<&AiTarget> {
@@ -121,6 +129,7 @@ impl AiChatPanel {
         let (context, message) = prompt::analyze_selection(selection, host);
         self.store.update(cx, |s, cx| {
             s.activate_session(&t.session_id, t.scope.clone(), cx);
+            s.reset_follow_ups(&t.session_id);
             s.send_direct_message(&t.session_id, message, Some(context), Vec::new(), cx);
         });
     }
@@ -135,8 +144,38 @@ impl AiChatPanel {
         if self.target.is_none() {
             return;
         }
-        let context = self.context(cx);
         let text = self.input.read(cx).value().to_string();
+        // while the `/` list is open Enter picks its entry instead of sending
+        if let Some(query) = quick::slash_query(&text) {
+            let items = self.slash_items(query, cx);
+            if let Some(item) = items.iter().find(|i| i.slug == query).or(items.first()).cloned() {
+                self.apply_slash(item, window, cx);
+                return;
+            }
+        }
+        if let Some((slug, rest)) = quick::parse_slash_command(&text) {
+            if slug == "search" && crate::ai::runtime::limits(cx).web_search_ready {
+                self.send_with_search(rest.to_string(), window, cx);
+                return;
+            }
+            if self.skills.is_empty() {
+                self.reload_skills(cx);
+            }
+            if let Some(skill) = self.skills.iter().find(|s| s.ready && s.slug == slug).cloned() {
+                let message = if rest.is_empty() { t!("ai.useSkill", name = skill.name.clone()) } else { rest.to_string() };
+                self.dispatch(message, Some(format!("[用户技能：{}]\n{}", skill.name, skill.body)), window, cx);
+                return;
+            }
+        }
+        self.dispatch(text, None, window, cx);
+    }
+
+    /// Sends `text` (with optional extra context in front of the terminal context) and clears the input.
+    fn dispatch(&mut self, text: String, extra: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        let mut context = self.context(cx);
+        if let Some(extra) = extra {
+            context = format!("{extra}\n\n{context}");
+        }
         let sid = self.target.as_ref().map(|t| t.session_id.clone()).unwrap_or_default();
         let sent = self.store.update(cx, |s, cx| {
             s.set_input_text(&sid, text, cx);
@@ -144,6 +183,89 @@ impl AiChatPanel {
         });
         if sent {
             self.input.update(cx, |i, cx| i.set_value("", window, cx));
+        }
+    }
+
+    /// `/search <query>`: look the query up, then ask with the results as context.
+    fn send_with_search(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
+        if query.is_empty() {
+            return;
+        }
+        let ctx = crate::services::ctx(cx);
+        let q = query.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let result = ops_core::rt::run(async move {
+                let prefs = ops_ai::prefs::load_prefs(&ctx.db)?;
+                let config = prefs.web_search.ok_or_else(|| "网页搜索尚未配置".to_string())?;
+                ops_ai::prefs::search::web_search(&config, &q).await
+            })
+            .await
+            .and_then(|r| r);
+            let _ = this.update_in(cx, |this, window, cx| match result {
+                Ok(rows) => {
+                    let context = quick::format_search_context(&query, &rows);
+                    this.dispatch(query, Some(context), window, cx);
+                }
+                Err(e) => crate::widgets::toast::error(window, cx, t!("ai.searchFailed", error = e)),
+            });
+        })
+        .detach();
+    }
+
+    fn reload_skills(&mut self, cx: &mut Context<Self>) {
+        let dir = crate::services::ctx(cx).core.data_dir.clone();
+        self.skills = user_skills::scan(&dir).map(|s| s.skills.into_iter().filter(|k| k.ready).collect()).unwrap_or_default();
+    }
+
+    /// The entries of the `/` list for what is typed after the slash.
+    pub fn slash_items(&self, query: &str, cx: &App) -> Vec<SlashItem> {
+        let limits = crate::ai::runtime::limits(cx);
+        let skills: Vec<quick::SkillEntry> = self.skills.iter().map(|s| (s.slug.clone(), s.name.clone(), s.description.clone())).collect();
+        let streaming = self.target.as_ref().and_then(|t| self.store.read(cx).session(&t.session_id)).is_some_and(|s| s.streaming());
+        quick::build_slash_items(&limits.quick_messages, &skills, query, limits.web_search_ready, streaming)
+    }
+
+    /// Picks an entry of the `/` list.
+    pub fn apply_slash(&mut self, item: SlashItem, window: &mut Window, cx: &mut Context<Self>) {
+        let value = match &item.kind {
+            SlashKind::Quick(m) => m.content.clone(),
+            SlashKind::Skill => format!("/{} ", item.slug),
+            SlashKind::Search => "/search ".to_string(),
+            SlashKind::Stop => {
+                let conversation = self.target.as_ref().and_then(|t| self.store.read(cx).session(&t.session_id)).and_then(|s| s.active_conversation_id.clone());
+                if let Some(id) = conversation {
+                    let _ = ops_ai::client::ai_chat_cancel(id);
+                }
+                String::new()
+            }
+        };
+        self.input.update(cx, |i, cx| {
+            i.set_value(value, window, cx);
+            i.focus(window, cx);
+        });
+        cx.notify();
+    }
+
+    /// "Auto" permission mode (and commands a permission grant covers) run without a click; blocked commands never do.
+    fn auto_approve(&mut self, cx: &mut Context<Self>) {
+        let Some(target) = self.target.as_ref() else { return };
+        let auto = crate::ai::runtime::limits(cx).permission_mode == ops_ai::prefs::PermissionMode::Auto;
+        let ready: Vec<String> = self
+            .store
+            .read(cx)
+            .session(&target.session_id)
+            .map(|s| {
+                s.pending_actions()
+                    .into_iter()
+                    .filter(|a| a.kind == ActionKind::Command && !a.approved && !a.executed && !a.rejected && !a.assessment_loading)
+                    .filter(|a| a.assessment.as_ref().is_some_and(|x| x.decision != AiActionDecision::Block && (auto || x.matched_rule == "PERMISSION_GRANT")))
+                    .filter(|a| !self.executing.contains(&a.id))
+                    .map(|a| a.id.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for id in ready {
+            self.approve(&id, cx);
         }
     }
 
@@ -167,7 +289,8 @@ impl AiChatPanel {
 
         self.executing.insert(action.id.clone());
         let follow_up_context = self.context(cx);
-        let rx = pane.update(cx, |p, cx| p.execute_command(&command, Some(AUTO_COMMAND_TIMEOUT), cx));
+        let limits = crate::ai::runtime::limits(cx);
+        let rx = pane.update(cx, |p, cx| p.execute_command(&command, Some(Duration::from_secs(limits.command_timeout as u64)), cx));
         cx.notify();
         let action_id = action.id.clone();
         cx.spawn(async move |this, cx| {
@@ -186,9 +309,10 @@ impl AiChatPanel {
                 let decision = classify_terminal_follow_up(&formatted);
                 let body = if decision.output.is_empty() { formatted } else { decision.output };
                 let text = prompt::follow_up_message(&body);
+                let max_iterations = limits.max_iterations;
                 this.store.update(cx, |s, cx| {
                     s.mark_executed(&sid, &action_id, cx);
-                    s.send_direct_message(&sid, text, Some(follow_up_context), Vec::new(), cx);
+                    s.send_follow_up(&sid, text, Some(follow_up_context), max_iterations, cx);
                 });
                 cx.notify();
             });
@@ -357,6 +481,8 @@ impl Render for AiChatPanel {
         let done: Vec<ParsedPendingAction> = session.as_ref().map(|s| s.executed_actions().into_iter().cloned().collect()).unwrap_or_default();
         let active_conv = session.as_ref().and_then(|s| s.active_conversation_id.clone());
         let has_text = !self.input.read(cx).value().trim().is_empty();
+        let typed = self.input.read(cx).value().to_string();
+        let slash_items = quick::slash_query(&typed).map(|q| self.slash_items(q, cx)).unwrap_or_default();
         let unfinished = !pending.is_empty();
         let (executing, waiting): (Vec<_>, Vec<_>) = pending.iter().cloned().partition(|a| self.executing.contains(&a.id));
         let title = self.target.as_ref().map(|t| t.label.clone()).filter(|l| !l.is_empty()).unwrap_or_else(|| t!("ai.assistantTitle"));
@@ -489,6 +615,56 @@ impl Render for AiChatPanel {
             )
             .when_some(history, |d, h| d.child(h))
             .child(messages_view)
+            .when(!slash_items.is_empty(), |d| {
+                let weak = cx.entity().downgrade();
+                d.child(
+                    v_flex()
+                        .id("ai-slash-list")
+                        .test_support()
+                        .flex_none()
+                        .max_h(px(160.))
+                        .overflow_y_scroll()
+                        .mx(px(8.))
+                        .mb(px(2.))
+                        .py(px(2.))
+                        .rounded(px(4.))
+                        .border_1()
+                        .border_color(ui.term_border)
+                        .bg(ui.terminal_panel_bg)
+                        .children(slash_items.into_iter().enumerate().map(|(ix, item)| {
+                            let w = weak.clone();
+                            let description = match &item.kind {
+                                SlashKind::Search => t!("ai.slashSearchDesc"),
+                                SlashKind::Stop => t!("ai.slashStopDesc"),
+                                _ => item.description.clone(),
+                            };
+                            let title = match &item.kind {
+                                SlashKind::Search => t!("ai.slashSearch"),
+                                SlashKind::Stop => t!("ai.slashStop"),
+                                _ => item.title.clone(),
+                            };
+                            let picked = item.clone();
+                            h_flex()
+                                .id(SharedString::from(format!("ai-slash-item-{ix}")))
+                                .test_support()
+                                .gap(px(8.))
+                                .px(px(8.))
+                                .py(px(3.))
+                                .items_baseline()
+                                .cursor_pointer()
+                                .text_size(px(11.))
+                                .when(ix == 0, |d| d.bg(ui.term_border))
+                                .hover(move |d| d.bg(ui.term_border))
+                                .child(div().flex_none().font_family("Menlo").text_color(ui.term_accent).child(format!("/{}", item.slug)))
+                                .child(div().text_color(ui.text).truncate().child(title))
+                                .when(!description.is_empty(), |d| d.child(div().flex_1().min_w_0().truncate().text_color(ui.text_secondary).child(description)))
+                                .on_click(move |_, window, cx| {
+                                    let picked = picked.clone();
+                                    let _ = w.update(cx, |this, cx| this.apply_slash(picked, window, cx));
+                                })
+                        })),
+                )
+            })
             .child(
                 h_flex()
                     .flex_none()

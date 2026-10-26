@@ -308,7 +308,7 @@ impl RdpAiPanel {
     /// the result has been checked against the screen.
     fn run_action(&mut self, action_id: String, cx: &mut Context<Self>) -> Task<StepOutcome> {
         let sid = self.sid.clone();
-        let Some(action) = self.store.update(cx, |s, _| s.begin_rdp_approval(&sid, &action_id)) else { return Task::ready(StepOutcome::Failed) };
+        let Some(action) = self.store.update(cx, |s, cx| s.begin_rdp_approval(&sid, &action_id, cx)) else { return Task::ready(StepOutcome::Failed) };
         let Some(ops) = action.rdp_operations.clone().filter(|o| !o.is_empty()) else { return Task::ready(StepOutcome::Failed) };
         let Some(win) = self.win.upgrade() else { return Task::ready(StepOutcome::Failed) };
         self.running.insert(action_id.clone());

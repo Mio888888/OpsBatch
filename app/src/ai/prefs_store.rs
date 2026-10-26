@@ -1,0 +1,96 @@
+//! Shared state of the AI settings tabs: the whole `AiPrefs` document, loaded once and saved after every change.
+
+use gpui_kit::*;
+use ops_ai::prefs::{self, AiPrefs, RuntimeLimits};
+
+#[derive(Debug, Clone)]
+pub enum PrefsEvent {
+    Loaded,
+    Saved,
+    SaveFailed(String),
+}
+
+pub struct PrefsStore {
+    prefs: AiPrefs,
+    loaded: bool,
+    saving: bool,
+    dirty: bool,
+}
+
+impl EventEmitter<PrefsEvent> for PrefsStore {}
+
+impl PrefsStore {
+    pub fn new(cx: &mut Context<Self>) -> Self {
+        let mut this = Self { prefs: AiPrefs::default(), loaded: false, saving: false, dirty: false };
+        this.load(cx);
+        this
+    }
+
+    fn load(&mut self, cx: &mut Context<Self>) {
+        let ctx = crate::services::ctx(cx);
+        cx.spawn(async move |this, cx| {
+            let result = ops_core::rt::run(async move { prefs::load_prefs(&ctx.db) }).await.and_then(|r| r);
+            let _ = this.update(cx, |this, cx| {
+                match result {
+                    Ok(prefs) => this.prefs = prefs,
+                    Err(e) => cx.emit(PrefsEvent::SaveFailed(e)),
+                }
+                this.loaded = true;
+                crate::ai::runtime::set(cx, RuntimeLimits::from(this.prefs.clone()));
+                cx.emit(PrefsEvent::Loaded);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    pub fn prefs(&self) -> &AiPrefs {
+        &self.prefs
+    }
+
+    pub fn loaded(&self) -> bool {
+        self.loaded
+    }
+
+    /// A save is running or queued.
+    pub fn saving(&self) -> bool {
+        self.saving || self.dirty
+    }
+
+    /// Applies `f`, normalizes, tells the chat runtime and saves in the background (saves never overlap; the latest
+    /// state always wins).
+    pub fn update(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut AiPrefs)) {
+        if !self.loaded {
+            return;
+        }
+        f(&mut self.prefs);
+        self.prefs.normalize();
+        crate::ai::runtime::set(cx, RuntimeLimits::from(self.prefs.clone()));
+        cx.notify();
+        self.persist(cx);
+    }
+
+    fn persist(&mut self, cx: &mut Context<Self>) {
+        if self.saving {
+            self.dirty = true;
+            return;
+        }
+        self.saving = true;
+        let snapshot = self.prefs.clone();
+        let ctx = crate::services::ctx(cx);
+        cx.spawn(async move |this, cx| {
+            let result = ops_core::rt::run(async move { prefs::save_prefs(&ctx.db, &snapshot) }).await.and_then(|r| r);
+            let _ = this.update(cx, |this, cx| {
+                this.saving = false;
+                match result {
+                    Ok(()) => cx.emit(PrefsEvent::Saved),
+                    Err(e) => cx.emit(PrefsEvent::SaveFailed(e)),
+                }
+                if std::mem::take(&mut this.dirty) {
+                    this.persist(cx);
+                }
+            });
+        })
+        .detach();
+    }
+}

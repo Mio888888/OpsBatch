@@ -9,9 +9,8 @@ use std::time::Duration;
 
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext};
-use ops_ai::client::{save_ai_config, AiActionDecision, AiConfig};
+use ops_ai::client::{ai_assess_action, save_ai_config, AiActionDecision, AiConfig};
 use opsbatch_app::ai::panel::AiChatPanel;
-use opsbatch_app::ai::settings::AiSettingsView;
 use opsbatch_app::ai::store::{ai_store, Role};
 use opsbatch_app::batch_exec::window::BatchCommandsWindow;
 use opsbatch_app::terminal::page::{BottomTab, TerminalPage};
@@ -410,58 +409,6 @@ fn selection_analysis_starts_a_turn_with_the_error_prompt(cx: &mut TestAppContex
 }
 
 #[gpui_kit::test]
-fn ai_settings_save_fetch_models_and_test_connection(cx: &mut TestAppContext) {
-    let _s = serial();
-    let fx = common::setup(cx, |_| {});
-    let mock = start_mock();
-    let view: Entity<AiSettingsView> = win(cx, &fx, |window, cx| cx.new(|cx| AiSettingsView::new(window, cx)));
-    wait_until(cx, "stored config loaded", |cx| view.read_with(cx, |v, _| v.loaded()));
-    view.read_with(cx, |v, _| assert_eq!((v.provider(), v.enabled(), v.model()), ("openai", false, "gpt-4o-mini")));
-
-    // Switching provider restores that provider's defaults.
-    win(cx, &fx, |w, cx| {
-        view.update(cx, |v, cx| {
-            v.set_enabled(true, cx);
-            v.api_url().update(cx, |s, cx| s.set_value(format!("{}/chat/completions/", mock.url), w, cx));
-            v.api_key().update(cx, |s, cx| s.set_value("sk-test-key-123456", w, cx));
-            v.custom_model().update(cx, |s, cx| s.set_value("my-model", w, cx));
-        });
-    });
-
-    // Fetch the model list from the (mock) provider.
-    win(cx, &fx, |w, cx| view.update(cx, |v, cx| v.fetch_models(w, cx)));
-    wait_until(cx, "models fetched", |cx| view.read_with(cx, |v, _| !v.fetched_models().is_empty() && !v.busy()));
-    view.read_with(cx, |v, _| assert_eq!(v.fetched_models(), ["m-a", "m-b"], "sorted by id"));
-
-    // Saving validates and persists (key masked on reload, URL normalized).
-    win(cx, &fx, |w, cx| view.update(cx, |v, cx| v.save(w, cx)));
-    let db = fx.ctx.db.clone();
-    wait_until(cx, "saved", |_| {
-        let cfg = ops_core::rt::block_on(ops_ai::client::get_ai_config(&db)).unwrap();
-        cfg.enabled && cfg.api_url == mock.url && cfg.api_key.contains("****")
-    });
-    let saved = ops_core::rt::block_on(ops_ai::client::get_ai_config(&db)).unwrap();
-    assert_eq!(saved.provider, "openai");
-    assert_eq!(saved.model, "gpt-4o-mini");
-    wait_until(cx, "form reloaded with masked key", |cx| view.read_with(cx, |v, cx| v.api_key().read(cx).value().contains("****")));
-
-    // Test connection uses the saved config and the chosen model.
-    win(cx, &fx, |w, cx| view.update(cx, |v, cx| v.test_connection(w, cx)));
-    wait_until(cx, "connection tested", |cx| view.read_with(cx, |v, _| !v.busy()) && mock.requests().iter().any(|b| b["stream"] != true && b["model"] == "gpt-4o-mini"));
-
-    // Missing required fields never reach the backend.
-    win(cx, &fx, |w, cx| {
-        view.update(cx, |v, cx| {
-            v.api_url().update(cx, |s, cx| s.set_value("", w, cx));
-            v.save(w, cx);
-        })
-    });
-    cx.run_until_parked();
-    let after = ops_core::rt::block_on(ops_ai::client::get_ai_config(&db)).unwrap();
-    assert_eq!(after.api_url, mock.url);
-}
-
-#[gpui_kit::test]
 fn batch_window_assess_button_shows_the_policy_risk(cx: &mut TestAppContext) {
     let _s = serial();
     let fx = common::setup(cx, |_| {});
@@ -474,4 +421,208 @@ fn batch_window_assess_button_shows_the_policy_risk(cx: &mut TestAppContext) {
     win(cx, &fx, |w, cx| bx.update(cx, |b, cx| b.set_command("ls", w, cx)));
     cx.run_until_parked();
     bx.read_with(cx, |b, _| assert!(b.risk().is_none()));
+}
+
+// ---------------------------------------------------------------------------
+// Safety settings in the chat
+// ---------------------------------------------------------------------------
+
+/// Stores AI preferences without disturbing the provider the fixture configured (the legacy row is adopted first).
+fn set_prefs(fx: &Fixture, f: impl FnOnce(&mut ops_ai::prefs::AiPrefs)) -> ops_ai::prefs::AiPrefs {
+    let mut prefs = ops_ai::prefs::load_prefs(&fx.ctx.db).unwrap();
+    f(&mut prefs);
+    ops_ai::prefs::save_prefs(&fx.ctx.db, &prefs).unwrap();
+    prefs
+}
+
+fn executed(cx: &mut TestAppContext, sid: &str) -> bool {
+    cx.update(|cx| ai_store(cx).read(cx).session(sid).is_some_and(|s| s.executed_actions().len() == 1))
+}
+
+#[gpui_kit::test]
+fn auto_mode_runs_commands_without_a_click(cx: &mut TestAppContext) {
+    let _s = serial();
+    let (fx, _mock, _tp, panel, sid) = ai_fixture(cx);
+    let prefs = set_prefs(&fx, |p| p.global_permission_mode = ops_ai::prefs::PermissionMode::Auto);
+    cx.update(|cx| opsbatch_app::ai::runtime::set(cx, ops_ai::prefs::RuntimeLimits::from(prefs)));
+    send_text(cx, &fx, &panel, "检查磁盘");
+    wait_idle(cx, &sid);
+    wait_until(cx, "command ran by itself", |cx| executed(cx, &sid));
+    assert!(active_pane(cx).read_with(cx, |p, _| p.buffer_text().contains("ai-mark-42")));
+    wait_until(cx, "follow-up answered", |cx| cx.update(|cx| ai_store(cx).read(cx).session(&sid).is_some_and(|s| !s.streaming() && s.messages.len() == 4)));
+}
+
+#[gpui_kit::test]
+fn confirm_mode_waits_for_the_click_and_a_matching_grant_skips_it(cx: &mut TestAppContext) {
+    let _s = serial();
+    let (fx, _mock, _tp, panel, sid) = ai_fixture(cx);
+    send_text(cx, &fx, &panel, "检查磁盘");
+    wait_idle(cx, &sid);
+    wait_until(cx, "plan assessed", |cx| pending_with_assessment(cx, &sid));
+    std::thread::sleep(Duration::from_millis(300));
+    cx.run_until_parked();
+    assert!(!executed(cx, &sid), "nothing runs before the click");
+
+    // a grant for exactly this command lets the next one through on its own
+    let prefs = set_prefs(&fx, |p| {
+        p.permission_grants.push(ops_ai::prefs::PermissionGrantRule { id: "g1".into(), capability_id: "terminal.execute".into(), session_pattern: "*".into(), command_pattern: Some("echo ai-mark-42".into()), ..Default::default() });
+    });
+    cx.update(|cx| opsbatch_app::ai::runtime::set(cx, ops_ai::prefs::RuntimeLimits::from(prefs)));
+    win(cx, &fx, |w, cx| {
+        w.render_frame(cx);
+        w.click("ai-reject-0", cx);
+    });
+    send_text(cx, &fx, &panel, "检查磁盘");
+    wait_until(cx, "granted command ran", |cx| cx.update(|cx| ai_store(cx).read(cx).session(&sid).is_some_and(|s| s.executed_actions().len() == 1)));
+    let rule = cx.update(|cx| ai_store(cx).read(cx).session(&sid).unwrap().executed_actions()[0].assessment.clone().unwrap().matched_rule);
+    assert_eq!(rule, "PERMISSION_GRANT");
+}
+
+#[gpui_kit::test]
+fn observer_mode_and_the_blocklist_refuse_commands(cx: &mut TestAppContext) {
+    let _s = serial();
+    let (fx, _mock, _tp, panel, sid) = ai_fixture(cx);
+    set_prefs(&fx, |p| p.global_permission_mode = ops_ai::prefs::PermissionMode::Observer);
+    send_text(cx, &fx, &panel, "检查磁盘");
+    wait_idle(cx, &sid);
+    wait_until(cx, "plan assessed", |cx| pending_with_assessment(cx, &sid));
+    let a = cx.update(|cx| ai_store(cx).read(cx).session(&sid).unwrap().pending_actions()[0].clone());
+    assert_eq!(a.assessment.as_ref().map(|x| (x.decision.clone(), x.matched_rule.as_str())), Some((AiActionDecision::Block, "AI_OBSERVER_MODE")));
+    win(cx, &fx, |w, cx| {
+        w.render_frame(cx);
+        w.click("ai-approve-0", cx);
+    });
+    cx.run_until_parked();
+    assert!(!executed(cx, &sid), "a blocked command never runs");
+
+    // back to confirm, with the command on the blocklist
+    set_prefs(&fx, |p| {
+        p.global_permission_mode = ops_ai::prefs::PermissionMode::Confirm;
+        p.command_blocklist = vec!["ai-mark".into()];
+    });
+    let db = fx.ctx.db.clone();
+    let assessed = ai_assess_action(&db, "echo ai-mark-42".into()).unwrap();
+    assert_eq!((assessed.decision, assessed.matched_rule.as_str()), (AiActionDecision::Block, "AI_COMMAND_BLOCKLIST"));
+}
+
+#[gpui_kit::test]
+fn follow_ups_stop_at_the_iteration_cap(cx: &mut TestAppContext) {
+    let _s = serial();
+    let (_fx, _mock, _tp, _panel, sid) = ai_fixture(cx);
+    let store = cx.update(|cx| ai_store(cx));
+    let sent = cx.update(|cx| store.update(cx, |s, cx| s.send_follow_up(&sid, "next".into(), None, 0, cx)));
+    assert!(!sent, "a cap of zero refuses the follow-up");
+    cx.update(|cx| {
+        let s = store.read(cx).session(&sid).unwrap();
+        assert_eq!(s.messages.last().map(|m| m.role), Some(Role::System));
+        assert!(!s.streaming());
+    });
+    let sent = cx.update(|cx| store.update(cx, |s, cx| s.send_follow_up(&sid, "next".into(), None, 3, cx)));
+    assert!(sent);
+    cx.update(|cx| assert_eq!(store.read(cx).session(&sid).unwrap().follow_ups, 1));
+}
+
+// ---------------------------------------------------------------------------
+// Slash commands of the composer
+// ---------------------------------------------------------------------------
+
+/// Types into the composer the way the keyboard does (`set_value` alone emits nothing).
+fn type_text(cx: &mut TestAppContext, fx: &Fixture, panel: &Entity<AiChatPanel>, text: &str) {
+    win(cx, fx, |w, cx| {
+        let input = panel.read(cx).input().clone();
+        input.update(cx, |i, cx| i.set_value(text.to_string(), w, cx));
+        input.update(cx, |_, cx| cx.emit(gpui_kit::component::input::InputEvent::Change));
+    });
+    cx.run_until_parked();
+}
+
+fn text_of(cx: &mut TestAppContext, panel: &Entity<AiChatPanel>) -> String {
+    cx.update(|cx| panel.read(cx).input().read(cx).value().to_string())
+}
+
+#[gpui_kit::test]
+fn the_slash_list_offers_quick_messages_and_fills_the_input(cx: &mut TestAppContext) {
+    let _s = serial();
+    let (fx, mock, _tp, panel, sid) = ai_fixture(cx);
+    let prefs = set_prefs(&fx, |p| {
+        p.quick_messages = ops_ai::prefs::quick::sanitize_quick_messages(vec![ops_ai::prefs::QuickMessage { name: "磁盘检查".into(), slug: "disk".into(), content: "检查磁盘".into(), description: Some("看看空间".into()), ..Default::default() }]);
+    });
+    cx.update(|cx| opsbatch_app::ai::runtime::set(cx, ops_ai::prefs::RuntimeLimits::from(prefs)));
+
+    // typing "/" opens the list; picking an entry puts its prompt in the input
+    type_text(cx, &fx, &panel, "/di");
+    win(cx, &fx, |w, cx| {
+        w.render_frame(cx);
+        assert!(w.try_find("ai-slash-list").is_some() && w.try_find("ai-slash-item-0").is_some());
+        w.click("ai-slash-item-0", cx);
+    });
+    assert_eq!(text_of(cx, &panel), "检查磁盘");
+    win(cx, &fx, |w, cx| {
+        w.render_frame(cx);
+        assert!(w.try_find("ai-slash-list").is_none(), "the list closes once the command is replaced");
+    });
+
+    // Enter on a bare "/slug" does the same
+    win(cx, &fx, |w, cx| panel.update(cx, |p, cx| p.input().update(cx, |i, cx| i.set_value("/disk".to_string(), w, cx))));
+    win(cx, &fx, |w, cx| panel.update(cx, |p, cx| p.send(w, cx)));
+    assert_eq!(text_of(cx, &panel), "检查磁盘");
+    // and the picked prompt is a normal message
+    win(cx, &fx, |w, cx| panel.update(cx, |p, cx| p.send(w, cx)));
+    wait_idle(cx, &sid);
+    assert!(mock.all_text().contains("检查磁盘"));
+}
+
+#[gpui_kit::test]
+fn a_user_skill_joins_the_request_as_context(cx: &mut TestAppContext) {
+    let _s = serial();
+    let (fx, mock, _tp, panel, sid) = ai_fixture(cx);
+    let dir = fx.ctx.core.data_dir.join("skills/Deploy Helper");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("SKILL.md"), "---\nname: Deploy Helper\ndescription: ships\n---\nSKILL-BODY-MARK always run smoke tests first").unwrap();
+
+    type_text(cx, &fx, &panel, "/");
+    let items = cx.update(|cx| panel.read(cx).slash_items("dep", cx));
+    assert_eq!(items.iter().map(|i| i.slug.as_str()).collect::<Vec<_>>(), vec!["deploy-helper"]);
+    win(cx, &fx, |w, cx| panel.update(cx, |p, cx| p.apply_slash(items[0].clone(), w, cx)));
+    assert_eq!(text_of(cx, &panel), "/deploy-helper ");
+
+    win(cx, &fx, |w, cx| panel.update(cx, |p, cx| p.input().update(cx, |i, cx| i.set_value("/deploy-helper 检查磁盘".to_string(), w, cx))));
+    win(cx, &fx, |w, cx| panel.update(cx, |p, cx| p.send(w, cx)));
+    wait_idle(cx, &sid);
+    let text = mock.all_text();
+    assert!(text.contains("SKILL-BODY-MARK") && text.contains("检查磁盘"), "{text}");
+    cx.update(|cx| assert_eq!(ai_store(cx).read(cx).session(&sid).unwrap().messages[0].content, "检查磁盘", "the chat shows the question, not the skill"));
+}
+
+#[gpui_kit::test]
+fn search_runs_the_query_and_sends_the_results_as_context(cx: &mut TestAppContext) {
+    use std::io::{Read, Write};
+    let _s = serial();
+    let (fx, mock, _tp, panel, sid) = ai_fixture(cx);
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let host = format!("http://{}", listener.local_addr().unwrap());
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+    let log = seen.clone();
+    std::thread::spawn(move || {
+        if let Ok((mut s, _)) = listener.accept() {
+            let mut buf = [0u8; 4096];
+            let n = s.read(&mut buf).unwrap_or(0);
+            *log.lock().unwrap() = String::from_utf8_lossy(&buf[..n]).lines().next().unwrap_or("").to_string();
+            let body = r#"{"results":[{"title":"Rust 官网","url":"https://rust-lang.org","content":"SEARCH-RESULT-MARK"}]}"#;
+            let _ = s.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes());
+        }
+    });
+    let prefs = set_prefs(&fx, |p| p.web_search = Some(ops_ai::prefs::WebSearchConfig { provider_id: "searxng".into(), api_host: Some(host), enabled: true, ..Default::default() }));
+    cx.update(|cx| opsbatch_app::ai::runtime::set(cx, ops_ai::prefs::RuntimeLimits::from(prefs)));
+
+    // "/" lists the search command; with a query Enter runs it
+    let items = cx.update(|cx| panel.read(cx).slash_items("se", cx));
+    assert_eq!(items.iter().map(|i| i.slug.as_str()).collect::<Vec<_>>(), vec!["search"]);
+    win(cx, &fx, |w, cx| panel.update(cx, |p, cx| p.input().update(cx, |i, cx| i.set_value("/search rust gpui".to_string(), w, cx))));
+    win(cx, &fx, |w, cx| panel.update(cx, |p, cx| p.send(w, cx)));
+    wait_until(cx, "search results reached the model", |_| mock.all_text().contains("SEARCH-RESULT-MARK"));
+    wait_idle(cx, &sid);
+    assert!(seen.lock().unwrap().contains("GET /search?q=rust%20gpui&format=json"), "{}", seen.lock().unwrap());
+    cx.update(|cx| assert_eq!(ai_store(cx).read(cx).session(&sid).unwrap().messages[0].content, "rust gpui"));
+    assert_eq!(text_of(cx, &panel), "");
 }

@@ -7136,6 +7136,7 @@ version = "0.2.4"
 dependencies = [
  "chrono",
  "dashmap",
+ "fancy-regex",
  "futures",
  "futures-util",
  "log",

@@ -341,7 +341,7 @@ fn settings_embeds_ai_and_library_sections(cx: &mut TestAppContext) {
     let (handle, win) = open_settings(cx, Section::Ai);
     cx.update_window(handle.into(), |_, w, cx| {
         w.render_frame(cx);
-        assert!(w.try_find("ai-save").is_some(), "AI form is embedded");
+        assert!(w.try_find("ai-tabs").is_some(), "AI tabs are embedded");
         win.update(cx, |v, cx| v.select(Section::CommandLib, cx));
         w.render_frame(cx);
         assert!(w.try_find("command-lib").is_some() && w.try_find("clib-add").is_some());

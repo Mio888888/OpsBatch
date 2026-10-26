@@ -418,12 +418,15 @@ impl TerminalPage {
                 if let Some(text) = selection.clone() {
                     let copy = text.clone();
                     menu = menu.item(PopupMenuItem::new(t!("terminal.copy")).on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))));
-                    menu = menu.separator();
-                    let page = page.clone();
-                    menu = menu.item(PopupMenuItem::new(format!("🔍 {}", t!("terminal.aiAnalyzeError"))).on_click(move |_, window, cx| {
-                        let text = text.clone();
-                        let _ = page.update(cx, |this, cx| this.analyze_selection(text, window, cx));
-                    }));
+                    // Settings → AI → Tool access → "show the AI action on a selection"
+                    if crate::ai::runtime::limits(cx).show_selection_action {
+                        menu = menu.separator();
+                        let page = page.clone();
+                        menu = menu.item(PopupMenuItem::new(format!("🔍 {}", t!("terminal.aiAnalyzeError"))).on_click(move |_, window, cx| {
+                            let text = text.clone();
+                            let _ = page.update(cx, |this, cx| this.analyze_selection(text, window, cx));
+                        }));
+                    }
                 } else {
                     let p = menu_pane.clone();
                     menu = menu.item(PopupMenuItem::new(t!("terminal.paste")).on_click(move |_, _, cx| {

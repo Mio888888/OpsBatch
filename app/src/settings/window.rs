@@ -203,7 +203,7 @@ impl Render for SettingsWindow {
                     // embedded library pages: same 18/24/24 padding, the list scrolls inside its card
                     d.pt(px(18.)).px(px(24.)).pb(px(24.)).child(div().size_full().child(body))
                 } else {
-                    d.overflow_y_scroll().pt(px(18.)).px(px(24.)).pb(px(24.)).child(div().max_w(px(640.)).child(body))
+                    d.overflow_y_scroll().pt(px(18.)).px(px(24.)).pb(px(24.)).child(div().max_w(px(if current == Section::Ai { 820. } else { 640. })).child(body))
                 }
             });
         // The window has no title bar of its own: the traffic lights float over the sidebar and the

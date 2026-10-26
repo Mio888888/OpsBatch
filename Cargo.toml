@@ -1,0 +1,69 @@
+[workspace]
+resolver = "2"
+members = [
+    "app",
+    "crates/*",
+    "spikes/*",
+]
+
+[workspace.package]
+version = "0.2.4"
+edition = "2021"
+license = "MIT"
+authors = ["mio"]
+publish = false
+
+[workspace.dependencies]
+# UI: gpui-kit pins the matching gpui (gpui-pre =0.3.9), gpui-base and
+# gpui-component 0.8.0, plus the Lucide icon assets. Upgrade all together.
+gpui-kit = { version = "=0.8.0" }
+
+# Shared crates
+ops-core = { path = "crates/ops-core" }
+ops-ssh = { path = "crates/ops-ssh" }
+ops-terminal = { path = "crates/ops-terminal" }
+ops-rdp = { path = "crates/ops-rdp" }
+ops-vnc = { path = "crates/ops-vnc" }
+ops-library = { path = "crates/ops-library" }
+ops-ai = { path = "crates/ops-ai" }
+ops-workflow = { path = "crates/ops-workflow" }
+ops-i18n = { path = "crates/ops-i18n" }
+
+# Same versions as OpsBatch/src-tauri/Cargo.toml
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1"
+thiserror = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+portable-pty = "0.9"
+alacritty_terminal = "0.26"
+tray-icon = "0.26"
+futures = "0.3"
+flume = "0.11"
+parking_lot = "0.12"
+log = "0.4"
+env_logger = "0.11"
+
+[profile.dev]
+# gpui is slow in pure debug; keep our code debuggable but optimize deps.
+opt-level = 0
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# Patched third-party crates carried over from OpsBatch (used by ops-rdp in M8).
+[patch.crates-io]
+ironrdp-egfx = { path = "vendor/ironrdp-egfx-0.1.0" }
+ironrdp-dvc = { path = "vendor/ironrdp-dvc-0.6.0" }
+ironrdp-connector = { path = "vendor/ironrdp-connector-0.9.0" }
+# 0.8.0 plus a bundled PowerShell grammar for the syntect highlighter (see vendor/gpui-component-0.8.0/src/highlighter/powershell.sublime-syntax).
+gpui-component = { path = "vendor/gpui-component-0.8.0" }
+picky = { path = "vendor/picky-7.0.0-rc.23" }
+picky-krb = { path = "vendor/picky-krb-0.12.3" }
+sspi = { path = "vendor/sspi-0.21.0" }

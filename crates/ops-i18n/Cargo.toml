@@ -1,0 +1,12 @@
+[package]
+name = "ops-i18n"
+description = "OpsBatch i18n: zh-CN / en-US dictionaries (exported from the Tauri build) and t!() (TASKS M2-04)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde_json.workspace = true
+sys-locale = "0.3"

@@ -1,0 +1,53 @@
+[package]
+name = "opsbatch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lib]
+name = "opsbatch_app"
+path = "src/lib.rs"
+
+[[bin]]
+name = "opsbatch"
+path = "src/main.rs"
+
+[features]
+# Real encrypted vault + OS keychain (M1-05 / M2-09). Release packages must enable it once it ships; without it the app
+# keeps secrets in memory and uses an isolated `-dev` data directory.
+real-vault = ["ops-core/real-vault"]
+
+[dependencies]
+gpui-kit = { workspace = true, features = ["syntect"] }
+ops-core.workspace = true
+ops-ssh.workspace = true
+ops-terminal.workspace = true
+ops-library.workspace = true
+ops-ai.workspace = true
+ops-rdp.workspace = true
+ops-vnc.workspace = true
+ops-workflow.workspace = true
+ops-i18n.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+flume.workspace = true
+parking_lot.workspace = true
+log.workspace = true
+env_logger.workspace = true
+tray-icon.workspace = true
+alacritty_terminal.workspace = true
+futures.workspace = true
+uuid.workspace = true
+tokio.workspace = true
+regex = "1"
+base64 = "0.22"
+chrono.workspace = true
+rodio = { version = "0.22", default-features = false, features = ["playback", "flac", "mp3", "mp4", "vorbis", "wav"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+
+[dev-dependencies]
+rusqlite = { version = "0.31", features = ["bundled"] }
+sha2 = "0.10"
+gpui-kit = { workspace = true, features = ["test-support", "syntect"] }

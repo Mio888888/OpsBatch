@@ -1,0 +1,1464 @@
+mod host_key;
+
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use dashmap::DashMap;
+use russh::keys::ssh_key;
+use russh::{
+    cipher, client, compression, kex, mac, Channel, ChannelMsg, ChannelReadHalf, ChannelWriteHalf,
+    Preferred,
+};
+use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
+use std::future::Future;
+use std::io::{Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+use tokio::runtime::Runtime;
+
+use host_key::HostKeyVerifier;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SshConfig {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub auth_type: String,
+    pub password: Option<String>,
+    pub private_key: Option<String>,
+    pub proxy: Option<ProxySettings>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProxyType {
+    Http,
+    Socks5,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProxySettings {
+    pub enabled: bool,
+    #[serde(rename = "type")]
+    pub proxy_type: ProxyType,
+    pub host: String,
+    pub port: u16,
+    pub username: Option<String>,
+    pub password: Option<String>,
+}
+
+impl ProxySettings {
+    fn enabled_endpoint(&self) -> Option<(&str, u16)> {
+        if !self.enabled || self.host.trim().is_empty() || self.port == 0 {
+            return None;
+        }
+        Some((self.host.trim(), self.port))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecResult {
+    pub success: bool,
+    pub output: String,
+    pub exit_code: i32,
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TransferResult {
+    pub host: String,
+    pub success: bool,
+    pub error: Option<String>,
+    pub file_size: u64,
+    pub duration_ms: u64,
+}
+
+pub struct ClientHandler {
+    verifier: HostKeyVerifier,
+}
+
+impl ClientHandler {
+    fn new(host_id: impl Into<String>) -> Self {
+        Self {
+            verifier: HostKeyVerifier::new(host_id),
+        }
+    }
+}
+
+fn build_ssh_client_config() -> client::Config {
+    client::Config {
+        preferred: Preferred {
+            kex: Cow::Borrowed(&[
+                kex::CURVE25519,
+                kex::CURVE25519_PRE_RFC_8731,
+                kex::ECDH_SHA2_NISTP256,
+                kex::ECDH_SHA2_NISTP384,
+                kex::ECDH_SHA2_NISTP521,
+                kex::DH_GEX_SHA256,
+                kex::DH_G18_SHA512,
+                kex::DH_G17_SHA512,
+                kex::DH_G16_SHA512,
+                kex::DH_G15_SHA512,
+                kex::DH_G14_SHA256,
+                kex::DH_G14_SHA1,
+                kex::DH_GEX_SHA1,
+                kex::EXTENSION_SUPPORT_AS_CLIENT,
+                kex::EXTENSION_OPENSSH_STRICT_KEX_AS_CLIENT,
+            ]),
+            key: Cow::Borrowed(&[
+                ssh_key::Algorithm::Ed25519,
+                ssh_key::Algorithm::Ecdsa {
+                    curve: ssh_key::EcdsaCurve::NistP256,
+                },
+                ssh_key::Algorithm::Ecdsa {
+                    curve: ssh_key::EcdsaCurve::NistP384,
+                },
+                ssh_key::Algorithm::Ecdsa {
+                    curve: ssh_key::EcdsaCurve::NistP521,
+                },
+                ssh_key::Algorithm::Rsa {
+                    hash: Some(ssh_key::HashAlg::Sha512),
+                },
+                ssh_key::Algorithm::Rsa {
+                    hash: Some(ssh_key::HashAlg::Sha256),
+                },
+                ssh_key::Algorithm::Rsa { hash: None },
+            ]),
+            cipher: Cow::Borrowed(&[
+                cipher::CHACHA20_POLY1305,
+                cipher::AES_256_GCM,
+                cipher::AES_128_GCM,
+                cipher::AES_256_CTR,
+                cipher::AES_192_CTR,
+                cipher::AES_128_CTR,
+                cipher::AES_256_CBC,
+                cipher::AES_192_CBC,
+                cipher::AES_128_CBC,
+            ]),
+            mac: Cow::Borrowed(&[
+                mac::HMAC_SHA512_ETM,
+                mac::HMAC_SHA256_ETM,
+                mac::HMAC_SHA512,
+                mac::HMAC_SHA256,
+                mac::HMAC_SHA1_ETM,
+                mac::HMAC_SHA1,
+            ]),
+            compression: Cow::Borrowed(&[compression::NONE]),
+        },
+        keepalive_interval: Some(std::time::Duration::from_secs(15)),
+        keepalive_max: 3,
+        nodelay: true,
+        ..Default::default()
+    }
+}
+
+fn resolve_socket_addr(host: &str, port: u16) -> Result<std::net::SocketAddr, String> {
+    let addr = format!("{}:{}", host, port);
+    addr.to_socket_addrs()
+        .map_err(|e| format!("DNS解析失败 {}: {}", addr, e))?
+        .next()
+        .ok_or_else(|| format!("未找到地址: {}", addr))
+}
+
+fn connect_tcp_endpoint(host: &str, port: u16, timeout_secs: u64) -> Result<TcpStream, String> {
+    let socket_addr = resolve_socket_addr(host, port)?;
+    TcpStream::connect_timeout(&socket_addr, Duration::from_secs(timeout_secs))
+        .map_err(|e| format!("TCP连接失败: {}", e))
+}
+
+fn connect_tcp_for_ssh(config: &SshConfig, timeout_secs: u64) -> Result<TcpStream, String> {
+    connect_tcp_stream(
+        &config.host,
+        config.port,
+        config.proxy.clone(),
+        timeout_secs,
+    )
+}
+
+pub fn connect_tcp_stream(
+    host: &str,
+    port: u16,
+    proxy: Option<ProxySettings>,
+    timeout_secs: u64,
+) -> Result<TcpStream, String> {
+    let config = SshConfig {
+        host: host.to_string(),
+        port,
+        username: String::new(),
+        auth_type: "password".to_string(),
+        password: None,
+        private_key: None,
+        proxy,
+    };
+
+    match config
+        .proxy
+        .as_ref()
+        .and_then(ProxySettings::enabled_endpoint)
+    {
+        Some(_) => connect_tcp_via_proxy(&config, timeout_secs),
+        None => connect_tcp_endpoint(host, port, timeout_secs),
+    }
+}
+
+fn connect_tcp_via_proxy(config: &SshConfig, timeout_secs: u64) -> Result<TcpStream, String> {
+    let proxy = config
+        .proxy
+        .as_ref()
+        .ok_or_else(|| "代理配置缺失".to_string())?;
+    let (proxy_host, proxy_port) = proxy
+        .enabled_endpoint()
+        .ok_or_else(|| "代理配置不完整".to_string())?;
+    let mut tcp = connect_tcp_endpoint(proxy_host, proxy_port, timeout_secs)
+        .map_err(|e| format!("代理 {}:{} 连接失败: {}", proxy_host, proxy_port, e))?;
+    tcp.set_read_timeout(Some(Duration::from_secs(timeout_secs)))
+        .map_err(|e| format!("设置代理读取超时失败: {}", e))?;
+    tcp.set_write_timeout(Some(Duration::from_secs(timeout_secs)))
+        .map_err(|e| format!("设置代理写入超时失败: {}", e))?;
+
+    match proxy.proxy_type {
+        ProxyType::Http => establish_http_proxy_tunnel(&mut tcp, config, proxy)?,
+        ProxyType::Socks5 => establish_socks5_proxy_tunnel(&mut tcp, config, proxy)?,
+    }
+
+    tcp.set_read_timeout(None)
+        .map_err(|e| format!("清理代理读取超时失败: {}", e))?;
+    tcp.set_write_timeout(None)
+        .map_err(|e| format!("清理代理写入超时失败: {}", e))?;
+    Ok(tcp)
+}
+
+fn establish_http_proxy_tunnel(
+    tcp: &mut TcpStream,
+    config: &SshConfig,
+    proxy: &ProxySettings,
+) -> Result<(), String> {
+    let target = format!("{}:{}", config.host, config.port);
+    let mut request = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n");
+    if let Some(username) = proxy.username.as_deref().filter(|value| !value.is_empty()) {
+        let password = proxy.password.as_deref().unwrap_or("");
+        let token = BASE64.encode(format!("{username}:{password}"));
+        request.push_str(&format!("Proxy-Authorization: Basic {token}\r\n"));
+    }
+    request.push_str("\r\n");
+    tcp.write_all(request.as_bytes())
+        .map_err(|e| format!("HTTP 代理请求失败: {}", e))?;
+
+    let mut response = Vec::with_capacity(256);
+    let mut byte = [0u8; 1];
+    while response.len() < 8192 {
+        tcp.read_exact(&mut byte)
+            .map_err(|e| format!("HTTP 代理响应读取失败: {}", e))?;
+        response.push(byte[0]);
+        if response.ends_with(b"\r\n\r\n") {
+            break;
+        }
+    }
+    let response_text = String::from_utf8_lossy(&response);
+    let status_line = response_text.lines().next().unwrap_or_default();
+    if !status_line.contains(" 200 ") {
+        return Err(format!("HTTP 代理 CONNECT 失败: {}", status_line));
+    }
+    Ok(())
+}
+
+fn establish_socks5_proxy_tunnel(
+    tcp: &mut TcpStream,
+    config: &SshConfig,
+    proxy: &ProxySettings,
+) -> Result<(), String> {
+    let needs_auth = proxy
+        .username
+        .as_deref()
+        .is_some_and(|value| !value.is_empty());
+    let greeting: &[u8] = if needs_auth {
+        &[0x05, 0x02, 0x00, 0x02]
+    } else {
+        &[0x05, 0x01, 0x00]
+    };
+    tcp.write_all(greeting)
+        .map_err(|e| format!("SOCKS5 握手失败: {}", e))?;
+
+    let mut method = [0u8; 2];
+    tcp.read_exact(&mut method)
+        .map_err(|e| format!("SOCKS5 方法响应读取失败: {}", e))?;
+    if method[0] != 0x05 || method[1] == 0xff {
+        return Err("SOCKS5 代理没有可用认证方式".to_string());
+    }
+
+    if method[1] == 0x02 {
+        let username = proxy.username.as_deref().unwrap_or("");
+        let password = proxy.password.as_deref().unwrap_or("");
+        if username.len() > u8::MAX as usize || password.len() > u8::MAX as usize {
+            return Err("SOCKS5 用户名或密码过长".to_string());
+        }
+        let mut auth = Vec::with_capacity(3 + username.len() + password.len());
+        auth.push(0x01);
+        auth.push(username.len() as u8);
+        auth.extend_from_slice(username.as_bytes());
+        auth.push(password.len() as u8);
+        auth.extend_from_slice(password.as_bytes());
+        tcp.write_all(&auth)
+            .map_err(|e| format!("SOCKS5 认证请求失败: {}", e))?;
+
+        let mut auth_response = [0u8; 2];
+        tcp.read_exact(&mut auth_response)
+            .map_err(|e| format!("SOCKS5 认证响应读取失败: {}", e))?;
+        if auth_response != [0x01, 0x00] {
+            return Err("SOCKS5 代理认证失败".to_string());
+        }
+    } else if method[1] != 0x00 {
+        return Err(format!("SOCKS5 不支持的认证方式: {}", method[1]));
+    }
+
+    let host_bytes = config.host.as_bytes();
+    if host_bytes.len() > u8::MAX as usize {
+        return Err("目标主机名过长，SOCKS5 无法连接".to_string());
+    }
+    let mut request = Vec::with_capacity(7 + host_bytes.len());
+    request.extend_from_slice(&[0x05, 0x01, 0x00, 0x03, host_bytes.len() as u8]);
+    request.extend_from_slice(host_bytes);
+    request.extend_from_slice(&config.port.to_be_bytes());
+    tcp.write_all(&request)
+        .map_err(|e| format!("SOCKS5 CONNECT 请求失败: {}", e))?;
+
+    let mut header = [0u8; 4];
+    tcp.read_exact(&mut header)
+        .map_err(|e| format!("SOCKS5 CONNECT 响应读取失败: {}", e))?;
+    if header[0] != 0x05 || header[1] != 0x00 {
+        return Err(format!("SOCKS5 CONNECT 失败，状态码 {}", header[1]));
+    }
+
+    match header[3] {
+        0x01 => read_and_discard(tcp, 6)?,
+        0x03 => {
+            let mut len = [0u8; 1];
+            tcp.read_exact(&mut len)
+                .map_err(|e| format!("SOCKS5 响应地址长度读取失败: {}", e))?;
+            read_and_discard(tcp, len[0] as usize + 2)?;
+        }
+        0x04 => read_and_discard(tcp, 18)?,
+        other => return Err(format!("SOCKS5 响应地址类型不支持: {}", other)),
+    }
+
+    Ok(())
+}
+
+fn read_and_discard(tcp: &mut TcpStream, len: usize) -> Result<(), String> {
+    let mut buffer = vec![0u8; len];
+    tcp.read_exact(&mut buffer)
+        .map_err(|e| format!("SOCKS5 响应读取失败: {}", e))
+}
+
+impl client::Handler for ClientHandler {
+    type Error = russh::Error;
+
+    async fn check_server_key(&mut self, key: &ssh_key::PublicKey) -> Result<bool, Self::Error> {
+        let fingerprint = key.fingerprint(ssh_key::HashAlg::Sha256).to_string();
+        self.verifier.verify_fingerprint(&fingerprint).map_err(|e| {
+            eprintln!("[SSH] Host key verification failed: {}", e);
+            russh::Error::Disconnect
+        })
+    }
+}
+
+struct SharedSshConnectionInner {
+    runtime: Arc<Runtime>,
+    handle: tokio::sync::Mutex<client::Handle<ClientHandler>>,
+}
+
+/// Keeps one shared SSH transport alive for the lifetime of an opened channel.
+#[derive(Clone)]
+pub struct SharedSshChannelLease {
+    connection: SharedSshConnection,
+}
+
+impl SharedSshChannelLease {
+    pub fn block_on<F: Future>(&self, future: F) -> F::Output {
+        self.connection.block_on(future)
+    }
+
+    pub fn is_closed(&self) -> bool {
+        self.connection.is_closed()
+    }
+}
+
+/// Cloneable reference to one authenticated SSH transport.
+///
+/// The russh client handle itself is not cloneable because it owns reply state,
+/// so the pool stores it behind an async mutex and shares this wrapper. Each
+/// terminal/stat/SFTP operation opens its own channel on the same transport.
+#[derive(Clone)]
+pub struct SharedSshConnection {
+    inner: Arc<SharedSshConnectionInner>,
+}
+
+impl SharedSshConnection {
+    fn from_parts(runtime: Arc<Runtime>, handle: client::Handle<ClientHandler>) -> Self {
+        Self {
+            inner: Arc::new(SharedSshConnectionInner {
+                runtime,
+                handle: tokio::sync::Mutex::new(handle),
+            }),
+        }
+    }
+
+    fn same_transport(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.inner, &other.inner)
+    }
+
+    pub fn is_closed(&self) -> bool {
+        match self.inner.handle.try_lock() {
+            Ok(handle) => handle.is_closed(),
+            Err(_) => false,
+        }
+    }
+
+    /// 检查连接是否已死（含锁超时场景）。
+    /// 当 try_lock 拿不到锁时说明另一个操作正在长时间占用 handle，
+    /// 如果持续拿不到锁则怀疑连接已卡死。
+    pub fn is_dead(&self) -> bool {
+        match self.inner.handle.try_lock() {
+            Ok(handle) => handle.is_closed(),
+            Err(_) => {
+                // 拿不到锁，尝试短暂等待后重试一次
+                std::thread::sleep(Duration::from_millis(50));
+                match self.inner.handle.try_lock() {
+                    Ok(handle) => handle.is_closed(),
+                    Err(_) => {
+                        eprintln!(
+                            "[SSH] is_dead: handle lock contention, treating as potentially dead"
+                        );
+                        false
+                    }
+                }
+            }
+        }
+    }
+
+    /// 通过尝试打开并立即关闭一个临时 channel 来探测连接是否真正可用。
+    /// 比 is_closed/is_dead 更可靠——能检测出 TCP 已断但 russh 尚未感知的场景。
+    pub fn health_probe(&self) -> bool {
+        let conn = self.clone();
+        let result = self.block_on(async {
+            // 用 tokio::time::timeout 防止 probe 卡在死连接上
+            match tokio::time::timeout(Duration::from_secs(5), conn.open_channel_async()).await {
+                Ok(Ok(channel)) => {
+                    // 成功打开 channel，立即关闭——连接是活的
+                    drop(channel);
+                    true
+                }
+                Ok(Err(_)) => {
+                    // channel 打开失败——连接已不可用
+                    false
+                }
+                Err(_) => {
+                    // timeout——连接卡死
+                    eprintln!("[SSH] health_probe: channel open timed out, connection likely dead");
+                    false
+                }
+            }
+        });
+        result
+    }
+
+    pub fn block_on<F: Future>(&self, future: F) -> F::Output {
+        self.inner.runtime.block_on(future)
+    }
+
+    pub async fn open_channel_split_async(
+        &self,
+    ) -> Result<(ChannelReadHalf, ChannelWriteHalf<client::Msg>), String> {
+        let handle = self.inner.handle.lock().await;
+        let channel = handle
+            .channel_open_session()
+            .await
+            .map_err(|e| format!("channel failed: {}", e))?;
+        Ok(channel.split())
+    }
+
+    pub async fn open_channel_async(&self) -> Result<Channel<client::Msg>, String> {
+        let handle = self.inner.handle.lock().await;
+        handle
+            .channel_open_session()
+            .await
+            .map_err(|e| format!("channel failed: {}", e))
+    }
+
+    pub async fn open_direct_tcpip_channel_async(
+        &self,
+        host: &str,
+        port: u32,
+    ) -> Result<Channel<client::Msg>, String> {
+        let handle = self.inner.handle.lock().await;
+        handle
+            .channel_open_direct_tcpip(host, port, "127.0.0.1", 0)
+            .await
+            .map_err(|e| format!("direct-tcpip channel failed: {}", e))
+    }
+
+    pub async fn tcpip_forward_async(&self, host: &str, port: u32) -> Result<(), String> {
+        let handle = self.inner.handle.lock().await;
+        handle
+            .tcpip_forward(host, port)
+            .await
+            .map_err(|e| format!("tcpip_forward failed: {}", e))?;
+        Ok(())
+    }
+
+    pub async fn cancel_tcpip_forward_async(&self, host: &str, port: u32) -> Result<(), String> {
+        let handle = self.inner.handle.lock().await;
+        handle
+            .cancel_tcpip_forward(host, port)
+            .await
+            .map_err(|e| format!("cancel_tcpip_forward failed: {}", e))?;
+        Ok(())
+    }
+
+    pub async fn open_sftp_session(&self) -> Result<russh_sftp::client::SftpSession, String> {
+        let channel = self
+            .open_channel_async()
+            .await
+            .map_err(|e| format!("open channel: {}", e))?;
+        channel
+            .request_subsystem(false, "sftp")
+            .await
+            .map_err(|e| format!("sftp subsystem: {}", e))?;
+        let sftp = russh_sftp::client::SftpSession::new(channel.into_stream())
+            .await
+            .map_err(|e| format!("sftp init: {}", e))?;
+        Ok(sftp)
+    }
+}
+
+/// Connect and authenticate on a shared runtime, returning only the client handle.
+/// Used by the connection pool to avoid creating a per-connection tokio Runtime.
+fn connect_handle_on_runtime(
+    runtime: &Runtime,
+    host_id: &str,
+    config: &SshConfig,
+    timeout_secs: u64,
+) -> Result<client::Handle<ClientHandler>, String> {
+    let config_clone = config.clone();
+
+    let tcp = connect_tcp_for_ssh(&config_clone, timeout_secs)?;
+    tcp.set_nonblocking(true)
+        .map_err(|e| format!("设置非阻塞失败: {}", e))?;
+
+    let config_clone = config.clone();
+    let verifier_id = host_id.to_string();
+
+    let handle = runtime.block_on(async move {
+        let tcp = tokio::net::TcpStream::from_std(tcp)
+            .map_err(|e| format!("TcpStream转换失败: {}", e))?;
+
+        let ssh_config = build_ssh_client_config();
+        let handler = ClientHandler::new(verifier_id);
+
+        let mut handle = client::connect_stream(Arc::new(ssh_config), tcp, handler)
+            .await
+            .map_err(|e| format!("SSH握手失败: {}", e))?;
+
+        let auth_result = match config_clone.auth_type.as_str() {
+            "password" => handle
+                .authenticate_password(
+                    &config_clone.username,
+                    config_clone.password.as_deref().unwrap_or(""),
+                )
+                .await
+                .map_err(|e| format!("认证失败: {}", e))?,
+            "key" => {
+                let key_data = config_clone.private_key.as_deref().unwrap_or("");
+                if key_data.is_empty() {
+                    return Err("私钥内容为空".to_string());
+                }
+                let key_pair = russh::keys::decode_secret_key(key_data, None)
+                    .map_err(|e| format!("私钥解析失败: {}", e))?;
+                let hash_alg = handle
+                    .best_supported_rsa_hash()
+                    .await
+                    .map_err(|e| format!("hash alg error: {}", e))?;
+                let key_with_alg =
+                    russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key_pair), hash_alg.flatten());
+                handle
+                    .authenticate_publickey(&config_clone.username, key_with_alg)
+                    .await
+                    .map_err(|e| format!("密钥认证失败: {}", e))?
+            }
+            _ => return Err(format!("不支持的认证类型: {}", config_clone.auth_type)),
+        };
+
+        match auth_result {
+            russh::client::AuthResult::Success => {}
+            russh::client::AuthResult::Failure { .. } => {
+                return Err("认证被拒绝".to_string());
+            }
+        }
+
+        Ok(handle)
+    })?;
+
+    Ok(handle)
+}
+
+/// Connect through a jump chain on a shared runtime, returning only the client handle.
+fn connect_via_jump_handle_on_runtime(
+    runtime: &Runtime,
+    target_config: &SshConfig,
+    jump_configs: &[SshConfig],
+    timeout_secs: u64,
+) -> Result<client::Handle<ClientHandler>, String> {
+    if jump_configs.is_empty() {
+        let host_id = format!("{}:{}", target_config.host, target_config.port);
+        return connect_handle_on_runtime(runtime, &host_id, target_config, timeout_secs);
+    }
+
+    // Step 1: Direct TCP connect to first jump host
+    let first_config = &jump_configs[0];
+    let tcp = connect_tcp_for_ssh(first_config, timeout_secs)
+        .map_err(|e| format!("跳板机 {} 连接失败: {}", first_config.host, e))?;
+    tcp.set_nonblocking(true)
+        .map_err(|e| format!("设置非阻塞失败: {}", e))?;
+
+    // Step 2: SSH handshake + auth on first jump
+    let first_config_clone = first_config.clone();
+    let mut current_handle = runtime.block_on(async move {
+        let tcp = tokio::net::TcpStream::from_std(tcp)
+            .map_err(|e| format!("TcpStream转换失败: {}", e))?;
+        let ssh_config = build_ssh_client_config();
+        let mut handle = client::connect_stream(
+            Arc::new(ssh_config),
+            tcp,
+            ClientHandler::new(format!(
+                "{}:{}",
+                first_config_clone.host, first_config_clone.port
+            )),
+        )
+        .await
+        .map_err(|e| format!("跳板机 {} SSH握手失败: {}", first_config_clone.host, e))?;
+        authenticate_handle(&mut handle, &first_config_clone).await?;
+        Ok::<_, String>(handle)
+    })?;
+
+    // Step 3: For each subsequent hop, open direct-tcpip channel -> SSH handshake
+    let hops: Vec<&SshConfig> = jump_configs[1..]
+        .iter()
+        .chain(std::iter::once(target_config))
+        .collect();
+
+    for (i, hop_config) in hops.iter().enumerate() {
+        let is_target = i == hops.len() - 1;
+        let label = if is_target {
+            "目标主机"
+        } else {
+            "跳板机"
+        };
+        let hop = (*hop_config).clone();
+
+        current_handle = runtime.block_on(async move {
+            let channel = current_handle
+                .channel_open_direct_tcpip(&hop.host, hop.port as u32, "127.0.0.1", 0)
+                .await
+                .map_err(|e| {
+                    format!(
+                        "{} {}:{} direct-tcpip 通道打开失败: {}",
+                        label, hop.host, hop.port, e
+                    )
+                })?;
+
+            let stream = channel.into_stream();
+            let ssh_config = build_ssh_client_config();
+            let mut handle = client::connect_stream(
+                Arc::new(ssh_config),
+                stream,
+                ClientHandler::new(format!("{}:{}", hop.host, hop.port)),
+            )
+            .await
+            .map_err(|e| format!("{} {}:{} SSH握手失败: {}", label, hop.host, hop.port, e))?;
+
+            authenticate_handle(&mut handle, &hop).await?;
+
+            Ok::<_, String>(handle)
+        })?;
+    }
+
+    Ok(current_handle)
+}
+
+/// Authenticate an SSH handle using the given config.
+async fn authenticate_handle(
+    handle: &mut client::Handle<ClientHandler>,
+    config: &SshConfig,
+) -> Result<(), String> {
+    let auth_result = match config.auth_type.as_str() {
+        "password" => handle
+            .authenticate_password(&config.username, config.password.as_deref().unwrap_or(""))
+            .await
+            .map_err(|e| format!("认证失败: {}", e))?,
+        "key" => {
+            let key_data = config.private_key.as_deref().unwrap_or("");
+            if key_data.is_empty() {
+                return Err("私钥内容为空".to_string());
+            }
+            let key_pair = russh::keys::decode_secret_key(key_data, None)
+                .map_err(|e| format!("私钥解析失败: {}", e))?;
+            let hash_alg = handle
+                .best_supported_rsa_hash()
+                .await
+                .map_err(|e| format!("hash alg error: {}", e))?;
+            let key_with_alg =
+                russh::keys::PrivateKeyWithHashAlg::new(Arc::new(key_pair), hash_alg.flatten());
+            handle
+                .authenticate_publickey(&config.username, key_with_alg)
+                .await
+                .map_err(|e| format!("密钥认证失败: {}", e))?
+        }
+        _ => return Err(format!("不支持的认证类型: {}", config.auth_type)),
+    };
+
+    match auth_result {
+        russh::client::AuthResult::Success => Ok(()),
+        russh::client::AuthResult::Failure { .. } => Err("认证被拒绝".to_string()),
+    }
+}
+
+pub async fn execute_command_on_shared_connection(
+    conn: &SharedSshConnection,
+    command: &str,
+    start: std::time::Instant,
+) -> Result<ExecResult, String> {
+    let (mut read_half, write_half) = conn.open_channel_split_async().await?;
+
+    write_half
+        .exec(true, command)
+        .await
+        .map_err(|e| format!("exec failed: {}", e))?;
+
+    read_command_output(&mut read_half, &write_half, start).await
+}
+
+async fn read_command_output(
+    read_half: &mut ChannelReadHalf,
+    write_half: &ChannelWriteHalf<client::Msg>,
+    start: std::time::Instant,
+) -> Result<ExecResult, String> {
+    let mut output = Vec::new();
+    let mut exit_code = -1i32;
+    let mut exec_accepted = false;
+
+    while let Some(msg) = read_half.wait().await {
+        match msg {
+            ChannelMsg::Data { data } => output.extend_from_slice(&data),
+            ChannelMsg::ExtendedData { data, .. } => output.extend_from_slice(&data),
+            ChannelMsg::ExitStatus { exit_status } => {
+                exit_code = exit_status as i32;
+            }
+            ChannelMsg::ExitSignal { signal_name, .. } => {
+                eprintln!("[SSH Exec] ExitSignal={:?}", signal_name);
+            }
+            ChannelMsg::Success => {
+                exec_accepted = true;
+            }
+            ChannelMsg::Eof | ChannelMsg::Close => break,
+            _ => {}
+        }
+    }
+
+    let duration_ms = start.elapsed().as_millis() as u64;
+
+    let _ = write_half.eof().await;
+
+    Ok(ExecResult {
+        success: exit_code == 0 || (exit_code == -1 && (exec_accepted || !output.is_empty())),
+        output: String::from_utf8_lossy(&output).to_string(),
+        exit_code,
+        duration_ms,
+    })
+}
+
+pub struct PooledSftpSession {
+    pub sftp: russh_sftp::client::SftpSession,
+    pub lease: SharedSshChannelLease,
+}
+
+pub struct PooledTerminalChannel {
+    pub read_half: ChannelReadHalf,
+    pub write_half: ChannelWriteHalf<client::Msg>,
+    pub lease: SharedSshChannelLease,
+    pub connection_key: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ConnectionState {
+    Connecting,
+    Active,
+    Idle,
+    LinkDown,
+    Reconnecting,
+}
+
+struct ConnectionEntry {
+    connection: SharedSshConnection,
+    state: Mutex<ConnectionState>,
+    last_activity: Mutex<Instant>,
+}
+
+impl ConnectionEntry {
+    fn new(connection: SharedSshConnection) -> Self {
+        Self {
+            connection,
+            state: Mutex::new(ConnectionState::Active),
+            last_activity: Mutex::new(Instant::now()),
+        }
+    }
+
+    fn touch(&self) {
+        *self.last_activity.lock().unwrap_or_else(|e| e.into_inner()) = Instant::now();
+    }
+}
+
+struct CachedSshConfig {
+    config: SshConfig,
+    stored_at: Instant,
+}
+
+fn jump_connection_key(host_id: &str, jump_configs: &[SshConfig]) -> String {
+    format!(
+        "{}:jump:{}",
+        host_id,
+        jump_configs
+            .iter()
+            .map(|c| c.host.as_str())
+            .collect::<Vec<_>>()
+            .join(",")
+    )
+}
+
+pub struct SshConnectionRegistry {
+    connections: DashMap<String, ConnectionEntry>,
+    config_cache: DashMap<String, CachedSshConfig>,
+    connection_locks: DashMap<String, Arc<Mutex<()>>>,
+    core: std::sync::OnceLock<ops_core::Core>,
+    idle_timeout: Duration,
+    config_cache_ttl: Duration,
+    shared_runtime: Arc<Runtime>,
+}
+
+impl SshConnectionRegistry {
+    pub fn new() -> Self {
+        Self {
+            connections: DashMap::new(),
+            config_cache: DashMap::new(),
+            connection_locks: DashMap::new(),
+            core: std::sync::OnceLock::new(),
+            idle_timeout: Duration::from_secs(15 * 60),
+            config_cache_ttl: Duration::from_secs(120),
+            shared_runtime: Arc::new(Runtime::new().expect("shared tokio runtime init failed")),
+        }
+    }
+
+    #[cfg(test)]
+    fn new_with_config_cache_ttl(config_cache_ttl: Duration) -> Self {
+        Self {
+            connections: DashMap::new(),
+            config_cache: DashMap::new(),
+            connection_locks: DashMap::new(),
+            core: std::sync::OnceLock::new(),
+            idle_timeout: Duration::from_secs(15 * 60),
+            config_cache_ttl,
+            shared_runtime: Arc::new(Runtime::new().expect("shared tokio runtime init failed")),
+        }
+    }
+
+    pub fn remember_config(&self, host_id: &str, config: &SshConfig) {
+        self.config_cache.insert(
+            host_id.to_string(),
+            CachedSshConfig {
+                config: config.clone(),
+                stored_at: Instant::now(),
+            },
+        );
+    }
+
+    pub fn cached_config(&self, host_id: &str) -> Option<SshConfig> {
+        let cached = self.config_cache.get(host_id)?;
+        if cached.stored_at.elapsed() <= self.config_cache_ttl {
+            return Some(cached.config.clone());
+        }
+        drop(cached);
+        self.config_cache.remove(host_id);
+        None
+    }
+
+    pub fn forget_config(&self, host_id: &str) {
+        self.config_cache.remove(host_id);
+    }
+
+    pub fn set_core(&self, core: ops_core::Core) {
+        // 启动时设置一次,之后只读;OnceLock 避免后续每次状态推送时的锁开销
+        let _ = self.core.set(core);
+    }
+
+    fn emit_connection_status(&self, host_id: &str, state: ConnectionState) {
+        let Some(app) = self.core.get() else {
+            return;
+        };
+        let status = match state {
+            ConnectionState::Connecting => "connecting",
+            ConnectionState::Active => "active",
+            ConnectionState::Idle => "idle_disconnected",
+            ConnectionState::LinkDown => "link_down",
+            ConnectionState::Reconnecting => "reconnecting",
+        };
+        app.emit(
+            "connection_status_changed",
+            serde_json::json!({ "hostId": host_id, "status": status }),
+        );
+
+        // 推入全局日志
+        let level = match state {
+            ConnectionState::LinkDown => "error",
+            ConnectionState::Reconnecting => "warn",
+            _ => "info",
+        };
+        let msg = match state {
+            ConnectionState::Connecting => format!("主机 {} 正在连接...", host_id),
+            ConnectionState::Active => format!("主机 {} 已连接", host_id),
+            ConnectionState::Idle => format!("主机 {} 连接空闲", host_id),
+            ConnectionState::LinkDown => format!("主机 {} 连接断开", host_id),
+            ConnectionState::Reconnecting => format!("主机 {} 正在重连...", host_id),
+        };
+        ops_core::log::emit_log(app, level, "ssh", &msg, "backend");
+    }
+
+    fn log(&self, level: &str, message: &str) {
+        let Some(app) = self.core.get() else {
+            return;
+        };
+        ops_core::log::emit_log(app, level, "ssh", message, "backend");
+    }
+
+    pub fn start_idle_reaper(registry: Arc<SshConnectionRegistry>) {
+        std::thread::spawn(move || loop {
+            std::thread::sleep(Duration::from_secs(30));
+            registry.reap_and_health_check();
+        });
+    }
+
+    /// 合并 idle 回收与健康检查：
+    /// 1. 检查 is_dead() → 标记 LinkDown + 移除（静默断连回收）
+    /// 2. 对非 idle 超时连接做 health_probe → 检测 TCP 层已断但 russh 未感知的场景
+    /// 3. idle 超时 → 正常回收
+    fn reap_and_health_check(&self) {
+        let now = Instant::now();
+        let keys: Vec<String> = self.connections.iter().map(|r| r.key().clone()).collect();
+        for key in keys {
+            if let Some(entry) = self.connections.get(&key) {
+                // 第一关：is_dead() 检查——快速发现 russh 已标记 closed 的连接
+                if entry.connection.is_dead() {
+                    let state = *entry.state.lock().unwrap_or_else(|e| e.into_inner());
+                    drop(entry);
+                    eprintln!(
+                        "[SSH Registry] Dead connection detected for {}, state={:?}",
+                        key, state
+                    );
+                    self.connections.remove(&key);
+                    self.emit_connection_status(&key, ConnectionState::LinkDown);
+                    continue;
+                }
+
+                let last = *entry
+                    .last_activity
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                let idle_duration = now.duration_since(last);
+
+                let is_active = {
+                    let s = entry.state.lock().unwrap_or_else(|e| e.into_inner());
+                    *s == ConnectionState::Active
+                };
+                drop(entry);
+
+                if !is_active {
+                    // 非 Active 状态（Connecting/LinkDown/Reconnecting）不做 idle 回收
+                    continue;
+                }
+
+                // 第二关：idle 超时回收
+                if idle_duration > self.idle_timeout {
+                    self.connections.remove(&key);
+                    eprintln!(
+                        "[SSH Registry] Idle timeout for {} (idle {:.0}s)",
+                        key,
+                        idle_duration.as_secs_f64()
+                    );
+                    self.emit_connection_status(&key, ConnectionState::Idle);
+                    continue;
+                }
+
+                // 第三关：对空闲超过 60 秒但未达 idle_timeout 的连接做主动 probe
+                // 这能捕获 TCP 已断但 russh keepalive 尚未感知的"半死"连接
+                if idle_duration > Duration::from_secs(60) {
+                    let probe_key = key.clone();
+                    let probe_ok = {
+                        if let Some(e) = self.connections.get(&probe_key) {
+                            e.connection.health_probe()
+                        } else {
+                            continue;
+                        }
+                    };
+                    if !probe_ok {
+                        eprintln!(
+                            "[SSH Registry] Health probe failed for {} (idle {:.0}s), marking dead",
+                            key,
+                            idle_duration.as_secs_f64()
+                        );
+                        if let Some(e) = self.connections.get(&key) {
+                            *e.state.lock().unwrap_or_else(|e| e.into_inner()) =
+                                ConnectionState::LinkDown;
+                        }
+                        self.connections.remove(&key);
+                        self.emit_connection_status(&key, ConnectionState::LinkDown);
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn execute(
+        &self,
+        host_id: &str,
+        config: &SshConfig,
+        command: &str,
+        timeout_secs: u64,
+    ) -> Result<String, String> {
+        let conn = self.get_or_connect(host_id, config, timeout_secs)?;
+        match Self::execute_on_shared(&conn, command) {
+            Ok(result) => Ok(result.output),
+            Err(err) => {
+                eprintln!(
+                    "[SSH Registry] Shared connection failed for {} during exec: {}; reconnecting once",
+                    host_id, err
+                );
+                self.remove_if_same(host_id, &conn);
+                let conn = self.reconnect_and_store(host_id, config, timeout_secs)?;
+                let result = Self::execute_on_shared(&conn, command)?;
+                Ok(result.output)
+            }
+        }
+    }
+
+    pub fn open_sftp_session(
+        &self,
+        host_id: &str,
+        config: &SshConfig,
+        timeout_secs: u64,
+    ) -> Result<PooledSftpSession, String> {
+        let conn = self.get_or_connect(host_id, config, timeout_secs)?;
+        match Self::open_sftp_on_shared(conn.clone()) {
+            Ok(session) => Ok(session),
+            Err(err) => {
+                eprintln!(
+                    "[SSH Registry] Failed to open SFTP on shared connection for {}: {}; reconnecting once",
+                    host_id, err
+                );
+                self.remove_if_same(host_id, &conn);
+                let conn = self.reconnect_and_store(host_id, config, timeout_secs)?;
+                Self::open_sftp_on_shared(conn)
+            }
+        }
+    }
+
+    pub fn open_terminal_channel(
+        &self,
+        host_id: &str,
+        config: &SshConfig,
+        timeout_secs: u64,
+        cols: u16,
+        rows: u16,
+    ) -> Result<PooledTerminalChannel, String> {
+        let conn = self.get_or_connect(host_id, config, timeout_secs)?;
+        match Self::open_terminal_on_shared(conn.clone(), host_id.to_string(), cols, rows) {
+            Ok(channel) => Ok(channel),
+            Err(err) => {
+                eprintln!(
+                    "[SSH Registry] Failed to open terminal on shared connection for {}: {}; reconnecting once",
+                    host_id, err
+                );
+                self.remove_if_same(host_id, &conn);
+                let conn = self.reconnect_and_store(host_id, config, timeout_secs)?;
+                Self::open_terminal_on_shared(conn, host_id.to_string(), cols, rows)
+            }
+        }
+    }
+
+    fn execute_on_shared(conn: &SharedSshConnection, command: &str) -> Result<ExecResult, String> {
+        let start = std::time::Instant::now();
+        let opener = conn.clone();
+        conn.block_on(
+            async move { execute_command_on_shared_connection(&opener, command, start).await },
+        )
+    }
+
+    fn open_sftp_on_shared(conn: SharedSshConnection) -> Result<PooledSftpSession, String> {
+        let opener = conn.clone();
+        let sftp = conn.block_on(async move { opener.open_sftp_session().await })?;
+        Ok(PooledSftpSession {
+            sftp,
+            lease: SharedSshChannelLease { connection: conn },
+        })
+    }
+
+    fn open_terminal_on_shared(
+        conn: SharedSshConnection,
+        connection_key: String,
+        cols: u16,
+        rows: u16,
+    ) -> Result<PooledTerminalChannel, String> {
+        let opener = conn.clone();
+        let (read_half, write_half) = conn.block_on(async move {
+            let (read_half, write_half) = opener.open_channel_split_async().await?;
+            write_half
+                .request_pty(false, "xterm-256color", cols as u32, rows as u32, 0, 0, &[])
+                .await
+                .map_err(|e| {
+                    eprintln!("[Terminal] PTY request failed: {}", e);
+                    format!("pty request failed: {}", e)
+                })?;
+            write_half.request_shell(false).await.map_err(|e| {
+                eprintln!("[Terminal] Shell request failed: {}", e);
+                format!("shell failed: {}", e)
+            })?;
+            Ok::<_, String>((read_half, write_half))
+        })?;
+
+        Ok(PooledTerminalChannel {
+            read_half,
+            write_half,
+            lease: SharedSshChannelLease { connection: conn },
+            connection_key,
+        })
+    }
+
+    pub fn get_shared_connection(
+        &self,
+        host_id: &str,
+        config: &SshConfig,
+        timeout_secs: u64,
+    ) -> Result<SharedSshConnection, String> {
+        self.get_or_connect(host_id, config, timeout_secs)
+    }
+
+    fn host_lock(&self, host_id: &str) -> Arc<Mutex<()>> {
+        self.connection_locks
+            .entry(host_id.to_string())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
+    fn get_or_connect(
+        &self,
+        host_id: &str,
+        config: &SshConfig,
+        timeout_secs: u64,
+    ) -> Result<SharedSshConnection, String> {
+        if let Some(conn) = self.get_existing(host_id) {
+            return Ok(conn);
+        }
+
+        let host_lock = self.host_lock(host_id);
+        let _host_guard = host_lock.lock().map_err(|e| e.to_string())?;
+
+        if let Some(conn) = self.get_existing(host_id) {
+            return Ok(conn);
+        }
+
+        self.connect_and_store_locked(host_id, config, timeout_secs)
+    }
+
+    fn get_existing(&self, host_id: &str) -> Option<SharedSshConnection> {
+        let entry = self.connections.get(host_id)?;
+        // 使用 is_dead() 替代 is_closed()，能覆盖锁竞争场景
+        if entry.connection.is_dead() {
+            drop(entry);
+            self.connections
+                .remove_if(host_id, |_, e| e.connection.is_dead());
+            eprintln!(
+                "[SSH Registry] Dropping dead shared connection for {}",
+                host_id
+            );
+            return None;
+        }
+        // 对空闲超过 30 秒的连接做轻量 probe，确保不在取用时拿到半死连接
+        let last = *entry
+            .last_activity
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if last.elapsed() > Duration::from_secs(30) && !entry.connection.health_probe() {
+            drop(entry);
+            self.connections.remove(host_id);
+            eprintln!(
+                "[SSH Registry] Health probe failed on get_existing for {}, removing",
+                host_id
+            );
+            self.emit_connection_status(host_id, ConnectionState::LinkDown);
+            return None;
+        }
+        drop(entry);
+        // 重新获取 entry 来 touch（前面可能已经 drop）
+        if let Some(e) = self.connections.get(host_id) {
+            e.touch();
+            Some(e.connection.clone())
+        } else {
+            None
+        }
+    }
+
+    fn reconnect_and_store(
+        &self,
+        host_id: &str,
+        config: &SshConfig,
+        timeout_secs: u64,
+    ) -> Result<SharedSshConnection, String> {
+        let host_lock = self.host_lock(host_id);
+        let _host_guard = host_lock.lock().map_err(|e| e.to_string())?;
+
+        if let Some(conn) = self.get_existing(host_id) {
+            return Ok(conn);
+        }
+
+        self.connect_and_store_locked(host_id, config, timeout_secs)
+    }
+
+    fn connect_and_store_locked(
+        &self,
+        host_id: &str,
+        config: &SshConfig,
+        timeout_secs: u64,
+    ) -> Result<SharedSshConnection, String> {
+        self.log(
+            "info",
+            &format!(
+                "主机 {} 正在连接 {}:{}...",
+                host_id, config.host, config.port
+            ),
+        );
+
+        match connect_handle_on_runtime(&self.shared_runtime, host_id, config, timeout_secs) {
+            Ok(handle) => {
+                let shared = SharedSshConnection::from_parts(self.shared_runtime.clone(), handle);
+
+                if let Some(existing) = self.connections.get(host_id) {
+                    if !existing.connection.is_closed() {
+                        return Ok(existing.connection.clone());
+                    }
+                }
+
+                self.connections
+                    .insert(host_id.to_string(), ConnectionEntry::new(shared.clone()));
+
+                self.log(
+                    "success",
+                    &format!("主机 {} ({}) 已连接", host_id, config.host),
+                );
+
+                Ok(shared)
+            }
+            Err(e) => {
+                self.log("error", &format!("主机 {} 连接失败: {}", host_id, e));
+                Err(e)
+            }
+        }
+    }
+
+    fn remove_if_same(&self, host_id: &str, conn: &SharedSshConnection) {
+        self.connections
+            .remove_if(host_id, |_, entry| entry.connection.same_transport(conn));
+    }
+
+    pub fn remove_connection(&self, host_id: &str) -> bool {
+        self.connections.remove(host_id).is_some()
+    }
+
+    pub fn touch_connection(&self, host_id: &str) -> bool {
+        let Some(entry) = self.connections.get(host_id) else {
+            return false;
+        };
+        entry.touch();
+        true
+    }
+
+    pub fn get_shared_connection_via_jump(
+        &self,
+        host_id: &str,
+        target_config: &SshConfig,
+        jump_configs: &[SshConfig],
+        timeout_secs: u64,
+    ) -> Result<SharedSshConnection, String> {
+        if jump_configs.is_empty() {
+            return self.get_or_connect(host_id, target_config, timeout_secs);
+        }
+
+        let pool_key = jump_connection_key(host_id, jump_configs);
+
+        if let Some(conn) = self.get_existing(&pool_key) {
+            return Ok(conn);
+        }
+
+        let host_lock = self.host_lock(&pool_key);
+        let _host_guard = host_lock.lock().map_err(|e| e.to_string())?;
+
+        if let Some(conn) = self.get_existing(&pool_key) {
+            return Ok(conn);
+        }
+
+        let handle = connect_via_jump_handle_on_runtime(
+            &self.shared_runtime,
+            target_config,
+            jump_configs,
+            timeout_secs,
+        )?;
+        let shared = SharedSshConnection::from_parts(self.shared_runtime.clone(), handle);
+
+        self.connections
+            .insert(pool_key, ConnectionEntry::new(shared.clone()));
+        Ok(shared)
+    }
+
+    pub fn open_terminal_channel_via_jump(
+        &self,
+        host_id: &str,
+        target_config: &SshConfig,
+        jump_configs: &[SshConfig],
+        timeout_secs: u64,
+        cols: u16,
+        rows: u16,
+    ) -> Result<PooledTerminalChannel, String> {
+        let pool_key = jump_connection_key(host_id, jump_configs);
+        let conn = self.get_shared_connection_via_jump(
+            host_id,
+            target_config,
+            jump_configs,
+            timeout_secs,
+        )?;
+        match Self::open_terminal_on_shared(conn.clone(), pool_key.clone(), cols, rows) {
+            Ok(channel) => Ok(channel),
+            Err(err) => {
+                eprintln!(
+                    "[SSH Registry] Failed to open terminal via jump for {}: {}; reconnecting once",
+                    host_id, err
+                );
+                self.connections.remove(&pool_key);
+                let conn = self.get_shared_connection_via_jump(
+                    host_id,
+                    target_config,
+                    jump_configs,
+                    timeout_secs,
+                )?;
+                Self::open_terminal_on_shared(conn, pool_key, cols, rows)
+            }
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn get_connection_state(&self, host_id: &str) -> Option<ConnectionState> {
+        self.connections
+            .get(host_id)
+            .map(|e| *e.state.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    #[allow(dead_code)]
+    pub fn mark_link_down(&self, host_id: &str) {
+        if let Some(entry) = self.connections.get(host_id) {
+            *entry.state.lock().unwrap_or_else(|e| e.into_inner()) = ConnectionState::LinkDown;
+            self.emit_connection_status(host_id, ConnectionState::LinkDown);
+        }
+        // Cascade: mark all downstream connections that route through this host as LinkDown
+        let downstream_keys: Vec<String> = self
+            .connections
+            .iter()
+            .filter_map(|r| {
+                let key = r.key();
+                // Jump connection keys are formatted as "{host_id}:jump:{jump1,jump2,...}"
+                if let Some(idx) = key.find(":jump:") {
+                    let jump_part = &key[idx + 6..];
+                    if jump_part.split(',').any(|j| j == host_id) {
+                        return Some(key.clone());
+                    }
+                }
+                None
+            })
+            .collect();
+        for key in downstream_keys {
+            if let Some(entry) = self.connections.get(&key) {
+                *entry.state.lock().unwrap_or_else(|e| e.into_inner()) = ConnectionState::LinkDown;
+                self.emit_connection_status(&key, ConnectionState::LinkDown);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ProxySettings, ProxyType, SshConfig, SshConnectionRegistry};
+    use std::time::Duration;
+
+    fn sample_config(host: &str) -> SshConfig {
+        SshConfig {
+            host: host.to_string(),
+            port: 22,
+            username: "root".to_string(),
+            auth_type: "password".to_string(),
+            password: Some("secret".to_string()),
+            private_key: None,
+            proxy: None,
+        }
+    }
+
+    #[test]
+    fn ssh_config_can_carry_proxy_settings() {
+        let mut config = sample_config("192.0.2.10");
+        config.proxy = Some(ProxySettings {
+            enabled: true,
+            proxy_type: ProxyType::Socks5,
+            host: "proxy.internal".to_string(),
+            port: 1080,
+            username: Some("deploy".to_string()),
+            password: Some("secret".to_string()),
+        });
+
+        let proxy = config.proxy.expect("proxy should be present");
+
+        assert!(proxy.enabled);
+        assert_eq!(proxy.host, "proxy.internal");
+        assert_eq!(proxy.port, 1080);
+        assert!(matches!(proxy.proxy_type, ProxyType::Socks5));
+    }
+
+    #[test]
+    fn cached_config_returns_recent_resolved_config() {
+        let registry = SshConnectionRegistry::new_with_config_cache_ttl(Duration::from_secs(60));
+        let config = sample_config("192.0.2.10");
+
+        registry.remember_config("host-1", &config);
+
+        assert_eq!(
+            registry.cached_config("host-1").map(|cached| cached.host),
+            Some("192.0.2.10".to_string())
+        );
+    }
+
+    #[test]
+    fn cached_config_expires_and_can_be_forgotten() {
+        let registry = SshConnectionRegistry::new_with_config_cache_ttl(Duration::from_millis(0));
+        let config = sample_config("192.0.2.20");
+
+        registry.remember_config("host-2", &config);
+        assert!(registry.cached_config("host-2").is_none());
+
+        let registry = SshConnectionRegistry::new();
+        registry.remember_config("host-2", &config);
+        registry.forget_config("host-2");
+        assert!(registry.cached_config("host-2").is_none());
+    }
+}

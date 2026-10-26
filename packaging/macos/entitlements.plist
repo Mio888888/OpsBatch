@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Hardened runtime without extra capabilities: OpsBatch is not sandboxed (it spawns shells and talks to SSH/RDP/VNC
+     hosts) and loads no unsigned plug-ins. If notarization ever reports a missing entitlement, add it here. -->
+<plist version="1.0">
+<dict/>
+</plist>

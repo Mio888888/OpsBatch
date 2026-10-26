@@ -1,0 +1,11 @@
+[package]
+name = "spike-rdp-gpu"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+gpui-kit.workspace = true
+openh264 = "0.9"
+flume.workspace = true
+image = { version = "0.25", default-features = false }

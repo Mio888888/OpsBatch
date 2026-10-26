@@ -1,0 +1,13 @@
+[package]
+name = "ops-terminal"
+description = "OpsBatch terminal logic without UI: command tracking, danger guard, background commands, search, tab rules (TASKS M1-40..42, M4)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+regex = "1"
+ops-core.workspace = true
+serde.workspace = true

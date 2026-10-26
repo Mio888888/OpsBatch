@@ -1,0 +1,39 @@
+# --- build output ---
+/target/
+/dist/
+
+# --- local data / secrets ---
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+.env
+.env.*
+
+# --- OS / editor noise ---
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.log
+
+# --- AI assistant files and directories ---
+.claude/
+.cursor/
+.cursorrules
+.windsurf/
+.codex/
+.gemini/
+.aider*
+.continue/
+.github/copilot-instructions.md
+CLAUDE.md
+CLAUDE.local.md
+AGENTS.md
+GEMINI.md
+
+# --- AI-authored planning / tracking docs ---
+/PLAN.md
+/TASKS.md
+/FEATURE_MATRIX.md
+/docs/

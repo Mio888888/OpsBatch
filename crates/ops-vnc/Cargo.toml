@@ -1,0 +1,24 @@
+[package]
+name = "ops-vnc"
+description = "Native RFB (VNC) client: None / VNC / ARD authentication, Raw, CopyRect, Hextile, ZRLE (TASKS M8-10)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+ops-core.workspace = true
+ops-ssh.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+flume.workspace = true
+rusqlite = { version = "0.31", features = ["bundled"] }
+aes = "0.8"
+des = "0.8"
+md-5 = "0.10"
+num-bigint = "0.4"
+rand = "0.8"
+flate2 = "1"

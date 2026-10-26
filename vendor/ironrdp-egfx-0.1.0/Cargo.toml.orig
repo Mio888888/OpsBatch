@@ -1,0 +1,34 @@
+[package]
+name = "ironrdp-egfx"
+version = "0.1.0"
+readme = "README.md"
+description = "Graphics pipeline dynamic channel extension implementation"
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[lib]
+doctest = false
+# test = false # FIXME: turn off and keep tests in testsuite crates
+
+[dependencies]
+bit_field = "0.10"
+bitflags = "2.11"
+ironrdp-core = { path = "../ironrdp-core", version = "0.2" } # public
+ironrdp-dvc = { path = "../ironrdp-dvc", version = "0.6" } # public
+ironrdp-graphics = { path = "../ironrdp-graphics", version = "0.8" } # public
+ironrdp-pdu = { path = "../ironrdp-pdu", version = "0.8" } # public
+openh264 = { version = "0.9", optional = true, default-features = false }
+tracing = { version = "0.1", features = ["log"] }
+
+[features]
+openh264 = ["dep:openh264"]
+openh264-bundled = ["openh264", "openh264/source"]
+openh264-libloading = ["openh264", "openh264/libloading"]
+
+[lints]
+workspace = true

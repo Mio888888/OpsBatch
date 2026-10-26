@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=OpsBatch
+Name[zh_CN]=OpsBatch 批量运维管理工具
+Comment=Batch operations workbench: SSH, RDP/VNC, scripts, workflows
+Exec=opsbatch
+Icon=opsbatch
+Terminal=false
+Categories=Development;System;Network;
+StartupWMClass=opsbatch

@@ -1,0 +1,16 @@
+[package]
+name = "spike-rdp"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Same ironrdp stack and features as OpsBatch/src-tauri/Cargo.toml (resolved through the vendored [patch.crates-io]).
+ironrdp = { version = "0.15", features = ["connector", "session", "input", "graphics", "svc", "dvc", "displaycontrol", "cliprdr", "rdpsnd"] }
+ironrdp-egfx = "0.1"
+ironrdp-dvc = { version = "0.6", features = ["opsbatch-diagnostics"] }
+ironrdp-tokio = { version = "0.9", features = ["reqwest"] }
+ironrdp-tls = { version = "0.2", features = ["rustls"] }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
+tokio = { workspace = true }
+openh264 = "0.9"

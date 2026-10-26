@@ -1,0 +1,25 @@
+[package]
+name = "ops-library"
+description = "OpsBatch command/script/quick-action library, repo sync, cloud import (TASKS M6)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+ops-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+tokio.workspace = true
+regex = "1"
+chrono.workspace = true
+rusqlite = { version = "0.31", features = ["bundled"] }
+base64 = "0.22"
+hmac = "0.12"
+sha2 = "0.10"
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+git2 = { version = "0.20", features = ["vendored-libgit2", "vendored-openssl"] }
+r2d2 = "0.8.10"
+r2d2_sqlite = "0.24"

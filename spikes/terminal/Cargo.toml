@@ -1,0 +1,12 @@
+[package]
+name = "spike-terminal"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+gpui-kit.workspace = true
+alacritty_terminal.workspace = true
+portable-pty.workspace = true
+parking_lot.workspace = true
+flume.workspace = true

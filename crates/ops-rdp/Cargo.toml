@@ -1,0 +1,34 @@
+[package]
+name = "ops-rdp"
+description = "OpsBatch RDP client on ironrdp (TASKS M8-01..04)."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+ops-core.workspace = true
+ops-ssh.workspace = true
+# Same ironrdp stack and features as OpsBatch/src-tauri/Cargo.toml (resolved through the vendored [patch.crates-io]).
+ironrdp = { version = "0.15", features = ["connector", "session", "input", "graphics", "svc", "dvc", "displaycontrol", "cliprdr", "rdpsnd"] }
+ironrdp-egfx = "0.1"
+ironrdp-dvc = { version = "0.6", features = ["opsbatch-diagnostics"] }
+ironrdp-tokio = { version = "0.9", features = ["reqwest"] }
+ironrdp-tls = { version = "0.2", features = ["rustls"] }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
+arboard = { version = "3.6", default-features = false }
+rodio = { version = "0.22", default-features = false, features = ["playback"] }
+openh264 = "0.9"
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+uuid.workspace = true
+flume.workspace = true
+dashmap = "6"
+rusqlite = { version = "0.31", features = ["bundled"] }
+bytes = "1"
+socket2 = { version = "0.6", features = ["all"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2"

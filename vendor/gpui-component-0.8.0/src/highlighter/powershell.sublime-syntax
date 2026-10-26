@@ -1,0 +1,140 @@
+%YAML 1.2
+---
+# PowerShell grammar for the syntect highlighter (two-face ships none). OpsBatch addition to the vendored crate.
+name: PowerShell
+file_extensions:
+  - ps1
+  - psm1
+  - psd1
+scope: source.powershell
+contexts:
+  main:
+    - include: comments
+    - include: heredocs
+    - include: strings
+    - include: constants
+    - include: variables
+    - include: numbers
+    - include: declarations
+    - include: keywords
+    - include: types
+    - include: comparison-operators
+    - include: parameters
+    - include: cmdlets
+    - include: operators
+
+  comments:
+    - match: '<#'
+      scope: punctuation.definition.comment.begin.powershell
+      push: block-comment
+    - match: '#.*$'
+      scope: comment.line.number-sign.powershell
+
+  block-comment:
+    - meta_include_prototype: false
+    - meta_scope: comment.block.powershell
+    - match: '#>'
+      scope: punctuation.definition.comment.end.powershell
+      pop: true
+
+  heredocs:
+    - match: '@"\s*$'
+      scope: punctuation.definition.string.begin.powershell
+      push: heredoc-double
+    - match: "@'\\s*$"
+      scope: punctuation.definition.string.begin.powershell
+      push: heredoc-single
+
+  heredoc-double:
+    - meta_include_prototype: false
+    - meta_scope: string.quoted.double.heredoc.powershell
+    - match: '^"@'
+      scope: punctuation.definition.string.end.powershell
+      pop: true
+    - include: string-variables
+
+  heredoc-single:
+    - meta_include_prototype: false
+    - meta_scope: string.quoted.single.heredoc.powershell
+    - match: "^'@"
+      scope: punctuation.definition.string.end.powershell
+      pop: true
+
+  strings:
+    - match: '"'
+      scope: punctuation.definition.string.begin.powershell
+      push: double-quoted
+    - match: "'"
+      scope: punctuation.definition.string.begin.powershell
+      push: single-quoted
+
+  double-quoted:
+    - meta_include_prototype: false
+    - meta_scope: string.quoted.double.powershell
+    - match: '`.'
+      scope: constant.character.escape.powershell
+    - match: '""'
+      scope: constant.character.escape.powershell
+    - match: '"'
+      scope: punctuation.definition.string.end.powershell
+      pop: true
+    - include: string-variables
+
+  string-variables:
+    - match: '\$(?:\{[^}]*\}|(?:(?i:global|script|local|env|private):)?\w+|\?|\$|\^)'
+      scope: variable.other.powershell
+
+  single-quoted:
+    - meta_include_prototype: false
+    - meta_scope: string.quoted.single.powershell
+    - match: "''"
+      scope: constant.character.escape.powershell
+    - match: "'"
+      scope: punctuation.definition.string.end.powershell
+      pop: true
+
+  constants:
+    - match: '(?i)\$(?:true|false)\b'
+      scope: constant.language.boolean.powershell
+    - match: '(?i)\$null\b'
+      scope: constant.language.null.powershell
+
+  variables:
+    - match: '\$(?:\{[^}]*\}|(?:(?i:global|script|local|env|private):)?\w+|\?|\$|\^)'
+      scope: variable.other.powershell
+    - match: '@\w+'
+      scope: variable.other.splat.powershell
+
+  numbers:
+    - match: '\b(?:0[xX][0-9a-fA-F]+|\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)(?:[kKmMgGtTpP][bB])?\b'
+      scope: constant.numeric.powershell
+
+  declarations:
+    - match: '(?i)\b(function|filter|workflow)\b(?:\s+((?:\w+:)?[\w-]+))?'
+      captures:
+        1: keyword.declaration.function.powershell
+        2: entity.name.function.powershell
+
+  keywords:
+    - match: '(?i)\b(?:if|elseif|else|switch|while|for|foreach|do|until|break|continue|return|exit|throw|try|catch|finally|trap|in|begin|process|end|param|class|enum|using|data|dynamicparam|parallel|sequence|inlinescript)\b'
+      scope: keyword.control.powershell
+
+  types:
+    - match: '\[(?:[A-Za-z_][\w.]*)(?:\[[,\s]*\])?\]'
+      scope: support.type.powershell
+
+  comparison-operators:
+    - match: '(?i)(?<![\w-])-(?:c|i)?(?:eq|ne|gt|ge|lt|le|like|notlike|match|notmatch|contains|notcontains|in|notin|replace)\b|(?i)(?<![\w-])-(?:split|join|is|isnot|as|and|or|xor|not|band|bor|bxor|bnot|shl|shr|f)\b'
+      scope: keyword.operator.comparison.powershell
+
+  parameters:
+    - match: '(?<![\w-])-[A-Za-z_]\w*:?'
+      scope: variable.parameter.powershell
+
+  cmdlets:
+    - match: '(?i)\b(?:Get|Set|New|Remove|Add|Clear|Copy|Move|Rename|Start|Stop|Restart|Invoke|Import|Export|Write|Read|Out|Select|Where|ForEach|Sort|Group|Measure|Test|Enter|Exit|Format|Join|Split|Find|Install|Uninstall|Update|Enable|Disable|Show|Hide|Wait|Register|Unregister|Send|Receive|Resolve|Push|Pop|Compare|Convert|ConvertTo|ConvertFrom|Expand|Compress|Grant|Revoke|Lock|Unlock|Mount|Dismount|Suspend|Resume|Debug|Trace|Use|Open|Close|Save|Search|Switch|Undo|Redo|Reset|Restore|Backup|Publish|Approve|Deny|Block|Unblock|Confirm|Connect|Disconnect|Initialize|Optimize|Repair|Sync|Merge|Limit|Skip|Step|Submit|Watch|Protect|Unprotect|Edit|Tee|Out)-[A-Za-z][\w]*\b'
+      scope: support.function.cmdlet.powershell
+
+  operators:
+    - match: '\|\||&&|[|&=+*/%!<>]+|\.\.|::'
+      scope: keyword.operator.powershell

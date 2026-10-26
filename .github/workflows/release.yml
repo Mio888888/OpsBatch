@@ -1,0 +1,159 @@
+name: Release
+
+# Push a tag v<version> (the version in Cargo.toml) or run the workflow by hand to build installers for every
+# platform and publish them with a SHA256SUMS file. The in-app updater (crates/ops-core/src/update.rs) looks for
+# exactly these asset names:
+#   OpsBatch-<version>-macos-<aarch64|x86_64>.dmg
+#   OpsBatch-<version>-windows-<x86_64|aarch64>-setup.exe
+#   OpsBatch-<version>-linux-<x86_64|aarch64>.AppImage
+#   SHA256SUMS
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (e.g. v0.1.0); builds only when empty"
+        required: false
+
+permissions:
+  contents: write
+
+env:
+  # Switch to "real-vault" once the encrypted vault ships (TASKS M1-05); release builds without it are not production-ready.
+  OPSBATCH_FEATURES: ""
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Linux system deps (gpui)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
+            libxcb1-dev libvulkan-dev libasound2-dev libfontconfig1-dev libssl-dev libgtk-3-dev libxdo-dev
+      - run: cargo test --workspace
+
+  macos:
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - runner: macos-14
+            target: aarch64-apple-darwin
+          - runner: macos-13
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    env:
+      # secrets are not available to step-level `if`, so mirror the optional one into the job environment
+      MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Import signing certificate
+        if: ${{ env.MACOS_CERT_P12 != '' }}
+        env:
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          echo "$MACOS_CERT_P12" | base64 --decode > cert.p12
+          security create-keychain -p ci build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p ci build.keychain
+          security import cert.p12 -k build.keychain -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain
+          rm cert.p12
+      - name: Build dmg
+        env:
+          OPSBATCH_TARGET: ${{ matrix.target }}
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: packaging/macos/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.target }}
+          path: dist/*.dmg
+          if-no-files-found: error
+
+  windows:
+    needs: test
+    runs-on: windows-latest
+    env:
+      WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CODESIGN_CERT_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Prepare signing certificate
+        if: ${{ env.WINDOWS_CERT_BASE64 != '' }}
+        shell: pwsh
+        run: |
+          [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\codesign.pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64))
+          "WINDOWS_CODESIGN_CERT_PATH=$env:RUNNER_TEMP\codesign.pfx" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Build installer
+        env:
+          WINDOWS_CODESIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_CERT_PASSWORD }}
+        shell: pwsh
+        run: packaging/windows/build.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: dist/*-setup.exe
+          if-no-files-found: error
+
+  linux:
+    needs: test
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: System deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
+            libxcb1-dev libvulkan-dev libasound2-dev libfontconfig1-dev libssl-dev libgtk-3-dev libxdo-dev libfuse2
+      - name: Install appimagetool
+        run: |
+          curl -fsSL -o /usr/local/bin/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /usr/local/bin/appimagetool
+      - name: Build AppImage and deb
+        run: packaging/linux/build.sh
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+          if-no-files-found: error
+
+  publish:
+    needs: [macos, windows, linux]
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: scripts/checksums.sh dist
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
+        run: |
+          gh release create "$TAG" dist/* --title "OpsBatch $TAG" --generate-notes

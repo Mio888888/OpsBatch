@@ -1,0 +1,404 @@
+//! The external MCP bridge: a small Streamable-HTTP MCP server (JSON-RPC over `POST /mcp`, bearer token) that lets an
+//! outside agent (Codex, Claude Code, Cursor, ...) use the app's terminal sessions. This module speaks the protocol
+//! only; every `tools/call` is handed to the app through a channel and answered once the app has decided (run,
+//! refuse, or wait for the user's approval).
+
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::time::Duration;
+
+use serde_json::{json, Value};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{oneshot, watch};
+
+pub const SERVER_NAME: &str = "opsbatch-external";
+pub const PROTOCOL_VERSION: &str = "2025-03-26";
+/// A tool call waits this long for the app (an approval can take a while).
+pub const CALL_TIMEOUT: Duration = Duration::from_secs(15 * 60);
+const MAX_BODY: usize = 4 * 1024 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolOutcome {
+    pub text: String,
+    pub is_error: bool,
+}
+
+impl ToolOutcome {
+    pub fn ok(text: impl Into<String>) -> Self {
+        Self { text: text.into(), is_error: false }
+    }
+    pub fn error(text: impl Into<String>) -> Self {
+        Self { text: text.into(), is_error: true }
+    }
+}
+
+/// One `tools/call` waiting for the app.
+pub struct BridgeCall {
+    pub tool: String,
+    pub arguments: Value,
+    pub reply: oneshot::Sender<ToolOutcome>,
+}
+
+/// The tools the bridge offers.
+pub fn tool_definitions() -> Vec<Value> {
+    vec![
+        json!({
+            "name": "get_environment",
+            "description": "Describe the OpsBatch environment: app version, the permission mode that applies to write operations and the open terminal sessions.",
+            "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}
+        }),
+        json!({
+            "name": "list_sessions",
+            "description": "List the terminal sessions (local shells and SSH hosts) that can be used with the other tools.",
+            "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}
+        }),
+        json!({
+            "name": "terminal_read",
+            "description": "Read the last lines currently shown in a terminal session. Read only.",
+            "inputSchema": {"type": "object", "properties": {
+                "session_id": {"type": "string", "description": "A session_id from list_sessions. Defaults to the active session."},
+                "lines": {"type": "integer", "minimum": 1, "maximum": 500, "description": "How many trailing lines to return (default 50)."}
+            }, "additionalProperties": false}
+        }),
+        json!({
+            "name": "terminal_execute",
+            "description": "Run one shell command in a terminal session and return its output and exit code. Subject to the permission mode (observer refuses, confirm asks the user in OpsBatch, auto runs) and the command blocklist.",
+            "inputSchema": {"type": "object", "properties": {
+                "command": {"type": "string", "description": "The command line to run."},
+                "session_id": {"type": "string", "description": "A session_id from list_sessions. Defaults to the active session."},
+                "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 3600, "description": "Give up waiting after this many seconds (default: the command timeout of the safety settings)."}
+            }, "required": ["command"], "additionalProperties": false}
+        }),
+    ]
+}
+
+/// Answers one JSON-RPC message. `None` is for notifications (no response body).
+pub async fn handle_rpc(message: &Value, calls: &flume::Sender<BridgeCall>) -> Option<Value> {
+    let id = message.get("id").cloned();
+    let method = message.get("method").and_then(|m| m.as_str()).unwrap_or("");
+    let respond = |result: Value| id.clone().map(|id| json!({"jsonrpc": "2.0", "id": id, "result": result}));
+    let fail = |code: i64, text: &str| id.clone().map(|id| json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": text}}));
+    if id.is_none() {
+        // notifications (`notifications/initialized`, ...) are accepted silently
+        return None;
+    }
+    match method {
+        "initialize" => {
+            let requested = message.pointer("/params/protocolVersion").and_then(|v| v.as_str()).unwrap_or(PROTOCOL_VERSION);
+            respond(json!({
+                "protocolVersion": requested,
+                "capabilities": {"tools": {"listChanged": false}},
+                "serverInfo": {"name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION")},
+                "instructions": "Tools operate on the terminal sessions open in the OpsBatch desktop app. Write operations follow the permission mode set in OpsBatch."
+            }))
+        }
+        "ping" => respond(json!({})),
+        "tools/list" => respond(json!({"tools": tool_definitions()})),
+        "tools/call" => {
+            let name = message.pointer("/params/name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if !tool_definitions().iter().any(|t| t["name"] == name.as_str()) {
+                return fail(-32602, &format!("Unknown tool: {name}"));
+            }
+            let arguments = message.pointer("/params/arguments").cloned().unwrap_or_else(|| json!({}));
+            let (tx, rx) = oneshot::channel();
+            if calls.send_async(BridgeCall { tool: name, arguments, reply: tx }).await.is_err() {
+                return respond(json!({"content": [{"type": "text", "text": "OpsBatch is not accepting tool calls right now."}], "isError": true}));
+            }
+            let outcome = match tokio::time::timeout(CALL_TIMEOUT, rx).await {
+                Ok(Ok(o)) => o,
+                Ok(Err(_)) => ToolOutcome::error("The call was cancelled."),
+                Err(_) => ToolOutcome::error("Timed out waiting for OpsBatch."),
+            };
+            respond(json!({"content": [{"type": "text", "text": outcome.text}], "isError": outcome.is_error}))
+        }
+        other => fail(-32601, &format!("Method not found: {other}")),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HTTP
+// ---------------------------------------------------------------------------
+
+struct HttpRequest {
+    method: String,
+    path: String,
+    headers: Vec<(String, String)>,
+    body: Vec<u8>,
+}
+
+impl HttpRequest {
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
+    }
+}
+
+async fn read_request(stream: &mut TcpStream) -> Result<HttpRequest, String> {
+    let mut buf = Vec::new();
+    let mut tmp = [0u8; 8192];
+    let header_end = loop {
+        if let Some(pos) = buf.windows(4).position(|w| w == b"\r\n\r\n") {
+            break pos + 4;
+        }
+        if buf.len() > 64 * 1024 {
+            return Err("headers too large".into());
+        }
+        let n = stream.read(&mut tmp).await.map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Err("closed".into());
+        }
+        buf.extend_from_slice(&tmp[..n]);
+    };
+    let head = String::from_utf8_lossy(&buf[..header_end]).to_string();
+    let mut lines = head.lines();
+    let first = lines.next().unwrap_or("");
+    let mut parts = first.split_whitespace();
+    let (method, path) = (parts.next().unwrap_or("").to_string(), parts.next().unwrap_or("").to_string());
+    let headers: Vec<(String, String)> = lines.filter_map(|l| l.split_once(':')).map(|(k, v)| (k.trim().to_string(), v.trim().to_string())).collect();
+    let length = headers.iter().find(|(k, _)| k.eq_ignore_ascii_case("content-length")).and_then(|(_, v)| v.parse::<usize>().ok()).unwrap_or(0);
+    if length > MAX_BODY {
+        return Err("body too large".into());
+    }
+    let mut body = buf[header_end..].to_vec();
+    while body.len() < length {
+        let n = stream.read(&mut tmp).await.map_err(|e| e.to_string())?;
+        if n == 0 {
+            return Err("closed".into());
+        }
+        body.extend_from_slice(&tmp[..n]);
+    }
+    body.truncate(length);
+    Ok(HttpRequest { method, path, headers, body })
+}
+
+async fn write_response(stream: &mut TcpStream, status: u16, reason: &str, body: &str) {
+    let reply = format!("HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}", body.len());
+    let _ = stream.write_all(reply.as_bytes()).await;
+    let _ = stream.shutdown().await;
+}
+
+/// Compares in constant time so a wrong token leaks nothing through timing.
+fn token_matches(given: &str, expected: &str) -> bool {
+    let (a, b) = (given.as_bytes(), expected.as_bytes());
+    let mut diff = (a.len() != b.len()) as u8;
+    for i in 0..a.len().max(b.len()) {
+        diff |= a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0);
+    }
+    diff == 0
+}
+
+/// A browser page must not be able to drive the bridge (DNS rebinding): an `Origin` has to be this machine.
+fn origin_allowed(origin: Option<&str>) -> bool {
+    match origin {
+        None => true,
+        Some(o) => {
+            let host = o.split("://").nth(1).unwrap_or(o).split('/').next().unwrap_or("");
+            let host = host.rsplit_once(':').map(|(h, p)| if p.chars().all(|c| c.is_ascii_digit()) { h } else { host }).unwrap_or(host);
+            matches!(host.trim_matches(|c| c == '[' || c == ']'), "localhost" | "127.0.0.1" | "::1")
+        }
+    }
+}
+
+async fn serve_connection(mut stream: TcpStream, token: Arc<String>, calls: flume::Sender<BridgeCall>) {
+    let request = match tokio::time::timeout(Duration::from_secs(30), read_request(&mut stream)).await {
+        Ok(Ok(r)) => r,
+        _ => return,
+    };
+    if request.path.split('?').next() != Some("/mcp") {
+        return write_response(&mut stream, 404, "Not Found", r#"{"error":"not found"}"#).await;
+    }
+    if !origin_allowed(request.header("origin")) {
+        return write_response(&mut stream, 403, "Forbidden", r#"{"error":"origin not allowed"}"#).await;
+    }
+    let bearer = request.header("authorization").and_then(|h| h.strip_prefix("Bearer ").or_else(|| h.strip_prefix("bearer "))).unwrap_or("");
+    if !token_matches(bearer, &token) {
+        return write_response(&mut stream, 401, "Unauthorized", r#"{"error":"invalid bearer token"}"#).await;
+    }
+    match request.method.as_str() {
+        "POST" => {}
+        // the legacy HTTP+SSE transport is not offered
+        "GET" => return write_response(&mut stream, 405, "Method Not Allowed", r#"{"error":"use POST"}"#).await,
+        "DELETE" => return write_response(&mut stream, 200, "OK", "{}").await,
+        _ => return write_response(&mut stream, 405, "Method Not Allowed", r#"{"error":"use POST"}"#).await,
+    }
+    let Ok(message) = serde_json::from_slice::<Value>(&request.body) else {
+        return write_response(&mut stream, 400, "Bad Request", r#"{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"Parse error"}}"#).await;
+    };
+    let answer = match &message {
+        Value::Array(items) => {
+            let mut out = Vec::new();
+            for m in items {
+                if let Some(r) = handle_rpc(m, &calls).await {
+                    out.push(r);
+                }
+            }
+            (!out.is_empty()).then(|| Value::Array(out))
+        }
+        m => handle_rpc(m, &calls).await,
+    };
+    match answer {
+        Some(body) => write_response(&mut stream, 200, "OK", &body.to_string()).await,
+        None => write_response(&mut stream, 202, "Accepted", "").await,
+    }
+}
+
+/// A running bridge; dropping it (or `stop`) closes the listener.
+pub struct BridgeHandle {
+    pub addr: SocketAddr,
+    shutdown: watch::Sender<bool>,
+}
+
+impl BridgeHandle {
+    pub fn stop(&self) {
+        let _ = self.shutdown.send(true);
+    }
+}
+
+impl Drop for BridgeHandle {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
+/// Listens on `listen_address:port`; every accepted `tools/call` goes to `calls`.
+pub async fn start(listen_address: &str, port: u16, token: String, calls: flume::Sender<BridgeCall>) -> Result<BridgeHandle, String> {
+    let ip: std::net::IpAddr = listen_address.trim().parse().map_err(|_| "invalid_address".to_string())?;
+    let listener = TcpListener::bind(SocketAddr::new(ip, port)).await.map_err(|e| if e.kind() == std::io::ErrorKind::AddrInUse { "port_in_use".to_string() } else { e.to_string() })?;
+    let addr = listener.local_addr().map_err(|e| e.to_string())?;
+    let (shutdown, mut stop) = watch::channel(false);
+    let token = Arc::new(token);
+    tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = stop.changed() => break,
+                accepted = listener.accept() => {
+                    let Ok((stream, _)) = accepted else { continue };
+                    tokio::spawn(serve_connection(stream, token.clone(), calls.clone()));
+                }
+            }
+        }
+    });
+    Ok(BridgeHandle { addr, shutdown })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn post(addr: SocketAddr, token: Option<&str>, origin: Option<&str>, method: &str, path: &str, body: &str) -> (u16, String) {
+        let mut s = TcpStream::connect(addr).await.unwrap();
+        let mut req = format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n", body.len());
+        if let Some(t) = token {
+            req.push_str(&format!("Authorization: Bearer {t}\r\n"));
+        }
+        if let Some(o) = origin {
+            req.push_str(&format!("Origin: {o}\r\n"));
+        }
+        req.push_str("\r\n");
+        req.push_str(body);
+        s.write_all(req.as_bytes()).await.unwrap();
+        let mut out = String::new();
+        s.read_to_string(&mut out).await.unwrap();
+        let status = out.split_whitespace().nth(1).and_then(|c| c.parse().ok()).unwrap_or(0);
+        (status, out.split_once("\r\n\r\n").map(|(_, b)| b.to_string()).unwrap_or_default())
+    }
+
+    async fn rpc(addr: SocketAddr, body: Value) -> (u16, Value) {
+        let (status, text) = post(addr, Some("tok"), None, "POST", "/mcp", &body.to_string()).await;
+        (status, serde_json::from_str(&text).unwrap_or(Value::Null))
+    }
+
+    #[test]
+    fn tokens_and_origins() {
+        assert!(token_matches("abc", "abc"));
+        assert!(!token_matches("abd", "abc"));
+        assert!(!token_matches("ab", "abc"));
+        assert!(!token_matches("", "abc"));
+        assert!(origin_allowed(None));
+        assert!(origin_allowed(Some("http://localhost:3000")));
+        assert!(origin_allowed(Some("http://127.0.0.1")));
+        assert!(origin_allowed(Some("http://[::1]:80")));
+        assert!(!origin_allowed(Some("https://evil.example")));
+        assert!(!origin_allowed(Some("http://localhost.evil.example")));
+    }
+
+    #[test]
+    fn every_tool_has_a_schema() {
+        let tools = tool_definitions();
+        assert_eq!(tools.iter().map(|t| t["name"].as_str().unwrap()).collect::<Vec<_>>(), vec!["get_environment", "list_sessions", "terminal_read", "terminal_execute"]);
+        assert!(tools.iter().all(|t| t["inputSchema"]["type"] == "object" && t["description"].as_str().is_some_and(|d| !d.is_empty())));
+        assert_eq!(tools[3]["inputSchema"]["required"][0], "command");
+    }
+
+    #[tokio::test]
+    async fn the_protocol_handshake_and_listing() {
+        let (tx, _rx) = flume::unbounded();
+        let h = start("127.0.0.1", 0, "tok".into(), tx).await.unwrap();
+        let (status, init) = rpc(h.addr, json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}})).await;
+        assert_eq!(status, 200);
+        assert_eq!(init["result"]["protocolVersion"], "2024-11-05");
+        assert_eq!(init["result"]["serverInfo"]["name"], SERVER_NAME);
+        assert!(init["result"]["capabilities"]["tools"].is_object());
+        // a notification gets no body
+        let (status, text) = post(h.addr, Some("tok"), None, "POST", "/mcp", r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).await;
+        assert_eq!((status, text.as_str()), (202, ""));
+        let (_, list) = rpc(h.addr, json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})).await;
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 4);
+        let (_, ping) = rpc(h.addr, json!({"jsonrpc": "2.0", "id": 3, "method": "ping"})).await;
+        assert_eq!(ping["result"], json!({}));
+        let (_, unknown) = rpc(h.addr, json!({"jsonrpc": "2.0", "id": 4, "method": "nope"})).await;
+        assert_eq!(unknown["error"]["code"], -32601);
+        let (_, bad_tool) = rpc(h.addr, json!({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "rm_rf"}})).await;
+        assert_eq!(bad_tool["error"]["code"], -32602);
+        // batches are answered as a batch
+        let (_, batch) = rpc(h.addr, json!([{"jsonrpc": "2.0", "id": 6, "method": "ping"}, {"jsonrpc": "2.0", "method": "notifications/x"}, {"jsonrpc": "2.0", "id": 7, "method": "ping"}])).await;
+        assert_eq!(batch.as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn requests_are_authenticated_and_confined() {
+        let (tx, _rx) = flume::unbounded();
+        let h = start("127.0.0.1", 0, "tok".into(), tx).await.unwrap();
+        let body = r#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#;
+        assert_eq!(post(h.addr, None, None, "POST", "/mcp", body).await.0, 401);
+        assert_eq!(post(h.addr, Some("wrong"), None, "POST", "/mcp", body).await.0, 401);
+        assert_eq!(post(h.addr, Some("tok"), Some("https://evil.example"), "POST", "/mcp", body).await.0, 403);
+        assert_eq!(post(h.addr, Some("tok"), Some("http://localhost:1234"), "POST", "/mcp", body).await.0, 200);
+        assert_eq!(post(h.addr, Some("tok"), None, "POST", "/other", body).await.0, 404);
+        assert_eq!(post(h.addr, Some("tok"), None, "GET", "/mcp", "").await.0, 405);
+        assert_eq!(post(h.addr, Some("tok"), None, "POST", "/mcp", "{not json").await.0, 400);
+        h.stop();
+    }
+
+    #[tokio::test]
+    async fn tool_calls_wait_for_the_app_and_carry_its_answer() {
+        let (tx, rx) = flume::unbounded::<BridgeCall>();
+        let h = start("127.0.0.1", 0, "tok".into(), tx).await.unwrap();
+        tokio::spawn(async move {
+            while let Ok(call) = rx.recv_async().await {
+                let outcome = match call.tool.as_str() {
+                    "terminal_execute" => ToolOutcome::ok(format!("ran: {}", call.arguments["command"].as_str().unwrap_or(""))),
+                    _ => ToolOutcome::error("refused"),
+                };
+                let _ = call.reply.send(outcome);
+            }
+        });
+        let (_, ok) = rpc(h.addr, json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "terminal_execute", "arguments": {"command": "uptime"}}})).await;
+        assert_eq!(ok["result"]["content"][0]["text"], "ran: uptime");
+        assert_eq!(ok["result"]["isError"], false);
+        let (_, denied) = rpc(h.addr, json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "list_sessions"}})).await;
+        assert_eq!((denied["result"]["isError"].as_bool(), denied["result"]["content"][0]["text"].as_str()), (Some(true), Some("refused")));
+    }
+
+    #[tokio::test]
+    async fn the_listener_reports_a_busy_port_and_stops() {
+        let (tx, _rx) = flume::unbounded();
+        let a = start("127.0.0.1", 0, "t".into(), tx.clone()).await.unwrap();
+        assert_eq!(start("127.0.0.1", a.addr.port(), "t".into(), tx.clone()).await.err().as_deref(), Some("port_in_use"));
+        assert_eq!(start("not-an-ip", 0, "t".into(), tx.clone()).await.err().as_deref(), Some("invalid_address"));
+        let port = a.addr.port();
+        a.stop();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(TcpStream::connect(("127.0.0.1", port)).await.is_err() || start("127.0.0.1", port, "t".into(), tx).await.is_ok());
+    }
+}

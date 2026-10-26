@@ -123,6 +123,34 @@ pub fn open_or_focus<V: 'static + Render>(
     }
 }
 
+/// Opens the window under `label` without taking the focus; an open one is left as it is (activated only when
+/// `activate` is set). For small status windows that must not interrupt what the user is typing.
+pub fn open_background<V: 'static + Render>(
+    label: &str,
+    options: WindowOptions,
+    activate: bool,
+    cx: &mut App,
+    build: impl FnOnce(&mut Window, &mut App) -> Entity<V>,
+) -> Option<AnyWindowHandle> {
+    let existing = cx.global::<WindowRegistry>().windows.get(label).copied();
+    if let Some(handle) = existing {
+        if handle.update(cx, |_, window, _| if activate { window.activate_window() }).is_ok() {
+            return Some(handle);
+        }
+        cx.global_mut::<WindowRegistry>().windows.remove(label);
+    }
+    match gpui_kit::open_window(options, cx, build) {
+        Ok((handle, _view)) => {
+            cx.global_mut::<WindowRegistry>().windows.insert(label.to_string(), handle);
+            Some(handle)
+        }
+        Err(error) => {
+            log::error!("failed to open window {label}: {error}");
+            None
+        }
+    }
+}
+
 /// Like [`open_or_focus`] but always shows fresh content: an existing window with this label is closed first
 /// (windows whose context comes from their opener, e.g. the batch upload target list).
 pub fn replace_window<V: 'static + Render>(

@@ -10,6 +10,20 @@ pub enum PrefsEvent {
     SaveFailed(String),
 }
 
+struct PrefsHandle(Entity<PrefsStore>);
+impl Global for PrefsHandle {}
+
+/// The one preferences document of the process: the settings window, the MCP bridge and the approval window all edit
+/// this entity, so a stale copy can never overwrite another one's change.
+pub fn shared(cx: &mut App) -> Entity<PrefsStore> {
+    if let Some(h) = cx.try_global::<PrefsHandle>() {
+        return h.0.clone();
+    }
+    let store = cx.new(PrefsStore::new);
+    cx.set_global(PrefsHandle(store.clone()));
+    store
+}
+
 pub struct PrefsStore {
     prefs: AiPrefs,
     loaded: bool,

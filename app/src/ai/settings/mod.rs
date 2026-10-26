@@ -61,7 +61,7 @@ pub struct AiSettingsView {
 
 impl AiSettingsView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let store = cx.new(PrefsStore::new);
+        let store = super::prefs_store::shared(cx);
         let subs = vec![cx.subscribe_in(&store, window, |_, _, ev: &PrefsEvent, window, cx| {
             if let PrefsEvent::SaveFailed(e) = ev {
                 toast::error(window, cx, t!("ncai.providers.headers.saveError").to_string() + " " + e);

@@ -7137,6 +7137,7 @@ dependencies = [
  "chrono",
  "dashmap",
  "fancy-regex",
+ "flume 0.11.1",
  "futures",
  "futures-util",
  "log",

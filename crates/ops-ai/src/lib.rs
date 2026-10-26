@@ -3,6 +3,7 @@
 pub mod client;
 pub mod follow_up;
 pub mod mcp;
+pub mod mcp_bridge;
 pub mod parser;
 pub mod prefs;
 pub mod rdp_parser;

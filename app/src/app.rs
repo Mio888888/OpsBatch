@@ -39,6 +39,7 @@ pub fn init_globals(ctx: Arc<Ctx>, language_mode: ops_i18n::LanguageMode, theme:
     crate::library::store::init(cx);
     crate::ai::store::init(cx);
     crate::ai::runtime::init(cx);
+    crate::mcp_bridge::init(cx);
     crate::workflow::store::init(cx);
     crate::log::store::init(cx);
     crate::update::init(cx);

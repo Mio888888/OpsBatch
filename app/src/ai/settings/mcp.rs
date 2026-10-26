@@ -1,8 +1,9 @@
 //! External MCP card of the tool-access tab (`ExternalMcpCard` + `ExternalMcpHttpSection`): the switches and limits of
 //! the bridge that lets an outside agent drive the app, and the client setup snippets.
 //!
-//! The settings are stored and the snippets generated here. The bridge server itself is not part of this build, so
-//! the status reads "unavailable" while the switch is on and there is no launcher path to put into the snippets.
+//! The settings are stored and the snippets generated here. The bridge itself (`crate::mcp_bridge`) serves the
+//! Streamable HTTP transport; the stdio launcher is not part of this build, so there is no launcher path for the
+//! stdio snippets.
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::Button;
@@ -93,6 +94,7 @@ impl ExternalMcpCard {
                 this.refresh_blocks(cx);
                 cx.notify();
             }),
+            cx.observe(&crate::mcp_bridge::bridge(cx), |_, _, cx| cx.notify()),
             cx.subscribe_in(&mode, window, |this, _, ev, _, cx| {
                 if let Some(v) = confirmed_value(ev) {
                     this.update(cx, |m| m.mode = if v == "temporary" { Mode::Temporary } else { Mode::Persistent });
@@ -268,7 +270,25 @@ impl Render for ExternalMcpCard {
         let mode = self.store.read(cx).prefs().global_permission_mode;
         let weak = cx.entity().downgrade();
 
-        let (status_text, status_color) = if !s.enabled { (t!("ncai.externalMcp.status.disabled"), ui_colors.text_muted) } else { (t!("ncai.externalMcp.status.unavailable"), ui::amber()) };
+        let bridge_status = crate::mcp_bridge::bridge(cx).read(cx).status().clone();
+        let (status_text, status_color) = match &bridge_status {
+            _ if !s.enabled => (t!("ncai.externalMcp.status.disabled"), ui_colors.text_muted),
+            crate::mcp_bridge::BridgeStatus::Running(_) => (t!("ncai.externalMcp.status.running"), ui::green()),
+            crate::mcp_bridge::BridgeStatus::Starting => (t!("ncai.externalMcp.status.starting"), ui::amber()),
+            crate::mcp_bridge::BridgeStatus::Error(_) => (t!("ncai.externalMcp.status.error"), theme.danger),
+            _ => (t!("ncai.externalMcp.status.unavailable"), ui::amber()),
+        };
+        let bridge_note: Option<(String, Hsla)> = match (&bridge_status, s.enabled) {
+            (_, false) => Some((t!("ncai.externalMcp.bridgeUnavailable"), ui_colors.text_muted)),
+            (crate::mcp_bridge::BridgeStatus::NeedsHttp, _) => Some((t!("mcp.needHttp"), ui::amber())),
+            (crate::mcp_bridge::BridgeStatus::Running(url), _) => Some((t!("mcp.listening", url = url.clone()), ui::green())),
+            (crate::mcp_bridge::BridgeStatus::Error(e), _) => Some((match e.as_str() {
+                "port_in_use" => t!("mcp.portInUse"),
+                "invalid_address" => t!("mcp.invalidAddress"),
+                other => other.to_string(),
+            }, theme.danger)),
+            _ => None,
+        };
         let w = weak.clone();
         let enable_row = ui::setting_row(
             Some(t!("ncai.externalMcp.title")),
@@ -419,7 +439,7 @@ impl Render for ExternalMcpCard {
             .gap(px(12.))
             .child(ui::muted_text(t!("ncai.externalMcp.description"), cx))
             .child(ui::card(rows, true, cx))
-            .child(ui::colored_text(t!("ncai.externalMcp.bridgeUnavailable"), ui_colors.text_muted))
+            .children(bridge_note.map(|(text, color)| div().id("ai-mcp-note").test_support().child(ui::colored_text(text, color))))
             .child(
                 v_flex()
                     .gap(px(2.))

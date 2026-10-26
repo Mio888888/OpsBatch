@@ -18,6 +18,7 @@ pub mod language;
 pub mod library;
 pub mod log;
 pub mod logging;
+pub mod mcp_bridge;
 pub mod rdp;
 pub mod remote;
 pub mod settings;

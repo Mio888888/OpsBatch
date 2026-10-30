@@ -335,6 +335,25 @@ pub fn strip_ansi(text: &str) -> String {
     out
 }
 
+/// zsh pads a missing final newline with a reverse-video `%` and spaces up to the terminal width (PROMPT_EOL_MARK),
+/// then draws the next prompt on the same line. Everything from that marker on is prompt, not command output.
+fn drop_prompt_artifacts(text: &str) -> String {
+    let marker = |line: &str| -> Option<usize> {
+        let at = line.find(['%', '#'])?;
+        let spaces = line[at + 1..].chars().take_while(|c| *c == ' ').count();
+        (spaces >= 10).then_some(at)
+    };
+    let mut out: Vec<&str> = Vec::new();
+    for line in text.lines() {
+        match marker(line) {
+            Some(at) if line[..at].trim().is_empty() => {}
+            Some(at) => out.push(&line[..at]),
+            None => out.push(line),
+        }
+    }
+    out.join("\n")
+}
+
 /// The line of an answer worth showing in the record: the first output line, else the status note.
 fn detail_of(text: &str, command: &str) -> String {
     let clean = strip_ansi(text);
@@ -477,7 +496,7 @@ async fn execute(id: &str, session: Session, command: String, timeout: Option<u6
         Ok(result) => {
             let formatted = ops_ai::follow_up::format_terminal_command_result(&ops_ai::follow_up::TerminalCommandResult { status: exec_status(result.status).into(), output: result.output, exit_code: result.exit_code });
             let failed = result.exit_code.is_some_and(|c| c != 0) || result.status != ExecStatus::Completed;
-            ToolOutcome { text: tail(&strip_ansi(&formatted), 20_000), is_error: failed }
+            ToolOutcome { text: tail(&drop_prompt_artifacts(&strip_ansi(&formatted)), 20_000), is_error: failed }
         }
         Err(_) => ToolOutcome::error("The terminal session closed before the command finished."),
     }
@@ -485,7 +504,17 @@ async fn execute(id: &str, session: Session, command: String, timeout: Option<u6
 
 #[cfg(test)]
 mod tests {
-    use super::{detail_of, strip_ansi};
+    use super::{detail_of, drop_prompt_artifacts, strip_ansi};
+
+    #[test]
+    fn the_zsh_end_of_line_marker_and_prompt_are_dropped() {
+        let pad = " ".repeat(40);
+        let out = format!("[当前命令：completed，退出码 0]\necho hi\nhi\n%{pad}macuser@Mac ~ % \n\n[OpsBatch] ok");
+        assert_eq!(drop_prompt_artifacts(&out), "[当前命令：completed，退出码 0]\necho hi\nhi\n\n[OpsBatch] ok");
+        // output without a newline keeps what came before the marker; a lone "%" in real output stays
+        assert_eq!(drop_prompt_artifacts(&format!("50%{pad}$ ")), "50");
+        assert_eq!(drop_prompt_artifacts("progress 50% done\n# comment"), "progress 50% done\n# comment");
+    }
 
     #[test]
     fn control_sequences_are_removed() {

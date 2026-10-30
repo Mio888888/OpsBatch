@@ -2,8 +2,8 @@
 //! the bridge that lets an outside agent drive the app, and the client setup snippets.
 //!
 //! The settings are stored and the snippets generated here. The bridge itself (`crate::mcp_bridge`) serves the
-//! Streamable HTTP transport; the stdio launcher is not part of this build, so there is no launcher path for the
-//! stdio snippets.
+//! Streamable HTTP transport and, through `opsbatch --mcp-stdio` (a launcher script next to the discovery file), the
+//! stdio transport.
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::Button;
@@ -54,9 +54,6 @@ pub struct ExternalMcpCard {
     port: Entity<InputState>,
     listen_address: Entity<InputState>,
     client_host: Entity<InputState>,
-    /// Path of the stdio launcher the snippets point to; the bridge is not part of this build.
-    launcher: Option<String>,
-    discovery: Option<String>,
     http_errors: Vec<&'static str>,
     prompt: Entity<CopyBlock>,
     snippets: Vec<Entity<CopyBlock>>,
@@ -94,7 +91,10 @@ impl ExternalMcpCard {
                 this.refresh_blocks(cx);
                 cx.notify();
             }),
-            cx.observe(&crate::mcp_bridge::bridge(cx), |_, _, cx| cx.notify()),
+            cx.observe(&crate::mcp_bridge::bridge(cx), |this, _, cx| {
+                this.refresh_blocks(cx);
+                cx.notify();
+            }),
             cx.subscribe_in(&mode, window, |this, _, ev, _, cx| {
                 if let Some(v) = confirmed_value(ev) {
                     this.update(cx, |m| m.mode = if v == "temporary" { Mode::Temporary } else { Mode::Persistent });
@@ -122,7 +122,7 @@ impl ExternalMcpCard {
             ui::on_commit(&listen_address, window, cx, |this, text, _, cx| this.commit_listen_address(&text, cx)),
             ui::on_commit(&client_host, window, cx, |this, text, _, cx| this.commit_client_host(&text, cx)),
         ];
-        let mut this = Self { store, client: Client::Codex, mode, approval, idle_timeout, session_idle_timeout, port, listen_address, client_host, launcher: None, discovery: None, http_errors: Vec::new(), prompt, snippets, http_blocks, _subs: subs };
+        let mut this = Self { store, client: Client::Codex, mode, approval, idle_timeout, session_idle_timeout, port, listen_address, client_host, http_errors: Vec::new(), prompt, snippets, http_blocks, _subs: subs };
         this.sync(window, cx);
         this
     }
@@ -171,7 +171,10 @@ impl ExternalMcpCard {
     /// Rewrites the snippets for the selected client and the HTTP transport.
     fn refresh_blocks(&mut self, cx: &mut Context<Self>) {
         let s = self.settings(cx);
-        let (launcher, discovery) = (self.launcher.clone(), self.discovery.clone());
+        let (launcher, discovery) = {
+            let b = crate::mcp_bridge::bridge(cx).read(cx);
+            (b.launcher_path(), b.discovery_path())
+        };
         self.prompt.update(cx, |b, cx| b.set_text(mcp::onboarding_prompt(launcher.as_deref(), discovery.as_deref()), cx));
         let texts: Vec<(Option<String>, String)> = match (&launcher, self.client) {
             (None, _) => Vec::new(),
@@ -280,8 +283,8 @@ impl Render for ExternalMcpCard {
         };
         let bridge_note: Option<(String, Hsla)> = match (&bridge_status, s.enabled) {
             (_, false) => Some((t!("ncai.externalMcp.bridgeUnavailable"), ui_colors.text_muted)),
-            (crate::mcp_bridge::BridgeStatus::NeedsHttp, _) => Some((t!("mcp.needHttp"), ui::amber())),
-            (crate::mcp_bridge::BridgeStatus::Running(url), _) => Some((t!("mcp.listening", url = url.clone()), ui::green())),
+            (crate::mcp_bridge::BridgeStatus::Running(url), _) if s.http.enabled => Some((t!("mcp.listening", url = url.clone()), ui::green())),
+            (crate::mcp_bridge::BridgeStatus::Running(_), _) => Some((t!("mcp.stdioReady"), ui::green())),
             (crate::mcp_bridge::BridgeStatus::Error(e), _) => Some((match e.as_str() {
                 "port_in_use" => t!("mcp.portInUse"),
                 "invalid_address" => t!("mcp.invalidAddress"),
@@ -354,11 +357,12 @@ impl Render for ExternalMcpCard {
             });
         }, cx);
         let mut client_body: Vec<AnyElement> = Vec::new();
-        if self.launcher.is_none() {
+        let has_launcher = crate::mcp_bridge::bridge(cx).read(cx).launcher_path().is_some();
+        if !has_launcher {
             client_body.push(ui::colored_text(t!("ncai.externalMcp.enableForLauncher"), ui::amber()).into_any_element());
         }
         client_body.extend(self.snippets.iter().filter(|b| !b.read(cx).text().is_empty()).map(|b| b.clone().into_any_element()));
-        if matches!(self.client, Client::Other) || self.launcher.is_none() {
+        if matches!(self.client, Client::Other) || !has_launcher {
             client_body.push(self.prompt.clone().into_any_element());
         }
         let clients = ui::padded_card(

@@ -281,6 +281,108 @@ pub async fn start(listen_address: &str, port: u16, token: String, calls: flume:
     Ok(BridgeHandle { addr, shutdown })
 }
 
+// ---------------------------------------------------------------------------
+// Discovery file and the stdio launcher
+// ---------------------------------------------------------------------------
+
+/// Env var a launcher reads its discovery file path from (the MCP client config sets it).
+pub const DISCOVERY_ENV: &str = "OPSBATCH_EXTERNAL_MCP_DISCOVERY_FILE";
+
+/// `<data dir>/mcp/discovery.json`
+pub fn default_discovery_path(data_dir: &std::path::Path) -> std::path::PathBuf {
+    data_dir.join("mcp").join("discovery.json")
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Discovery {
+    pub url: String,
+    pub token: String,
+}
+
+/// Written while the bridge runs so a stdio launcher can find the port and token (private to the user, like the
+/// original's discovery file); removed when the bridge stops.
+pub fn write_discovery(path: &std::path::Path, addr: SocketAddr, token: &str) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let host = if addr.ip().is_unspecified() { "127.0.0.1".to_string() } else if addr.is_ipv6() { format!("[{}]", addr.ip()) } else { addr.ip().to_string() };
+    let body = json!({"url": format!("http://{host}:{}/mcp", addr.port()), "token": token, "pid": std::process::id(), "version": env!("CARGO_PKG_VERSION")});
+    let tmp = path.with_extension("json.tmp");
+    {
+        use std::io::Write as _;
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&tmp)?;
+        file.write_all(body.to_string().as_bytes())?;
+    }
+    std::fs::rename(&tmp, path)
+}
+
+pub fn remove_discovery(path: &std::path::Path) {
+    let _ = std::fs::remove_file(path);
+}
+
+pub fn read_discovery(path: &std::path::Path) -> Result<Discovery, String> {
+    let text = std::fs::read_to_string(path).map_err(|_| "OpsBatch is not running, or External MCP is switched off in OpsBatch (Settings → AI → Tool access).".to_string())?;
+    let v: Value = serde_json::from_str(&text).map_err(|e| format!("The discovery file is damaged: {e}"))?;
+    let url = v["url"].as_str().filter(|u| !u.is_empty()).ok_or("The discovery file has no url")?.to_string();
+    let token = v["token"].as_str().unwrap_or("").to_string();
+    Ok(Discovery { url, token })
+}
+
+/// The stdio MCP transport: newline-delimited JSON-RPC on `input` / `output`, each message forwarded to the running
+/// app over HTTP (the discovery file is read for every message, so an app restart is picked up). Failures are answered
+/// as JSON-RPC errors so the client sees why instead of hanging.
+pub fn run_stdio_proxy<R: std::io::BufRead, W: std::io::Write>(discovery: &std::path::Path, input: R, output: &mut W) -> std::io::Result<()> {
+    let client = reqwest::blocking::Client::builder().timeout(CALL_TIMEOUT + Duration::from_secs(30)).build().map_err(std::io::Error::other)?;
+    for line in input.lines() {
+        let line = line?;
+        let text = line.trim();
+        if text.is_empty() {
+            continue;
+        }
+        let parsed: Option<Value> = serde_json::from_str(text).ok();
+        let id = parsed.as_ref().and_then(|v| v.get("id")).cloned();
+        let fail = |output: &mut W, message: String| -> std::io::Result<()> {
+            // notifications have no id and get no answer
+            match &id {
+                Some(id) => writeln!(output, "{}", json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": message}})),
+                None => Ok(()),
+            }
+        };
+        let found = match read_discovery(discovery) {
+            Ok(d) => d,
+            Err(e) => {
+                fail(output, e)?;
+                output.flush()?;
+                continue;
+            }
+        };
+        let response = client.post(&found.url).header("Content-Type", "application/json").header("Authorization", format!("Bearer {}", found.token)).body(text.to_string()).send();
+        match response {
+            Ok(r) if r.status().as_u16() == 202 => {}
+            Ok(r) if r.status().is_success() => {
+                let body = r.text().unwrap_or_default();
+                let body = body.trim();
+                if !body.is_empty() {
+                    // one message per line
+                    writeln!(output, "{}", body.replace('\n', " "))?;
+                }
+            }
+            Ok(r) if r.status().as_u16() == 401 => fail(output, "OpsBatch refused the token. Restart your MCP client so it reads the new discovery file.".into())?,
+            Ok(r) => fail(output, format!("OpsBatch answered HTTP {}.", r.status()))?,
+            Err(_) => fail(output, "Could not reach OpsBatch. Is it running with External MCP switched on?".into())?,
+        }
+        output.flush()?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -388,6 +490,79 @@ mod tests {
         assert_eq!(ok["result"]["isError"], false);
         let (_, denied) = rpc(h.addr, json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "list_sessions"}})).await;
         assert_eq!((denied["result"]["isError"].as_bool(), denied["result"]["content"][0]["text"].as_str()), (Some(true), Some("refused")));
+    }
+
+    #[test]
+    fn the_discovery_file_round_trips_privately() {
+        let dir = std::env::temp_dir().join(format!("opsbatch-disc-{}", uuid::Uuid::new_v4().simple()));
+        let path = default_discovery_path(&dir);
+        assert!(read_discovery(&path).unwrap_err().contains("not running"));
+        write_discovery(&path, "0.0.0.0:4567".parse().unwrap(), "tok").unwrap();
+        assert_eq!(read_discovery(&path).unwrap(), Discovery { url: "http://127.0.0.1:4567/mcp".into(), token: "tok".into() });
+        write_discovery(&path, "[::1]:9".parse().unwrap(), "t2").unwrap();
+        assert_eq!(read_discovery(&path).unwrap().url, "http://[::1]:9/mcp");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+        }
+        std::fs::write(&path, "not json").unwrap();
+        assert!(read_discovery(&path).unwrap_err().contains("damaged"));
+        remove_discovery(&path);
+        assert!(!path.exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn the_stdio_proxy_forwards_lines_and_reports_failures() {
+        let (tx, rx) = flume::unbounded::<BridgeCall>();
+        let h = start("127.0.0.1", 0, "tok".into(), tx).await.unwrap();
+        tokio::spawn(async move {
+            while let Ok(call) = rx.recv_async().await {
+                let _ = call.reply.send(ToolOutcome::ok(format!("echo:{}", call.arguments["x"].as_str().unwrap_or(""))));
+            }
+        });
+        let dir = std::env::temp_dir().join(format!("opsbatch-stdio-{}", uuid::Uuid::new_v4().simple()));
+        let path = default_discovery_path(&dir);
+        let run = |path: std::path::PathBuf, input: String| {
+            tokio::task::spawn_blocking(move || {
+                let mut out = Vec::new();
+                run_stdio_proxy(&path, std::io::Cursor::new(input), &mut out).unwrap();
+                String::from_utf8(out).unwrap().lines().map(|l| serde_json::from_str::<Value>(l).unwrap()).collect::<Vec<_>>()
+            })
+        };
+        let session = [
+            json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}).to_string(),
+            json!({"jsonrpc": "2.0", "method": "notifications/initialized"}).to_string(),
+            String::new(),
+            json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}).to_string(),
+            json!({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "get_environment", "arguments": {"x": "hi"}}}).to_string(),
+        ]
+        .join("\n");
+
+        // no discovery file: requests are answered with an error, notifications are dropped
+        let out = run(path.clone(), session.clone()).await.unwrap();
+        assert_eq!(out.len(), 3);
+        assert!(out.iter().all(|m| m["error"]["message"].as_str().unwrap().contains("not running")));
+        assert_eq!(out[0]["id"], 1);
+
+        write_discovery(&path, h.addr, "tok").unwrap();
+        let out = run(path.clone(), session.clone()).await.unwrap();
+        assert_eq!(out.len(), 3, "the notification is forwarded and answered with 202, which prints nothing");
+        assert_eq!(out[0]["result"]["serverInfo"]["name"], SERVER_NAME);
+        assert_eq!(out[1]["result"]["tools"].as_array().unwrap().len(), 4);
+        assert_eq!(out[2]["result"]["content"][0]["text"], "echo:hi");
+
+        // a wrong token and a stopped server are explained
+        write_discovery(&path, h.addr, "wrong").unwrap();
+        let out = run(path.clone(), json!({"jsonrpc": "2.0", "id": 9, "method": "ping"}).to_string()).await.unwrap();
+        assert!(out[0]["error"]["message"].as_str().unwrap().contains("refused the token"));
+        write_discovery(&path, h.addr, "tok").unwrap();
+        h.stop();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let out = run(path.clone(), json!({"jsonrpc": "2.0", "id": 10, "method": "ping"}).to_string()).await.unwrap();
+        assert!(out[0]["error"]["message"].as_str().unwrap().contains("Could not reach"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test]

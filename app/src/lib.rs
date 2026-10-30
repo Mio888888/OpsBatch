@@ -28,6 +28,8 @@ pub mod sftp;
 pub mod stores;
 pub mod terminal;
 pub mod update;
+pub mod vault;
+pub mod vault_dialog;
 pub mod transfer;
 pub mod theme;
 pub mod tray;

@@ -36,7 +36,15 @@ impl EventEmitter<PrefsEvent> for PrefsStore {}
 impl PrefsStore {
     pub fn new(cx: &mut Context<Self>) -> Self {
         let mut this = Self { prefs: AiPrefs::default(), loaded: false, saving: false, dirty: false };
-        this.load(cx);
+        // the keys live in the vault: reading while it is locked would show blanks and saving would erase the keys
+        if crate::vault::is_unlocked(cx) {
+            this.load(cx);
+        } else {
+            let weak = cx.entity().downgrade();
+            crate::vault::on_unlocked(cx, move |cx| {
+                let _ = weak.update(cx, |this, cx| this.load(cx));
+            });
+        }
         this
     }
 

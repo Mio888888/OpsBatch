@@ -20,6 +20,9 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 const SERVICE_NAME: &str = "com.opsbatch.app";
+/// Setting this to another name points every system-keychain item at that service instead. The master-key item of
+/// the default service is shared with the Tauri build, so a verification run must never use it.
+pub const SERVICE_OVERRIDE_ENV: &str = "OPSBATCH_KEYCHAIN_SERVICE";
 const KEY_API_KEY: &str = "ai_api_key";
 const KEY_HOST_PASSWORD: &str = "host_password";
 const KEY_HOST_PRIVATE_KEY: &str = "host_private_key";
@@ -34,6 +37,12 @@ const LEGACY_VAULT_KEY_EXTENSION: &str = "key";
 const SYSTEM_VAULT_MASTER_KEY_PREFIX: &str = "opsbatch-vault-master-key-v1:";
 
 static LOCAL_VAULT_DIR: OnceLock<PathBuf> = OnceLock::new();
+static SERVICE_NAME_RESOLVED: OnceLock<String> = OnceLock::new();
+
+/// The keychain service every item lives under (`com.opsbatch.app` unless overridden for a verification run).
+pub fn system_keychain_service() -> &'static str {
+    SERVICE_NAME_RESOLVED.get_or_init(|| std::env::var(SERVICE_OVERRIDE_ENV).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty()).unwrap_or_else(|| SERVICE_NAME.to_string()))
+}
 static VAULT_FILE_LOCK: Mutex<()> = Mutex::new(());
 static VAULT_MASTER_KEY: Mutex<Option<[u8; 32]>> = Mutex::new(None);
 #[cfg(test)]
@@ -525,7 +534,7 @@ fn read_system_vault_master_key() -> Result<Option<SystemVaultMasterKey>, String
     {
         let account = secret_account(KEY_LOCAL_VAULT_MASTER_KEY, "default");
         let entry =
-            Entry::new(SERVICE_NAME, &account).map_err(|e| format!("keyring 创建失败: {}", e))?;
+            Entry::new(system_keychain_service(), &account).map_err(|e| format!("keyring 创建失败: {}", e))?;
         match entry.get_password() {
             Ok(encoded) => decode_system_vault_master_key(&encoded).map(Some),
             Err(KeyringError::NoEntry) => read_legacy_system_vault_master_key(),
@@ -548,7 +557,7 @@ fn write_system_vault_master_key(key: &[u8; 32]) -> Result<(), String> {
     {
         let account = secret_account(KEY_LOCAL_VAULT_MASTER_KEY, "default");
         let entry =
-            Entry::new(SERVICE_NAME, &account).map_err(|e| format!("keyring 创建失败: {}", e))?;
+            Entry::new(system_keychain_service(), &account).map_err(|e| format!("keyring 创建失败: {}", e))?;
         entry
             .set_password(&encode_system_vault_master_key(key))
             .map_err(|e| format!("系统钥匙串保存失败: {}", e))
@@ -722,7 +731,7 @@ fn legacy_get_secret(account: &str) -> Result<String, SecretError> {
 
     #[cfg(not(target_os = "macos"))]
     {
-        let entry = Entry::new(SERVICE_NAME, account)
+        let entry = Entry::new(system_keychain_service(), account)
             .map_err(|e| SecretError::Backend(format!("keyring 创建失败: {}", e)))?;
         entry.get_password().map_err(|e| match e {
             KeyringError::NoEntry => SecretError::Missing,
@@ -744,7 +753,7 @@ fn macos_keychain() -> Result<SecKeychain, String> {
 fn macos_get_secret(account: &str) -> Result<String, SecretError> {
     let keychain = macos_keychain().map_err(SecretError::Backend)?;
     let (password, _) =
-        find_generic_password(Some(&[keychain]), SERVICE_NAME, account).map_err(|e| {
+        find_generic_password(Some(&[keychain]), system_keychain_service(), account).map_err(|e| {
             let text = e.to_string();
             if text.contains("-25300") || text.contains("could not be found") {
                 SecretError::Missing
@@ -779,7 +788,7 @@ pub fn get_host_password(host_id: &str) -> Result<String, SecretError> {
 pub fn host_password_debug_label(host_id: &str) -> String {
     format!(
         "service={} account={}",
-        SERVICE_NAME,
+        system_keychain_service(),
         secret_account(KEY_HOST_PASSWORD, host_id)
     )
 }
@@ -1225,5 +1234,43 @@ mod tests {
                 .cloned()
                 .ok_or(SecretError::Missing)
         }
+    }
+}
+
+/// Verification helpers (`examples/vault_check.rs`): they only work while the keychain service is overridden, so they can
+/// never touch the item the Tauri build shares.
+#[doc(hidden)]
+pub mod verification {
+    use super::*;
+
+    fn guard() -> Result<(), String> {
+        if system_keychain_service() == SERVICE_NAME {
+            return Err(format!("refusing to touch the shared keychain item: set {SERVICE_OVERRIDE_ENV} to a throw-away service name"));
+        }
+        Ok(())
+    }
+
+    /// Overwrites the system master-key item with a random key, which no longer opens the vault ("stale" key).
+    pub fn replace_system_master_key_with_random() -> Result<(), String> {
+        guard()?;
+        let mut key = [0u8; 32];
+        key.iter_mut().zip(new_nonce().iter().cycle()).for_each(|(k, n)| *k = *n);
+        key[31] ^= 0x5a;
+        write_system_vault_master_key(&key)
+    }
+
+    /// Removes the master-key item of the throw-away service.
+    pub fn delete_system_master_key() -> Result<(), String> {
+        guard()?;
+        let account = secret_account(KEY_LOCAL_VAULT_MASTER_KEY, "default");
+        let entry = Entry::new(system_keychain_service(), &account).map_err(|e| e.to_string())?;
+        match entry.delete_credential() {
+            Ok(()) | Err(KeyringError::NoEntry) => Ok(()),
+            Err(e) => Err(e.to_string()),
+        }
+    }
+
+    pub fn master_key_account() -> String {
+        secret_account(KEY_LOCAL_VAULT_MASTER_KEY, "default")
     }
 }

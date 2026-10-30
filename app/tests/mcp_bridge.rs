@@ -244,21 +244,80 @@ fn observer_mode_and_the_blocklist_refuse_without_asking(cx: &mut TestAppContext
 }
 
 #[gpui_kit::test]
-fn switching_the_settings_off_stops_the_server(cx: &mut TestAppContext) {
+fn the_server_follows_the_settings_and_keeps_a_discovery_file(cx: &mut TestAppContext) {
     let _s = serial();
-    let (_fx, port) = running_bridge(cx, PermissionMode::Auto);
+    let (fx, port) = running_bridge(cx, PermissionMode::Auto);
     let store = cx.update(|cx| prefs_store::shared(cx));
     let b = cx.update(|cx| bridge(cx));
-    // HTTP off while external MCP stays on: nothing listens and the settings say why
+    let discovery = ops_ai::mcp_bridge::default_discovery_path(&fx.ctx.core.data_dir);
+    assert_eq!(ops_ai::mcp_bridge::read_discovery(&discovery).unwrap().url, format!("http://127.0.0.1:{port}/mcp"));
+
+    // HTTP off while external MCP stays on: the server moves to a free loopback port for the stdio launcher
     cx.update(|cx| store.update(cx, |s, cx| s.update(cx, |p| p.external_mcp.http.enabled = false)));
-    cx.run_until_parked();
-    assert_eq!(b.read_with(cx, |b, _| b.status().clone()), BridgeStatus::NeedsHttp);
+    wait_until(cx, "moved to a loopback port", |cx| b.read_with(cx, |b, _| matches!(b.status(), BridgeStatus::Running(u) if !u.contains(&format!(":{port}/")))));
     std::thread::sleep(Duration::from_millis(200));
-    assert!(TcpStream::connect(("127.0.0.1", port)).is_err());
+    assert!(TcpStream::connect(("127.0.0.1", port)).is_err(), "the configured port is released");
+    let found = ops_ai::mcp_bridge::read_discovery(&discovery).unwrap();
+    assert!(found.url.starts_with("http://127.0.0.1:") && !found.url.contains(&format!(":{port}/")), "{}", found.url);
+    let launcher = b.read_with(cx, |b, _| b.launcher_path()).expect("a launcher script is written");
+    assert!(std::path::Path::new(&launcher).exists());
+
     // and back on
     cx.update(|cx| store.update(cx, |s, cx| s.update(cx, |p| p.external_mcp.http.enabled = true)));
-    wait_until(cx, "listening again", |cx| b.read_with(cx, |b, _| matches!(b.status(), BridgeStatus::Running(_))));
+    wait_until(cx, "listening on the configured port again", |cx| b.read_with(cx, |b, _| matches!(b.status(), BridgeStatus::Running(u) if u.contains(&format!(":{port}/")))));
     cx.update(|cx| store.update(cx, |s, cx| s.update(cx, |p| p.external_mcp.enabled = false)));
     cx.run_until_parked();
     assert_eq!(b.read_with(cx, |b, _| b.status().clone()), BridgeStatus::Disabled);
+    assert!(!discovery.exists(), "the discovery file goes with the server");
+    assert!(b.read_with(cx, |b, _| b.discovery_path()).is_none());
+}
+
+#[gpui_kit::test]
+fn the_real_stdio_launcher_talks_to_the_running_app(cx: &mut TestAppContext) {
+    use std::io::{BufRead, BufReader};
+    use std::process::{Command, Stdio};
+    let _s = serial();
+    let (fx, _port) = running_bridge(cx, PermissionMode::Auto);
+    let discovery = ops_ai::mcp_bridge::default_discovery_path(&fx.ctx.core.data_dir);
+    // the launcher is this very executable in --mcp-stdio mode, started the way an MCP client starts it
+    let mut child = Command::new(env!("CARGO_BIN_EXE_opsbatch"))
+        .arg("--mcp-stdio")
+        .env(ops_ai::mcp_bridge::DISCOVERY_ENV, &discovery)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let lines: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+    let sink = lines.clone();
+    std::thread::spawn(move || {
+        for l in BufReader::new(stdout).lines().map_while(Result::ok) {
+            sink.lock().unwrap().push(serde_json::from_str(&l).unwrap());
+        }
+    });
+    let mut say = |v: Value| writeln!(stdin, "{v}").unwrap();
+    say(json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26"}}));
+    say(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}));
+    say(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
+    say(call("terminal_execute", json!({"command": "echo stdio-mark-3"})));
+    wait_until(cx, "three answers through stdio", |_| lines.lock().unwrap().len() >= 3);
+    let got = lines.lock().unwrap().clone();
+    assert_eq!(got[0]["result"]["serverInfo"]["name"], "opsbatch-external");
+    assert_eq!(got[1]["result"]["tools"].as_array().unwrap().len(), 4);
+    assert!(text_of(&got[2]).contains("stdio-mark-3"), "{}", text_of(&got[2]));
+    // the call shows up in the activity records like any other
+    assert!(cx.update(|cx| activity(cx).read(cx).records().iter().any(|r| r.summary == "echo stdio-mark-3")));
+
+    // with External MCP switched off the launcher explains instead of hanging
+    let store = cx.update(|cx| prefs_store::shared(cx));
+    cx.update(|cx| store.update(cx, |s, cx| s.update(cx, |p| p.external_mcp.enabled = false)));
+    cx.run_until_parked();
+    say(json!({"jsonrpc": "2.0", "id": 4, "method": "ping"}));
+    wait_until(cx, "an explanation", |_| lines.lock().unwrap().len() >= 4);
+    assert!(lines.lock().unwrap()[3]["error"]["message"].as_str().unwrap().contains("not running"));
+    drop(stdin);
+    let status = child.wait().unwrap();
+    assert!(status.success(), "the launcher exits cleanly when its input closes");
 }

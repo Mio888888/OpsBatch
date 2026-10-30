@@ -38,6 +38,7 @@ pub fn init_globals(ctx: Arc<Ctx>, language_mode: ops_i18n::LanguageMode, theme:
     crate::sftp::store::init(cx);
     crate::library::store::init(cx);
     crate::ai::store::init(cx);
+    crate::vault::init(cx);
     crate::ai::runtime::init(cx);
     crate::mcp_bridge::init(cx);
     crate::workflow::store::init(cx);
@@ -77,6 +78,10 @@ pub fn run(ctx: Arc<Ctx>) {
 
             crate::tray::init(cx, open_main_window);
             open_main_window(cx);
+            // The local vault opens before anything reads secrets (a no-op when it is already open).
+            if let Some(main) = cx.windows().first().copied() {
+                let _ = main.update(cx, |_, window, cx| drop(crate::vault::request_unlock(window, cx)));
+            }
 
             // Quietly look for a newer release (the update button shows a dot when there is one).
             if std::env::var_os("OPSBATCH_SKIP_UPDATE_CHECK").is_none() {
@@ -85,19 +90,22 @@ pub fn run(ctx: Arc<Ctx>) {
             }
 
             // Repositories marked "update on startup" are pulled in the background; the libraries refresh afterwards.
+            // (after the vault is open: private repositories need their token)
             if std::env::var_os("OPSBATCH_SKIP_REPO_UPDATE").is_none() {
                 let core = ctx.core.clone();
-                cx.spawn(async move |cx| {
-                    let results = ops_core::rt::run(async move { ops_library::github::run_startup_repo_updates(&core).await }).await.and_then(|r| r);
-                    match results {
-                        Ok(r) if !r.is_empty() => {
-                            let _ = cx.update(|cx| crate::library::store::library_store(cx).update(cx, |l, cx| l.load_all(cx)));
+                crate::vault::on_unlocked(cx, move |cx| {
+                    cx.spawn(async move |cx| {
+                        let results = ops_core::rt::run(async move { ops_library::github::run_startup_repo_updates(&core).await }).await.and_then(|r| r);
+                        match results {
+                            Ok(r) if !r.is_empty() => {
+                                let _ = cx.update(|cx| crate::library::store::library_store(cx).update(cx, |l, cx| l.load_all(cx)));
+                            }
+                            Ok(_) => {}
+                            Err(e) => log::warn!("startup repository update failed: {e}"),
                         }
-                        Ok(_) => {}
-                        Err(e) => log::warn!("startup repository update failed: {e}"),
-                    }
-                })
-                .detach();
+                    })
+                    .detach();
+                });
             }
 
             if let Some(secs) = exit_after {

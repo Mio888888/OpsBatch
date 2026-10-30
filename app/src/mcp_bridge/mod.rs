@@ -23,8 +23,6 @@ use activity::{Decision, McpActivity, Status, Target};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BridgeStatus {
     Disabled,
-    /// External MCP is on but the HTTP transport (the only one in this build) is not.
-    NeedsHttp,
     Starting,
     Running(String),
     /// `port_in_use`, `invalid_address` or the system's message.
@@ -39,6 +37,9 @@ pub struct McpBridge {
     last_call: Instant,
     calls: flume::Sender<BridgeCall>,
     prefs: Entity<PrefsStore>,
+    /// `<data dir>/mcp`: the discovery file and the launcher script live here.
+    dir: std::path::PathBuf,
+    launcher: Option<std::path::PathBuf>,
 }
 
 struct BridgeGlobal {
@@ -66,7 +67,7 @@ pub fn init(cx: &mut App) {
             this.apply(&settings, cx);
         })
         .detach();
-        McpBridge { status: BridgeStatus::Disabled, handle: None, desired: None, last_call: Instant::now(), calls: tx, prefs: prefs.clone() }
+        McpBridge { status: BridgeStatus::Disabled, handle: None, desired: None, last_call: Instant::now(), calls: tx, prefs: prefs.clone(), dir: crate::services::ctx(cx).core.data_dir.join("mcp"), launcher: None }
     });
     cx.set_global(BridgeGlobal { bridge: bridge.clone(), activity });
     cx.spawn(async move |cx| {
@@ -89,44 +90,62 @@ impl McpBridge {
         &self.status
     }
 
-    /// Brings the server in line with the settings: running exactly when the switch and the HTTP transport are on.
+    /// The script an MCP client starts for the stdio transport (`opsbatch --mcp-stdio`), once the bridge is running.
+    pub fn launcher_path(&self) -> Option<String> {
+        self.launcher.as_ref().map(|p| p.display().to_string())
+    }
+
+    /// The file the launcher reads the port and token from, while the bridge is running.
+    pub fn discovery_path(&self) -> Option<String> {
+        matches!(self.status, BridgeStatus::Running(_)).then(|| ops_ai::mcp_bridge::default_discovery_path(self.dir.parent().unwrap_or(&self.dir)).display().to_string())
+    }
+
+    /// Brings the server in line with the settings: running exactly while "external MCP" is on. The HTTP switch only
+    /// decides whether it also listens on the configured address and port; otherwise it listens on loopback (any
+    /// free port) for the stdio launcher.
     pub fn apply(&mut self, s: &external_mcp::ExternalMcpSettings, cx: &mut Context<Self>) {
         if !self.prefs.read(cx).loaded() {
             return;
         }
-        let wanted = if !s.enabled {
-            None
-        } else if !s.http.enabled || s.http.token.is_empty() {
-            self.stop(BridgeStatus::NeedsHttp, cx);
-            return;
-        } else {
-            Some((s.http.listen_address.clone(), s.http.port, s.http.token.clone()))
-        };
-        if wanted == self.desired && wanted.is_some() {
-            return;
-        }
-        let Some((address, port, token)) = wanted else {
+        if !s.enabled {
             self.stop(BridgeStatus::Disabled, cx);
             return;
-        };
+        }
+        if s.http.token.is_empty() {
+            // the token protects the bridge whichever transport is used
+            self.prefs.update(cx, |p, cx| p.update(cx, |prefs| prefs.external_mcp.http.token = external_mcp::generate_token()));
+            return;
+        }
+        let (address, port) = if s.http.enabled { (s.http.listen_address.clone(), s.http.port) } else { (external_mcp::DEFAULT_HTTP_HOST.to_string(), 0) };
+        let wanted = (address.clone(), port, s.http.token.clone());
+        if self.desired.as_ref() == Some(&wanted) {
+            return;
+        }
         self.handle = None;
-        self.desired = Some((address.clone(), port, token.clone()));
+        self.desired = Some(wanted.clone());
         self.status = BridgeStatus::Starting;
         cx.notify();
         let calls = self.calls.clone();
-        let want = (address.clone(), port, token.clone());
+        let token = s.http.token.clone();
         let url_host = if external_mcp::is_wildcard_address(&address) { s.http.client_host.clone() } else { address.clone() };
+        let dir = self.dir.clone();
         cx.spawn(async move |this, cx| {
             let result = ops_core::rt::run(async move { ops_ai::mcp_bridge::start(&address, port, token, calls).await }).await.and_then(|r| r);
             let _ = this.update(cx, |this, cx| {
                 // the settings changed again while the listener was starting
-                if this.desired.as_ref() != Some(&want) {
+                if this.desired.as_ref() != Some(&wanted) {
                     return;
                 }
                 match result {
                     Ok(handle) => {
                         let url = external_mcp::http_url(&url_host, handle.addr.port(), "");
                         let url = if url.is_empty() { format!("http://{}{}", handle.addr, external_mcp::HTTP_PATH) } else { url };
+                        let data_dir = dir.parent().unwrap_or(&dir).to_path_buf();
+                        let discovery = ops_ai::mcp_bridge::default_discovery_path(&data_dir);
+                        if let Err(e) = ops_ai::mcp_bridge::write_discovery(&discovery, handle.addr, &wanted.2) {
+                            log::warn!("could not write the MCP discovery file: {e}");
+                        }
+                        this.launcher = write_launcher(&dir);
                         this.status = BridgeStatus::Running(url);
                         this.handle = Some(handle);
                     }
@@ -143,6 +162,7 @@ impl McpBridge {
 
     fn stop(&mut self, status: BridgeStatus, cx: &mut Context<Self>) {
         let changed = self.handle.is_some() || self.desired.is_some() || self.status != status;
+        ops_ai::mcp_bridge::remove_discovery(&ops_ai::mcp_bridge::default_discovery_path(self.dir.parent().unwrap_or(&self.dir)));
         self.handle = None;
         self.desired = None;
         self.status = status;
@@ -158,6 +178,39 @@ impl McpBridge {
         let s = self.prefs.read(cx).prefs().external_mcp.clone();
         if s.mode == Mode::Temporary && self.last_call.elapsed() >= Duration::from_secs(s.idle_timeout_minutes as u64 * 60) {
             self.prefs.update(cx, |p, cx| p.update(cx, |prefs| prefs.external_mcp.enabled = false));
+        }
+    }
+}
+
+/// Writes the script MCP clients start for the stdio transport: it runs this executable in `--mcp-stdio` mode (the
+/// path is refreshed at every start, so moving the app does not break a client's config).
+fn write_launcher(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    std::fs::create_dir_all(dir).ok()?;
+    #[cfg(windows)]
+    let (name, body) = ("opsbatch-mcp.cmd", format!("@echo off\r\n\"{}\" --mcp-stdio %*\r\n", exe.display()));
+    #[cfg(not(windows))]
+    let (name, body) = ("opsbatch-mcp", format!("#!/bin/sh\nexec '{}' --mcp-stdio \"$@\"\n", exe.display().to_string().replace('\'', "'\\''")));
+    let path = dir.join(name);
+    std::fs::write(&path, body).ok()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).ok()?;
+    }
+    Some(path)
+}
+
+/// `opsbatch --mcp-stdio`: the stdio launcher. Returns the process exit code.
+pub fn run_stdio_launcher() -> i32 {
+    let discovery = std::env::var_os(ops_ai::mcp_bridge::DISCOVERY_ENV).map(std::path::PathBuf::from).unwrap_or_else(|| ops_ai::mcp_bridge::default_discovery_path(&ops_core::paths::run_data_dir()));
+    let stdin = std::io::stdin();
+    let mut stdout = std::io::stdout().lock();
+    match ops_ai::mcp_bridge::run_stdio_proxy(&discovery, stdin.lock(), &mut stdout) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("opsbatch --mcp-stdio: {e}");
+            1
         }
     }
 }

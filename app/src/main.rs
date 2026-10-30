@@ -1,4 +1,8 @@
 fn main() {
+    // The MCP stdio launcher is this executable without the UI: no window, no database, only stdin / stdout.
+    if std::env::args().any(|a| a == "--mcp-stdio") {
+        std::process::exit(opsbatch_app::mcp_bridge::run_stdio_launcher());
+    }
     opsbatch_app::logging::BridgeLogger::init("warn");
     ops_core::tls::install_default_crypto_provider();
 

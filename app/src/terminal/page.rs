@@ -1,6 +1,7 @@
 //! The terminal page: tab bar, session area (single / split / state cards), search overlay, host monitor and
 //! bottom panel. Port of `pages/Terminal/TerminalPage.tsx` + `BottomPanel.tsx`.
 
+use crate::scale::px;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -11,21 +12,20 @@ use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Disableable as _, Icon, Sizable as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use crate::scale::px;
 use ops_i18n::t;
 use ops_terminal::auth::is_ssh_authentication_failure;
 use ops_terminal::tabs::TabCloseMode;
 
 use super::auth_dialog::AuthRetryDialog;
+use super::monitor_panel::HostMonitorPanel;
+use super::pane::{pane_element_id, SearchResult, TerminalPane};
+use super::workspace::{ConnState, TabKind, TerminalWorkspace, WorkspaceEvent};
 use crate::ai::inline::{AiInlinePanel, InlineEvent};
 use crate::ai::panel::{AiChatPanel, AiTarget};
 use crate::ai::store::AiScope;
-use super::monitor_panel::HostMonitorPanel;
-use super::pane::{pane_element_id, SearchResult, TerminalPane};
 use crate::forward::panel::PortForwardPanel;
 use crate::library::inline::{InlineKind, InlinePanel};
 use crate::sftp::panel::{SftpPanel, SftpPanelEvent};
-use super::workspace::{ConnState, TabKind, TerminalWorkspace, WorkspaceEvent};
 use crate::theme::css;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,7 +63,11 @@ impl BottomTab {
 
     /// Local shells only get the tabs that do not need an SSH host.
     pub fn available(self, remote: bool) -> bool {
-        remote || matches!(self, BottomTab::Ai | BottomTab::Commands | BottomTab::Scripts)
+        remote
+            || matches!(
+                self,
+                BottomTab::Ai | BottomTab::Commands | BottomTab::Scripts
+            )
     }
 }
 
@@ -72,7 +76,11 @@ pub enum PageEvent {
     /// "+" button / "new connection" / "open assets sidebar": show the host list.
     ShowAssets,
     /// Open a remote file or directory of `host_id` in the editor window.
-    OpenEditor { host_id: String, dir: bool, path: String },
+    OpenEditor {
+        host_id: String,
+        dir: bool,
+        path: String,
+    },
 }
 
 pub struct TerminalPage {
@@ -98,26 +106,39 @@ pub struct TerminalPage {
 impl EventEmitter<PageEvent> for TerminalPage {}
 
 impl TerminalPage {
-    pub fn new(workspace: Entity<TerminalWorkspace>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let search_input = cx.new(|cx| InputState::new(window, cx).placeholder(t!("terminal.searchPlaceholder")));
+    pub fn new(
+        workspace: Entity<TerminalWorkspace>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let search_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("terminal.searchPlaceholder")));
         let subs = vec![
-            cx.subscribe_in(&workspace, window, |this, _, ev: &WorkspaceEvent, window, cx| match ev {
-                WorkspaceEvent::Changed => {
-                    this.sync_monitor(cx);
-                    this.ensure_panels(window, cx);
-                    this.rerun_search(cx);
-                    cx.notify();
-                }
-                WorkspaceEvent::Activated => this.focus_active(window, cx),
-            }),
-            cx.subscribe_in(&search_input, window, |this, input, ev: &InputEvent, _, cx| match ev {
-                InputEvent::Change => {
-                    this.search_query = input.read(cx).value().to_string();
-                    this.run_search(false, None, cx);
-                }
-                InputEvent::PressEnter { shift, .. } => this.jump_search(*shift, cx),
-                _ => {}
-            }),
+            cx.subscribe_in(
+                &workspace,
+                window,
+                |this, _, ev: &WorkspaceEvent, window, cx| match ev {
+                    WorkspaceEvent::Changed => {
+                        this.sync_monitor(cx);
+                        this.ensure_panels(window, cx);
+                        this.rerun_search(cx);
+                        cx.notify();
+                    }
+                    WorkspaceEvent::Activated => this.focus_active(window, cx),
+                },
+            ),
+            cx.subscribe_in(
+                &search_input,
+                window,
+                |this, input, ev: &InputEvent, _, cx| match ev {
+                    InputEvent::Change => {
+                        this.search_query = input.read(cx).value().to_string();
+                        this.run_search(false, None, cx);
+                    }
+                    InputEvent::PressEnter { shift, .. } => this.jump_search(*shift, cx),
+                    _ => {}
+                },
+            ),
         ];
         workspace.update(cx, |w, cx| w.ensure_initial_tab(cx));
         let mut page = Self {
@@ -175,10 +196,19 @@ impl TerminalPage {
         let pane = tab.pane.clone()?;
         let session_id = pane.read(cx).session_id.clone();
         let (scope, host) = match (tab.kind, &tab.host_id) {
-            (TabKind::Remote, Some(host_id)) => (AiScope::new("ssh_host", host_id), Some((tab.host_name.clone(), tab.host_ip.clone()))),
+            (TabKind::Remote, Some(host_id)) => (
+                AiScope::new("ssh_host", host_id),
+                Some((tab.host_name.clone(), tab.host_ip.clone())),
+            ),
             _ => (AiScope::new("terminal_session", &session_id), None),
         };
-        Some(AiTarget { session_id, scope, host, label: tab.host_name.clone(), pane: pane.downgrade() })
+        Some(AiTarget {
+            session_id,
+            scope,
+            host,
+            label: tab.host_name.clone(),
+            pane: pane.downgrade(),
+        })
     }
 
     fn sync_ai_target(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -202,16 +232,22 @@ impl TerminalPage {
     }
 
     pub fn open_inline(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(target) = self.ai_target(cx) else { return };
+        let Some(target) = self.ai_target(cx) else {
+            return;
+        };
         if let Some(existing) = &self.ai_inline {
             existing.update(cx, |i, cx| i.focus_input(window, cx));
             return;
         }
         let panel = cx.new(|cx| AiInlinePanel::new(target, window, cx));
-        self.ai_inline_sub = Some(cx.subscribe_in(&panel, window, |this, _, ev: &InlineEvent, window, cx| match ev {
-            InlineEvent::Close => this.close_inline(window, cx),
-            InlineEvent::Inject(command) => this.insert_into_terminal(command, window, cx),
-        }));
+        self.ai_inline_sub = Some(cx.subscribe_in(
+            &panel,
+            window,
+            |this, _, ev: &InlineEvent, window, cx| match ev {
+                InlineEvent::Close => this.close_inline(window, cx),
+                InlineEvent::Inject(command) => this.insert_into_terminal(command, window, cx),
+            },
+        ));
         self.ai_inline = Some(panel);
         cx.notify();
     }
@@ -238,8 +274,15 @@ impl TerminalPage {
     }
 
     /// Put a command on the active terminal's prompt (no Enter) and give the terminal focus.
-    pub fn insert_into_terminal(&mut self, command: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(pane) = self.active_pane(cx) else { return };
+    pub fn insert_into_terminal(
+        &mut self,
+        command: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(pane) = self.active_pane(cx) else {
+            return;
+        };
         pane.update(cx, |p, cx| p.insert_command(command, cx));
         let handle = pane.read(cx).focus_handle().clone();
         window.focus(&handle, cx);
@@ -262,17 +305,37 @@ impl TerminalPage {
                 .and_then(|t| t.host_id.clone())
         };
         // a local shell has no SFTP/forward tabs: the panel falls back to AI, whose content must exist then
-        let remote = self.workspace.read(cx).active_tab().is_some_and(|t| t.kind == TabKind::Remote);
-        let effective = if self.bottom_tab.available(remote) { self.bottom_tab } else { BottomTab::Ai };
+        let remote = self
+            .workspace
+            .read(cx)
+            .active_tab()
+            .is_some_and(|t| t.kind == TabKind::Remote);
+        let effective = if self.bottom_tab.available(remote) {
+            self.bottom_tab
+        } else {
+            BottomTab::Ai
+        };
         match (&host, self.bottom_tab) {
             (Some(h), BottomTab::Sftp) => {
-                if self.sftp.as_ref().map(|p| p.read(cx).host_id() != h).unwrap_or(true) {
+                if self
+                    .sftp
+                    .as_ref()
+                    .map(|p| p.read(cx).host_id() != h)
+                    .unwrap_or(true)
+                {
                     let panel = cx.new(|cx| SftpPanel::new(h.clone(), window, cx));
-                    self.sftp_sub = Some(cx.subscribe(&panel, |_, _, ev: &SftpPanelEvent, cx| match ev {
-                        SftpPanelEvent::OpenEditor { host_id, dir, path } => {
-                            cx.emit(PageEvent::OpenEditor { host_id: host_id.clone(), dir: *dir, path: path.clone() })
-                        }
-                    }));
+                    self.sftp_sub =
+                        Some(
+                            cx.subscribe(&panel, |_, _, ev: &SftpPanelEvent, cx| match ev {
+                                SftpPanelEvent::OpenEditor { host_id, dir, path } => {
+                                    cx.emit(PageEvent::OpenEditor {
+                                        host_id: host_id.clone(),
+                                        dir: *dir,
+                                        path: path.clone(),
+                                    })
+                                }
+                            }),
+                        );
                     self.sftp = Some(panel);
                 }
             }
@@ -296,15 +359,21 @@ impl TerminalPage {
         if let Some((key, kind)) = kind {
             if !self.inline.contains_key(key) {
                 let page = cx.entity().downgrade();
-                let insert: crate::library::inline::InsertFn = std::rc::Rc::new(move |text, window, cx| {
-                    let _ = page.update(cx, |p, cx| p.insert_into_terminal(&text, window, cx));
-                });
+                let insert: crate::library::inline::InsertFn =
+                    std::rc::Rc::new(move |text, window, cx| {
+                        let _ = page.update(cx, |p, cx| p.insert_into_terminal(&text, window, cx));
+                    });
                 let panel = cx.new(|cx| InlinePanel::new(kind, insert, window, cx));
                 self.inline.insert(key, panel);
             }
         }
         if let (Some(h), BottomTab::Forward) = (&host, self.bottom_tab) {
-            if self.forward.as_ref().map(|p| p.read(cx).host_id() != h).unwrap_or(true) {
+            if self
+                .forward
+                .as_ref()
+                .map(|p| p.read(cx).host_id() != h)
+                .unwrap_or(true)
+            {
                 self.forward = Some(cx.new(|cx| PortForwardPanel::new(h.clone(), window, cx)));
             }
         }
@@ -317,7 +386,10 @@ impl TerminalPage {
     }
 
     fn active_pane(&self, cx: &App) -> Option<Entity<TerminalPane>> {
-        self.workspace.read(cx).active_tab().and_then(|t| t.pane.clone())
+        self.workspace
+            .read(cx)
+            .active_tab()
+            .and_then(|t| t.pane.clone())
     }
 
     fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -344,7 +416,11 @@ impl TerminalPage {
     // ---- search ----
 
     pub fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let ok = self.workspace.read(cx).active_tab().is_some_and(|t| t.state == ConnState::Connected && t.split.is_none());
+        let ok = self
+            .workspace
+            .read(cx)
+            .active_tab()
+            .is_some_and(|t| t.state == ConnState::Connected && t.split.is_none());
         if !ok {
             return;
         }
@@ -368,7 +444,9 @@ impl TerminalPage {
     }
 
     fn run_search(&mut self, backwards: bool, from: Option<usize>, cx: &mut Context<Self>) {
-        let Some(pane) = self.active_pane(cx) else { return };
+        let Some(pane) = self.active_pane(cx) else {
+            return;
+        };
         let q = self.search_query.clone();
         self.search = pane.update(cx, |p, _| p.search(&q, backwards, from));
         cx.notify();
@@ -401,7 +479,13 @@ impl TerminalPage {
         css(crate::theme::current(cx).resolved.theme.terminal.background)
     }
 
-    fn pane_view(&self, tab_key: String, pane: Entity<TerminalPane>, split_ok: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn pane_view(
+        &self,
+        tab_key: String,
+        pane: Entity<TerminalPane>,
+        split_ok: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let page = cx.entity().downgrade();
         let sid = pane.read(cx).session_id.clone();
         let menu_pane = pane.clone();
@@ -417,31 +501,44 @@ impl TerminalPage {
                 let mut menu = menu;
                 if let Some(text) = selection.clone() {
                     let copy = text.clone();
-                    menu = menu.item(PopupMenuItem::new(t!("terminal.copy")).on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))));
+                    menu = menu.item(PopupMenuItem::new(t!("terminal.copy")).on_click(
+                        move |_, _, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+                        },
+                    ));
                     // Settings → AI → Tool access → "show the AI action on a selection"
                     if crate::ai::runtime::limits(cx).show_selection_action {
                         menu = menu.separator();
                         let page = page.clone();
-                        menu = menu.item(PopupMenuItem::new(format!("🔍 {}", t!("terminal.aiAnalyzeError"))).on_click(move |_, window, cx| {
-                            let text = text.clone();
-                            let _ = page.update(cx, |this, cx| this.analyze_selection(text, window, cx));
-                        }));
+                        menu = menu.item(
+                            PopupMenuItem::new(format!("🔍 {}", t!("terminal.aiAnalyzeError")))
+                                .on_click(move |_, window, cx| {
+                                    let text = text.clone();
+                                    let _ = page.update(cx, |this, cx| {
+                                        this.analyze_selection(text, window, cx)
+                                    });
+                                }),
+                        );
                     }
                 } else {
                     let p = menu_pane.clone();
-                    menu = menu.item(PopupMenuItem::new(t!("terminal.paste")).on_click(move |_, _, cx| {
-                        if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
-                            p.update(cx, |p, cx| p.paste_text(&text, cx));
-                        }
-                    }));
+                    menu = menu.item(PopupMenuItem::new(t!("terminal.paste")).on_click(
+                        move |_, _, cx| {
+                            if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) {
+                                p.update(cx, |p, cx| p.paste_text(&text, cx));
+                            }
+                        },
+                    ));
                 }
                 if split_ok {
                     let page = page.clone();
                     let key = tab_key.clone();
-                    menu = menu.separator().item(PopupMenuItem::new(t!("terminal.openSplit")).on_click(move |_, _, cx| {
-                        let key = key.clone();
-                        let _ = page.update(cx, |this, cx| this.open_split(key, cx));
-                    }));
+                    menu = menu.separator().item(
+                        PopupMenuItem::new(t!("terminal.openSplit")).on_click(move |_, _, cx| {
+                            let key = key.clone();
+                            let _ = page.update(cx, |this, cx| this.open_split(key, cx));
+                        }),
+                    );
                 }
                 menu
             })
@@ -470,8 +567,15 @@ impl TerminalPage {
                         .text_color(ui.text_secondary)
                         .opacity(0.78)
                         .cursor_pointer()
-                        .hover(move |d| d.opacity(1.).text_color(ui.term_fg).bg(gpui_kit::rgba(0x141e2ceb)))
-                        .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new(t!("terminal.openSearch")).build(window, cx))
+                        .hover(move |d| {
+                            d.opacity(1.)
+                                .text_color(ui.term_fg)
+                                .bg(gpui_kit::rgba(0x141e2ceb))
+                        })
+                        .tooltip(|window, cx| {
+                            gpui_kit::component::tooltip::Tooltip::new(t!("terminal.openSearch"))
+                                .build(window, cx)
+                        })
                         .child(Icon::new(IconName::Search).size_4())
                         .on_click(cx.listener(|this, _, window, cx| this.open_search(window, cx)))
                 })
@@ -481,7 +585,11 @@ impl TerminalPage {
         let count = if !has_query {
             String::new()
         } else if self.search.match_count > 0 {
-            format!("{}/{}", self.search.match_index.map(|i| i + 1).unwrap_or(0), self.search.match_count)
+            format!(
+                "{}/{}",
+                self.search.match_index.map(|i| i + 1).unwrap_or(0),
+                self.search.match_count
+            )
         } else {
             t!("terminal.searchNoMatch")
         };
@@ -510,8 +618,19 @@ impl TerminalPage {
                         cx.stop_propagation();
                     }
                 }))
-                .child(div().flex_1().min_w_0().child(Input::new(&self.search_input).small().appearance(false)))
-                .child(div().min_w(px(42.)).text_size(px(10.)).text_color(theme.muted_foreground).child(count))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(Input::new(&self.search_input).small().appearance(false)),
+                )
+                .child(
+                    div()
+                        .min_w(px(42.))
+                        .text_size(px(10.))
+                        .text_color(theme.muted_foreground)
+                        .child(count),
+                )
                 .child(
                     Button::new("terminal-search-prev")
                         .ghost()
@@ -544,28 +663,34 @@ impl TerminalPage {
 
     fn state_card(&self, header: String, light: Hsla, body: impl IntoElement, cx: &App) -> Div {
         let theme = cx.theme();
-        div().size_full().flex().items_center().justify_center().p_6().child(
-            v_flex()
-                .w(px(520.))
-                .max_w_full()
-                .p(px(18.))
-                .gap_3()
-                .rounded(px(16.))
-                .border_1()
-                .border_color(theme.border)
-                .bg(theme.popover)
-                .child(
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .text_size(px(12.))
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(theme.muted_foreground)
-                        .child(div().size(px(8.)).rounded_full().bg(light))
-                        .child(header),
-                )
-                .child(body),
-        )
+        div()
+            .size_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .p_6()
+            .child(
+                v_flex()
+                    .w(px(520.))
+                    .max_w_full()
+                    .p(px(18.))
+                    .gap_3()
+                    .rounded(px(16.))
+                    .border_1()
+                    .border_color(theme.border)
+                    .bg(theme.popover)
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .text_size(px(12.))
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(theme.muted_foreground)
+                            .child(div().size(px(8.)).rounded_full().bg(light))
+                            .child(header),
+                    )
+                    .child(body),
+            )
     }
 
     fn connecting_view(&self, target: String, cx: &App) -> AnyElement {
@@ -584,8 +709,18 @@ impl TerminalPage {
                         .child(Spinner::new().small())
                         .child(
                             v_flex()
-                                .child(div().text_size(px(15.)).font_weight(FontWeight::BOLD).child(t!("terminal.connectTo", target = target.clone())))
-                                .child(div().text_size(px(13.)).text_color(theme.muted_foreground).child(t!("terminal.connectingSubtitle"))),
+                                .child(
+                                    div()
+                                        .text_size(px(15.))
+                                        .font_weight(FontWeight::BOLD)
+                                        .child(t!("terminal.connectTo", target = target.clone())),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(13.))
+                                        .text_color(theme.muted_foreground)
+                                        .child(t!("terminal.connectingSubtitle")),
+                                ),
                         ),
                 )
                 .child(
@@ -599,44 +734,91 @@ impl TerminalPage {
                         .bg(Hsla { a: 0.24, ..black() })
                         .text_size(px(12.))
                         .child(div().text_color(theme.success).child("$"))
-                        .child(div().min_w_0().truncate().text_color(theme.muted_foreground).child(format!("opsbatch terminal connect --target {target}"))),
+                        .child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_color(theme.muted_foreground)
+                                .child(format!("opsbatch terminal connect --target {target}")),
+                        ),
                 ),
             cx,
         )
         .into_any_element()
     }
 
-    fn error_view(&self, ix: usize, key: String, remote: bool, message: Option<String>, cx: &mut Context<Self>) -> AnyElement {
+    fn error_view(
+        &self,
+        ix: usize,
+        key: String,
+        remote: bool,
+        message: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = cx.theme().clone();
         let can_edit_auth = remote && is_ssh_authentication_failure(message.as_deref());
-        let shown = message.filter(|m| !m.is_empty()).unwrap_or_else(|| t!("terminal.errorFallback"));
+        let shown = message
+            .filter(|m| !m.is_empty())
+            .unwrap_or_else(|| t!("terminal.errorFallback"));
         let retry_key = key.clone();
         let auth_key = key.clone();
         self.state_card(
-            if remote { t!("terminal.remoteConnectFailed") } else { t!("terminal.localStartFailed") },
+            if remote {
+                t!("terminal.remoteConnectFailed")
+            } else {
+                t!("terminal.localStartFailed")
+            },
             theme.danger,
             v_flex()
                 .id(("terminal-error", ix))
                 .test_support()
                 .gap_2()
-                .child(div().text_size(px(15.)).font_weight(FontWeight::BOLD).child(t!("terminal.sessionStartFailed")))
-                .child(div().text_size(px(13.)).text_color(theme.muted_foreground).child(shown))
+                .child(
+                    div()
+                        .text_size(px(15.))
+                        .font_weight(FontWeight::BOLD)
+                        .child(t!("terminal.sessionStartFailed")),
+                )
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .text_color(theme.muted_foreground)
+                        .child(shown),
+                )
                 .child(
                     h_flex()
                         .gap_2()
                         .flex_wrap()
                         .mt_2()
-                        .child(Button::new("terminal-retry").primary().label(t!("terminal.retry")).on_click(cx.listener(move |this, _, _, cx| {
-                            let k = retry_key.clone();
-                            this.workspace.update(cx, |w, cx| w.retry(&k, cx));
-                        })))
+                        .child(
+                            Button::new("terminal-retry")
+                                .primary()
+                                .label(t!("terminal.retry"))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    let k = retry_key.clone();
+                                    this.workspace.update(cx, |w, cx| w.retry(&k, cx));
+                                })),
+                        )
                         .when(can_edit_auth, |d| {
-                            d.child(Button::new("terminal-edit-auth").label(t!("terminal.editAuthAndRetry")).on_click(cx.listener(move |this, _, window, cx| {
-                                AuthRetryDialog::open(this.workspace.clone(), auth_key.clone(), window, cx);
-                            })))
+                            d.child(
+                                Button::new("terminal-edit-auth")
+                                    .label(t!("terminal.editAuthAndRetry"))
+                                    .on_click(cx.listener(move |this, _, window, cx| {
+                                        AuthRetryDialog::open(
+                                            this.workspace.clone(),
+                                            auth_key.clone(),
+                                            window,
+                                            cx,
+                                        );
+                                    })),
+                            )
                         })
                         .when(remote, |d| {
-                            d.child(Button::new("terminal-open-assets").label(t!("terminal.openAssetsSidebar")).on_click(cx.listener(|this, _, _, cx| this.show_assets(cx))))
+                            d.child(
+                                Button::new("terminal-open-assets")
+                                    .label(t!("terminal.openAssetsSidebar"))
+                                    .on_click(cx.listener(|this, _, _, cx| this.show_assets(cx))),
+                            )
                         }),
                 ),
             cx,
@@ -647,28 +829,47 @@ impl TerminalPage {
     fn session_area(&self, cx: &mut Context<Self>) -> AnyElement {
         let theme = cx.theme().clone();
         let w = self.workspace.read(cx);
-        let Some(tab) = w.active_tab() else { return div().into_any_element() };
+        let Some(tab) = w.active_tab() else {
+            return div().into_any_element();
+        };
         let ix = w.tabs().iter().position(|t| t.key == tab.key).unwrap_or(0);
         let key = tab.key.clone();
         match tab.state {
-            ConnState::Connecting => self.connecting_view(if tab.host_ip.is_empty() { tab.host_name.clone() } else { tab.host_ip.clone() }, cx),
+            ConnState::Connecting => self.connecting_view(
+                if tab.host_ip.is_empty() {
+                    tab.host_name.clone()
+                } else {
+                    tab.host_ip.clone()
+                },
+                cx,
+            ),
             ConnState::Error => {
                 let (remote, msg) = (tab.kind == TabKind::Remote, tab.error.clone());
                 self.error_view(ix, key, remote, msg, cx)
             }
             ConnState::Connected => {
-                let Some(main) = tab.pane.clone() else { return div().into_any_element() };
+                let Some(main) = tab.pane.clone() else {
+                    return div().into_any_element();
+                };
                 match &tab.split {
                     None => {
                         let main_view = self.pane_view(key.clone(), main, true, cx);
-                        div().relative().size_full().child(main_view).child(self.search_overlay(cx)).into_any_element()
+                        div()
+                            .relative()
+                            .size_full()
+                            .child(main_view)
+                            .child(self.search_overlay(cx))
+                            .into_any_element()
                     }
                     Some(split) => {
-                        let (split_state, split_pane, split_err) = (split.state, split.pane.clone(), split.error.clone());
+                        let (split_state, split_pane, split_err) =
+                            (split.state, split.pane.clone(), split.error.clone());
                         let left = self.pane_view(key.clone(), main, false, cx);
                         let close_key = key.clone();
                         let right: AnyElement = match (split_state, split_pane) {
-                            (ConnState::Connected, Some(p)) => self.pane_view(key.clone(), p, false, cx),
+                            (ConnState::Connected, Some(p)) => {
+                                self.pane_view(key.clone(), p, false, cx)
+                            }
                             (state, _) => {
                                 let err = state == ConnState::Error;
                                 v_flex()
@@ -678,18 +879,35 @@ impl TerminalPage {
                                     .items_center()
                                     .justify_center()
                                     .gap_2()
-                                    .child(div().size(px(8.)).rounded_full().bg(if err { theme.danger } else { theme.primary }))
-                                    .child(div().text_size(px(12.)).text_color(theme.muted_foreground).child(if err {
-                                        split_err.filter(|e| !e.is_empty()).unwrap_or_else(|| t!("terminal.splitConnectFailed"))
+                                    .child(div().size(px(8.)).rounded_full().bg(if err {
+                                        theme.danger
                                     } else {
-                                        t!("terminal.openingSplit")
+                                        theme.primary
                                     }))
+                                    .child(
+                                        div()
+                                            .text_size(px(12.))
+                                            .text_color(theme.muted_foreground)
+                                            .child(if err {
+                                                split_err.filter(|e| !e.is_empty()).unwrap_or_else(
+                                                    || t!("terminal.splitConnectFailed"),
+                                                )
+                                            } else {
+                                                t!("terminal.openingSplit")
+                                            }),
+                                    )
                                     .when(err, |d| {
                                         let k = close_key.clone();
-                                        d.child(Button::new("terminal-split-state-close").small().label(t!("terminal.closeSplit")).on_click(cx.listener(move |this, _, _, cx| {
-                                            let k = k.clone();
-                                            this.workspace.update(cx, |w, cx| w.close_split(&k, cx));
-                                        })))
+                                        d.child(
+                                            Button::new("terminal-split-state-close")
+                                                .small()
+                                                .label(t!("terminal.closeSplit"))
+                                                .on_click(cx.listener(move |this, _, _, cx| {
+                                                    let k = k.clone();
+                                                    this.workspace
+                                                        .update(cx, |w, cx| w.close_split(&k, cx));
+                                                })),
+                                        )
                                     })
                                     .into_any_element()
                             }
@@ -702,21 +920,31 @@ impl TerminalPage {
                             .child(div().flex_1().min_w_0().h_full().child(left))
                             .child(div().w(px(1.)).h_full().bg(theme.border))
                             .child(
-                                div().relative().flex_1().min_w_0().h_full().child(right).when(split_state == ConnState::Connected, |d| {
-                                    d.child(
-                                        div().absolute().top(px(4.)).right(px(8.)).child(
-                                            Button::new("terminal-split-close")
-                                                .ghost()
-                                                .xsmall()
-                                                .icon(Icon::new(IconName::X))
-                                                .tooltip(t!("terminal.closeSplit"))
-                                                .on_click(cx.listener(move |this, _, _, cx| {
-                                                    let k = k.clone();
-                                                    this.workspace.update(cx, |w, cx| w.close_split(&k, cx));
-                                                })),
-                                        ),
-                                    )
-                                }),
+                                div()
+                                    .relative()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .h_full()
+                                    .child(right)
+                                    .when(split_state == ConnState::Connected, |d| {
+                                        d.child(
+                                            div().absolute().top(px(4.)).right(px(8.)).child(
+                                                Button::new("terminal-split-close")
+                                                    .ghost()
+                                                    .xsmall()
+                                                    .icon(Icon::new(IconName::X))
+                                                    .tooltip(t!("terminal.closeSplit"))
+                                                    .on_click(cx.listener(
+                                                        move |this, _, _, cx| {
+                                                            let k = k.clone();
+                                                            this.workspace.update(cx, |w, cx| {
+                                                                w.close_split(&k, cx)
+                                                            });
+                                                        },
+                                                    )),
+                                            ),
+                                        )
+                                    }),
                             )
                             .into_any_element()
                     }
@@ -730,7 +958,17 @@ impl TerminalPage {
         let (tabs, active): (Vec<_>, Option<String>) = {
             let w = self.workspace.read(cx);
             (
-                w.tabs().iter().map(|t| (t.key.clone(), t.host_name.clone(), t.host_ip.clone(), t.state)).collect(),
+                w.tabs()
+                    .iter()
+                    .map(|t| {
+                        (
+                            t.key.clone(),
+                            t.host_name.clone(),
+                            t.host_ip.clone(),
+                            t.state,
+                        )
+                    })
+                    .collect(),
                 w.active_key().map(str::to_string),
             )
         };
@@ -744,80 +982,142 @@ impl TerminalPage {
         let blue: Hsla = gpui_kit::rgb(0x2f80ed).into();
         let red: Hsla = gpui_kit::rgb(0xff4d4f).into();
 
-        let items = tabs.into_iter().enumerate().map(|(ix, (key, name, ip, state))| {
-            let is_active = active.as_deref() == Some(key.as_str());
-            let dot = match state {
-                ConnState::Connected => green,
-                ConnState::Connecting => blue,
-                ConnState::Error => red,
-            };
-            let status_text = match state {
-                ConnState::Connected => None,
-                ConnState::Connecting => Some((t!("terminal.state.connecting"), blue)),
-                ConnState::Error => Some((t!("terminal.state.error"), red)),
-            };
-            let select_key = key.clone();
-            let close_key = key.clone();
-            let menu_key = key.clone();
-            let menu_ws = ws.clone();
-            h_flex()
-                .id(("terminal-tab", ix))
-                .test_support()
-                .group("terminal-tab")
-                .relative()
-                .h(px(37.))
-                .max_w(px(240.))
-                .px(px(12.))
-                .gap(px(6.))
-                .items_center()
-                .flex_none()
-                .cursor_pointer()
-                .border_b_2()
-                .border_color(if is_active { ui.term_accent } else { gpui_kit::transparent_black() })
-                .text_color(if is_active { ui.term_fg } else { muted })
-                .hover(move |d| d.text_color(ui.term_fg).bg(gpui_kit::rgba(0x80caff0a)))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    let k = select_key.clone();
-                    this.workspace.update(cx, |w, cx| w.set_active(&k, cx));
-                }))
-                .child(div().size(px(6.)).flex_none().rounded_full().bg(dot).shadow(vec![BoxShadow { color: dot.opacity(if matches!(state, ConnState::Connected | ConnState::Error) { 0.18 } else { 0.2 }), offset: point(px(0.), px(0.)), blur_radius: px(0.), spread_radius: px(2.), inset: false }]))
-                .child(
-                    v_flex()
-                        .min_w_0()
-                        .gap(px(1.))
-                        .items_start()
-                        .line_height(relative(1.15))
-                        .child(div().max_w(px(140.)).truncate().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).child(name.clone()))
-                        .when(!ip.is_empty(), |d| d.child(div().max_w(px(140.)).truncate().text_size(px(10.)).text_color(if is_active { muted } else { weak }).child(ip))),
-                )
-                .when_some(status_text, |d, (text, color)| {
-                    d.child(div().px(px(5.)).py(px(1.)).rounded_full().bg(Hsla { a: 0.1, ..color }).text_color(color).text_size(px(10.)).font_weight(FontWeight::SEMIBOLD).child(text))
-                })
-                .child(
-                    div()
-                        .id(("terminal-tab-close", ix))
-                        .test_support()
-                        .size(px(16.))
-                        .ml(px(4.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(px(3.))
-                        .cursor_pointer()
-                        .text_color(if is_active { ui.term_fg } else { weak })
-                        .when(!is_active, |d| d.opacity(0.).group_hover("terminal-tab", |s| s.opacity(1.)))
-                        .hover(move |d| d.text_color(ui.term_fg).bg(gpui_kit::rgba(0xffffff1f)))
-                        .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(t!("terminal.closeTabLabel", name = name.clone())).build(window, cx))
-                        .child(Icon::new(IconName::X).size_3())
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            let k = close_key.clone();
-                            this.workspace.update(cx, |w, cx| w.close_tab(&k, cx));
-                            cx.stop_propagation();
-                        })),
-                )
-                .context_menu(move |menu, _, _| tab_menu(menu, menu_ws.clone(), menu_key.clone()))
-                .into_any_element()
-        });
+        let items = tabs
+            .into_iter()
+            .enumerate()
+            .map(|(ix, (key, name, ip, state))| {
+                let is_active = active.as_deref() == Some(key.as_str());
+                let dot = match state {
+                    ConnState::Connected => green,
+                    ConnState::Connecting => blue,
+                    ConnState::Error => red,
+                };
+                let status_text = match state {
+                    ConnState::Connected => None,
+                    ConnState::Connecting => Some((t!("terminal.state.connecting"), blue)),
+                    ConnState::Error => Some((t!("terminal.state.error"), red)),
+                };
+                let select_key = key.clone();
+                let close_key = key.clone();
+                let menu_key = key.clone();
+                let menu_ws = ws.clone();
+                h_flex()
+                    .id(("terminal-tab", ix))
+                    .test_support()
+                    .group("terminal-tab")
+                    .relative()
+                    .h(px(37.))
+                    .max_w(px(240.))
+                    .px(px(12.))
+                    .gap(px(6.))
+                    .items_center()
+                    .flex_none()
+                    .cursor_pointer()
+                    .border_b_2()
+                    .border_color(if is_active {
+                        ui.term_accent
+                    } else {
+                        gpui_kit::transparent_black()
+                    })
+                    .text_color(if is_active { ui.term_fg } else { muted })
+                    .hover(move |d| d.text_color(ui.term_fg).bg(gpui_kit::rgba(0x80caff0a)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let k = select_key.clone();
+                        this.workspace.update(cx, |w, cx| w.set_active(&k, cx));
+                    }))
+                    .child(
+                        div()
+                            .size(px(6.))
+                            .flex_none()
+                            .rounded_full()
+                            .bg(dot)
+                            .shadow(vec![BoxShadow {
+                                color: dot.opacity(
+                                    if matches!(state, ConnState::Connected | ConnState::Error) {
+                                        0.18
+                                    } else {
+                                        0.2
+                                    },
+                                ),
+                                offset: point(px(0.), px(0.)),
+                                blur_radius: px(0.),
+                                spread_radius: px(2.),
+                                inset: false,
+                            }]),
+                    )
+                    .child(
+                        v_flex()
+                            .min_w_0()
+                            .gap(px(1.))
+                            .items_start()
+                            .line_height(relative(1.15))
+                            .child(
+                                div()
+                                    .max_w(px(140.))
+                                    .truncate()
+                                    .text_size(px(12.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(name.clone()),
+                            )
+                            .when(!ip.is_empty(), |d| {
+                                d.child(
+                                    div()
+                                        .max_w(px(140.))
+                                        .truncate()
+                                        .text_size(px(10.))
+                                        .text_color(if is_active { muted } else { weak })
+                                        .child(ip),
+                                )
+                            }),
+                    )
+                    .when_some(status_text, |d, (text, color)| {
+                        d.child(
+                            div()
+                                .px(px(5.))
+                                .py(px(1.))
+                                .rounded_full()
+                                .bg(Hsla { a: 0.1, ..color })
+                                .text_color(color)
+                                .text_size(px(10.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(text),
+                        )
+                    })
+                    .child(
+                        div()
+                            .id(("terminal-tab-close", ix))
+                            .test_support()
+                            .size(px(16.))
+                            .ml(px(4.))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded(px(3.))
+                            .cursor_pointer()
+                            .text_color(if is_active { ui.term_fg } else { weak })
+                            .when(!is_active, |d| {
+                                d.opacity(0.).group_hover("terminal-tab", |s| s.opacity(1.))
+                            })
+                            .hover(move |d| d.text_color(ui.term_fg).bg(gpui_kit::rgba(0xffffff1f)))
+                            .tooltip(move |window, cx| {
+                                gpui_kit::component::tooltip::Tooltip::new(t!(
+                                    "terminal.closeTabLabel",
+                                    name = name.clone()
+                                ))
+                                .build(window, cx)
+                            })
+                            .child(Icon::new(IconName::X).size_3())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                let k = close_key.clone();
+                                this.workspace.update(cx, |w, cx| w.close_tab(&k, cx));
+                                cx.stop_propagation();
+                            })),
+                    )
+                    .context_menu(move |menu, _, _| {
+                        tab_menu(menu, menu_ws.clone(), menu_key.clone())
+                    })
+                    .into_any_element()
+            });
 
         // `.ui-tabs-list`: 36px strip on the 92% terminal background with a hairline underneath
         h_flex()
@@ -840,11 +1140,19 @@ impl TerminalPage {
                     .context_menu(move |menu, _, _| {
                         let page = list_page.clone();
                         let ws = list_ws.clone();
-                        menu.item(PopupMenuItem::new(t!("terminal.context.newConnection")).on_click(move |_, _, cx| {
-                            let _ = page.update(cx, |this, cx| this.show_assets(cx));
-                        }))
+                        menu.item(
+                            PopupMenuItem::new(t!("terminal.context.newConnection")).on_click(
+                                move |_, _, cx| {
+                                    let _ = page.update(cx, |this, cx| this.show_assets(cx));
+                                },
+                            ),
+                        )
                         .separator()
-                        .item(PopupMenuItem::new(t!("terminal.context.closeAll")).on_click(move |_, _, cx| ws.update(cx, |w, cx| w.close_all_sessions(cx))))
+                        .item(
+                            PopupMenuItem::new(t!("terminal.context.closeAll")).on_click(
+                                move |_, _, cx| ws.update(cx, |w, cx| w.close_all_sessions(cx)),
+                            ),
+                        )
                     }),
             )
             .child(
@@ -860,7 +1168,10 @@ impl TerminalPage {
                     .cursor_pointer()
                     .text_color(muted)
                     .hover(move |d| d.text_color(ui.term_fg).bg(ui.term_border))
-                    .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(t!("terminal.connectHost")).build(window, cx))
+                    .tooltip(move |window, cx| {
+                        gpui_kit::component::tooltip::Tooltip::new(t!("terminal.connectHost"))
+                            .build(window, cx)
+                    })
                     .child(Icon::new(IconName::Plus).size_4())
                     .on_click(cx.listener(|this, _, _, cx| this.show_assets(cx))),
             )
@@ -869,8 +1180,19 @@ impl TerminalPage {
     fn bottom_panel(&self, remote: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let ui = crate::theme::ui(cx);
         let theme = cx.theme().clone();
-        let effective = if self.bottom_tab.available(remote) { self.bottom_tab } else { BottomTab::Ai };
-        let all = [BottomTab::Sftp, BottomTab::Forward, BottomTab::Ai, BottomTab::Commands, BottomTab::Scripts, BottomTab::Docker];
+        let effective = if self.bottom_tab.available(remote) {
+            self.bottom_tab
+        } else {
+            BottomTab::Ai
+        };
+        let all = [
+            BottomTab::Sftp,
+            BottomTab::Forward,
+            BottomTab::Ai,
+            BottomTab::Commands,
+            BottomTab::Scripts,
+            BottomTab::Docker,
+        ];
         let muted = ui.text_secondary;
         // `.bottom-panel-shell`: terminal panel colour with a hairline on top; `.bottom-panel-tab-bar`: 28px strip
         v_flex()
@@ -888,7 +1210,17 @@ impl TerminalPage {
                     .w_full()
                     .relative()
                     .bg(ui.terminal_panel_bg.blend(ui.term_border.opacity(0.16)))
-                    .child(div().absolute().top(px(3.)).left_1_2().ml(px(-21.)).w(px(42.)).h(px(2.)).rounded_full().bg(ui.text_secondary.opacity(0.54))),
+                    .child(
+                        div()
+                            .absolute()
+                            .top(px(3.))
+                            .left_1_2()
+                            .ml(px(-21.))
+                            .w(px(42.))
+                            .h(px(2.))
+                            .rounded_full()
+                            .bg(ui.text_secondary.opacity(0.54)),
+                    ),
             )
             .child(
                 h_flex()
@@ -911,11 +1243,17 @@ impl TerminalPage {
                             .text_size(px(10.))
                             .font_weight(FontWeight::SEMIBOLD)
                             .border_b_2()
-                            .border_color(if active { ui.term_accent } else { gpui_kit::transparent_black() })
+                            .border_color(if active {
+                                ui.term_accent
+                            } else {
+                                gpui_kit::transparent_black()
+                            })
                             .text_color(if active { ui.term_accent } else { muted })
                             .hover(move |d| d.text_color(ui.term_accent))
                             .child(tab.label())
-                            .on_click(cx.listener(move |this, _, window, cx| this.set_bottom_tab(tab, window, cx)))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.set_bottom_tab(tab, window, cx)
+                            }))
                     }))
                     .child(div().flex_1())
                     .child(
@@ -931,11 +1269,25 @@ impl TerminalPage {
                             .font_family("Menlo")
                             .text_size(px(10.))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(if self.ai_inline.is_some() { gpui_kit::rgb(0xc084fc) } else { gpui_kit::rgb(0x526071) })
-                            .hover(|d| d.text_color(gpui_kit::rgb(0xc084fc)).bg(gpui_kit::rgba(0xc084fc1a)))
-                            .tooltip(|window, cx| gpui_kit::component::tooltip::Tooltip::new(t!("terminal.quickCommandTitle")).build(window, cx))
+                            .text_color(if self.ai_inline.is_some() {
+                                gpui_kit::rgb(0xc084fc)
+                            } else {
+                                gpui_kit::rgb(0x526071)
+                            })
+                            .hover(|d| {
+                                d.text_color(gpui_kit::rgb(0xc084fc))
+                                    .bg(gpui_kit::rgba(0xc084fc1a))
+                            })
+                            .tooltip(|window, cx| {
+                                gpui_kit::component::tooltip::Tooltip::new(t!(
+                                    "terminal.quickCommandTitle"
+                                ))
+                                .build(window, cx)
+                            })
                             .child("⌘I")
-                            .on_click(cx.listener(|this, _, window, cx| this.toggle_inline(window, cx))),
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.toggle_inline(window, cx)),
+                            ),
                     ),
             )
             .child({
@@ -947,7 +1299,9 @@ impl TerminalPage {
                     _ => None,
                 };
                 match (effective, self.sftp.clone(), self.forward.clone()) {
-                    (BottomTab::Ai, ..) if self.ai_panel.is_some() => content.child(self.ai_panel.clone().unwrap()),
+                    (BottomTab::Ai, ..) if self.ai_panel.is_some() => {
+                        content.child(self.ai_panel.clone().unwrap())
+                    }
                     (BottomTab::Sftp, Some(panel), _) => content.child(panel),
                     (BottomTab::Forward, _, Some(panel)) => content.child(panel),
                     _ if inline.is_some() => content.child(inline.unwrap()),
@@ -957,7 +1311,11 @@ impl TerminalPage {
                         .justify_center()
                         .text_size(px(12.))
                         .text_color(theme.muted_foreground)
-                        .child(format!("{} · {}", effective.label(), t!("terminalRuntime.panelPending"))),
+                        .child(format!(
+                            "{} · {}",
+                            effective.label(),
+                            t!("terminalRuntime.panelPending")
+                        )),
                 }
             })
     }
@@ -970,11 +1328,31 @@ fn tab_menu(menu: PopupMenu, ws: Entity<TerminalWorkspace>, key: String) -> Popu
             ws.update(cx, |w, cx| w.close_by_mode(&key, mode, cx));
         })
     };
-    menu.item(item(t!("terminal.context.closeAll"), TabCloseMode::All, ws.clone(), key.clone()))
-        .item(item(t!("terminal.context.closeOthers"), TabCloseMode::Others, ws.clone(), key.clone()))
-        .separator()
-        .item(item(t!("terminal.context.closeLeft"), TabCloseMode::Left, ws.clone(), key.clone()))
-        .item(item(t!("terminal.context.closeRight"), TabCloseMode::Right, ws, key))
+    menu.item(item(
+        t!("terminal.context.closeAll"),
+        TabCloseMode::All,
+        ws.clone(),
+        key.clone(),
+    ))
+    .item(item(
+        t!("terminal.context.closeOthers"),
+        TabCloseMode::Others,
+        ws.clone(),
+        key.clone(),
+    ))
+    .separator()
+    .item(item(
+        t!("terminal.context.closeLeft"),
+        TabCloseMode::Left,
+        ws.clone(),
+        key.clone(),
+    ))
+    .item(item(
+        t!("terminal.context.closeRight"),
+        TabCloseMode::Right,
+        ws,
+        key,
+    ))
 }
 
 impl Render for TerminalPage {
@@ -983,7 +1361,11 @@ impl Render for TerminalPage {
         let (has_tabs, connected, remote) = {
             let w = self.workspace.read(cx);
             match w.active_tab() {
-                Some(t) => (true, t.state == ConnState::Connected && t.pane.is_some(), t.kind == TabKind::Remote),
+                Some(t) => (
+                    true,
+                    t.state == ConnState::Connected && t.pane.is_some(),
+                    t.kind == TabKind::Remote,
+                ),
                 None => (!w.tabs().is_empty(), false, false),
             }
         };
@@ -996,7 +1378,12 @@ impl Render for TerminalPage {
                 .items_center()
                 .justify_center()
                 .gap_3()
-                .child(div().text_size(px(14.)).text_color(theme.muted_foreground).child(t!("terminal.noSessions")))
+                .child(
+                    div()
+                        .text_size(px(14.))
+                        .text_color(theme.muted_foreground)
+                        .child(t!("terminal.noSessions")),
+                )
                 .child(
                     h_flex()
                         .gap_2()
@@ -1024,10 +1411,27 @@ impl Render for TerminalPage {
         let main_column = if connected {
             v_resizable("terminal-v")
                 .with_state(&self.v_state)
-                .child(resizable_panel().child(
-                    div().size_full().min_h_0().relative().child(session).when_some(self.ai_inline.clone(), |d, inline| d.child(div().absolute().right(px(10.)).bottom(px(8.)).child(inline))),
-                ))
-                .child(resizable_panel().size(px(292.)).size_range(px(36.)..px(2000.)).flex_none().child(self.bottom_panel(remote, cx)))
+                .child(
+                    resizable_panel().child(
+                        div()
+                            .size_full()
+                            .min_h_0()
+                            .relative()
+                            .child(session)
+                            .when_some(self.ai_inline.clone(), |d, inline| {
+                                d.child(
+                                    div().absolute().right(px(10.)).bottom(px(8.)).child(inline),
+                                )
+                            }),
+                    ),
+                )
+                .child(
+                    resizable_panel()
+                        .size(px(292.))
+                        .size_range(px(36.)..px(2000.))
+                        .flex_none()
+                        .child(self.bottom_panel(remote, cx)),
+                )
                 .into_any_element()
         } else {
             div().size_full().child(session).into_any_element()
@@ -1036,7 +1440,15 @@ impl Render for TerminalPage {
         let monitor = self.monitor.clone();
         let body = h_resizable("terminal-h")
             .with_state(&self.h_state)
-            .child(resizable_panel().child(div().size_full().min_w_0().overflow_hidden().child(main_column)))
+            .child(
+                resizable_panel().child(
+                    div()
+                        .size_full()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .child(main_column),
+                ),
+            )
             .child(
                 resizable_panel()
                     .size(px(280.))

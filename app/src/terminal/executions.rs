@@ -6,7 +6,9 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 use futures::channel::oneshot;
-use ops_terminal::tracker::{create_tracked_command, done_pattern, strip_tracked_command_output_artifacts};
+use ops_terminal::tracker::{
+    create_tracked_command, done_pattern, strip_tracked_command_output_artifacts,
+};
 use regex::Regex;
 
 pub const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(30 * 60);
@@ -80,9 +82,17 @@ impl ExecutionTracker {
     }
 
     /// Queue a command. Returns what to write now when nothing else is running.
-    pub fn submit(&mut self, command: String, timeout: Duration) -> (oneshot::Receiver<ExecutionResult>, Option<Started>) {
+    pub fn submit(
+        &mut self,
+        command: String,
+        timeout: Duration,
+    ) -> (oneshot::Receiver<ExecutionResult>, Option<Started>) {
         let (tx, rx) = oneshot::channel();
-        self.queue.push_back(Queued { command, timeout: timeout.max(Duration::from_secs(1)), tx });
+        self.queue.push_back(Queued {
+            command,
+            timeout: timeout.max(Duration::from_secs(1)),
+            tx,
+        });
         let started = self.start_next();
         (rx, started)
     }
@@ -95,16 +105,35 @@ impl ExecutionTracker {
         let id = uuid::Uuid::new_v4().simple().to_string();
         let prefix = format!("__OPSBATCH_AI_DONE_{id}__:");
         let tracked = create_tracked_command(&next.command, &prefix);
-        let write = format!("\x15\x1b[200~{}{}\x1b[201~\r", tracked.visible_command, tracked.hidden_tracker);
+        let write = format!(
+            "\x15\x1b[200~{}{}\x1b[201~\r",
+            tracked.visible_command, tracked.hidden_tracker
+        );
         self.detector.clear();
-        self.active = Some(Active { pattern: done_pattern(&id), id: id.clone(), output: String::new(), tx: next.tx });
-        Some(Started { execution_id: id, write, timeout: next.timeout })
+        self.active = Some(Active {
+            pattern: done_pattern(&id),
+            id: id.clone(),
+            output: String::new(),
+            tx: next.tx,
+        });
+        Some(Started {
+            execution_id: id,
+            write,
+            timeout: next.timeout,
+        })
     }
 
     fn settle(&mut self, status: ExecStatus, exit_code: Option<i32>) -> Option<Started> {
         let a = self.active.take()?;
-        let output = strip_tracked_command_output_artifacts(&a.output).trim().to_string();
-        let _ = a.tx.send(ExecutionResult { execution_id: a.id, status, exit_code, output });
+        let output = strip_tracked_command_output_artifacts(&a.output)
+            .trim()
+            .to_string();
+        let _ = a.tx.send(ExecutionResult {
+            execution_id: a.id,
+            status,
+            exit_code,
+            output,
+        });
         self.start_next()
     }
 
@@ -113,13 +142,22 @@ impl ExecutionTracker {
     pub fn on_output(&mut self, raw: &str, cleaned: &str) -> Option<Started> {
         let active = self.active.as_mut()?;
         if !cleaned.is_empty() {
-            active.output = tail_chars(&format!("{}{}", active.output, cleaned), MAX_TRACKED_OUTPUT_CHARS);
+            active.output = tail_chars(
+                &format!("{}{}", active.output, cleaned),
+                MAX_TRACKED_OUTPUT_CHARS,
+            );
         }
         if raw.is_empty() {
             return None;
         }
-        self.detector = tail_chars(&format!("{}{}", self.detector, raw), MAX_DONE_DETECTOR_CHARS);
-        let code = active.pattern.captures(&self.detector).map(|c| c[1].parse::<i32>().ok());
+        self.detector = tail_chars(
+            &format!("{}{}", self.detector, raw),
+            MAX_DONE_DETECTOR_CHARS,
+        );
+        let code = active
+            .pattern
+            .captures(&self.detector)
+            .map(|c| c[1].parse::<i32>().ok());
         match code {
             Some(code) => self.settle(ExecStatus::Completed, code),
             None => None,
@@ -148,7 +186,12 @@ impl ExecutionTracker {
             self.settle(ExecStatus::Closed, None);
         }
         while let Some(q) = self.queue.pop_front() {
-            let _ = q.tx.send(ExecutionResult { execution_id: String::new(), status: ExecStatus::Closed, exit_code: None, output: String::new() });
+            let _ = q.tx.send(ExecutionResult {
+                execution_id: String::new(),
+                status: ExecStatus::Closed,
+                exit_code: None,
+                output: String::new(),
+            });
         }
     }
 }
@@ -202,7 +245,9 @@ mod tests {
         let (mut rx2, s2) = t.submit("two".into(), DEFAULT_COMMAND_TIMEOUT);
         assert!(s2.is_none(), "second waits for the first");
         let s1 = s1.unwrap();
-        let next = t.on_output(&done_line(&s1.execution_id, 0), "").expect("second starts when first completes");
+        let next = t
+            .on_output(&done_line(&s1.execution_id, 0), "")
+            .expect("second starts when first completes");
         assert!(next.write.contains("two"));
         assert_eq!(recv(&mut rx1).status, ExecStatus::Completed);
         assert!(rx2.try_recv().unwrap().is_none());
@@ -245,7 +290,10 @@ mod tests {
         t.on_output("partial", "partial");
         t.fail_all();
         let ra = recv(&mut a);
-        assert_eq!((ra.status, ra.output.as_str()), (ExecStatus::Closed, "partial"));
+        assert_eq!(
+            (ra.status, ra.output.as_str()),
+            (ExecStatus::Closed, "partial")
+        );
         assert_eq!(recv(&mut b).status, ExecStatus::Closed);
         assert_eq!(t.pending_count(), 0);
     }

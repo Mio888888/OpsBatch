@@ -40,13 +40,14 @@ pub fn parse(input: &str) -> Ansi {
     let mut span_start = 0usize;
     let mut i = 0;
 
-    let close = |text: &String, spans: &mut Vec<(Range<usize>, u32)>, color: Option<u32>, start: usize| {
-        if let Some(c) = color {
-            if text.len() > start {
-                spans.push((start..text.len(), c));
+    let close =
+        |text: &String, spans: &mut Vec<(Range<usize>, u32)>, color: Option<u32>, start: usize| {
+            if let Some(c) = color {
+                if text.len() > start {
+                    spans.push((start..text.len(), c));
+                }
             }
-        }
-    };
+        };
 
     while i < b.len() {
         match b[i] {
@@ -64,7 +65,11 @@ pub fn parse(input: &str) -> Ansi {
                 if b[j] == b'm' {
                     let params = &input[i + 2..j];
                     close(&text, &mut spans, color, span_start);
-                    color = if params.is_empty() || params == "0" { None } else { sgr_color(params).or(color) };
+                    color = if params.is_empty() || params == "0" {
+                        None
+                    } else {
+                        sgr_color(params).or(color)
+                    };
                     span_start = text.len();
                 }
                 i = j + 1;
@@ -72,10 +77,17 @@ pub fn parse(input: &str) -> Ansi {
             0x1b if i + 1 < b.len() && b[i + 1] == b']' => {
                 // OSC ... BEL or ESC \
                 let mut j = i + 2;
-                while j < b.len() && b[j] != 0x07 && !(b[j] == 0x1b && j + 1 < b.len() && b[j + 1] == b'\\') {
+                while j < b.len()
+                    && b[j] != 0x07
+                    && !(b[j] == 0x1b && j + 1 < b.len() && b[j + 1] == b'\\')
+                {
                     j += 1;
                 }
-                i = if j < b.len() && b[j] == 0x07 { j + 1 } else { j + 2 };
+                i = if j < b.len() && b[j] == 0x07 {
+                    j + 1
+                } else {
+                    j + 2
+                };
             }
             0x1b => i += 1,
             b'\r' => {

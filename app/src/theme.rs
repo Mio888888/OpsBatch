@@ -12,16 +12,27 @@ pub struct AppTheme {
 impl Global for AppTheme {}
 
 pub fn hsla_of(c: Rgba8) -> Hsla {
-    Rgba { r: c.r as f32 / 255.0, g: c.g as f32 / 255.0, b: c.b as f32 / 255.0, a: c.a }.into()
+    Rgba {
+        r: c.r as f32 / 255.0,
+        g: c.g as f32 / 255.0,
+        b: c.b as f32 / 255.0,
+        a: c.a,
+    }
+    .into()
 }
 
 /// CSS colour string from theme data -> Hsla (magenta for unparsable input so mistakes are visible).
 pub fn css(s: &str) -> Hsla {
-    parse_css_color(s).map(hsla_of).unwrap_or_else(|| hsla_of(Rgba8::rgb(255, 0, 255)))
+    parse_css_color(s)
+        .map(hsla_of)
+        .unwrap_or_else(|| hsla_of(Rgba8::rgb(255, 0, 255)))
 }
 
 fn os_prefers_dark(cx: &App) -> bool {
-    matches!(cx.window_appearance(), WindowAppearance::Dark | WindowAppearance::VibrantDark)
+    matches!(
+        cx.window_appearance(),
+        WindowAppearance::Dark | WindowAppearance::VibrantDark
+    )
 }
 
 pub fn init(settings: ThemeSettings, cx: &mut App) {
@@ -66,7 +77,11 @@ pub struct UiColors {
 /// Text colours: Windows uses the fixed UI palette, other platforms the theme's own line colours.
 fn text_colors(r: &ResolvedTheme) -> (Hsla, Hsla, Hsla) {
     if cfg!(target_os = "windows") {
-        (css(r.text.primary), css(r.text.secondary), css(r.text.muted))
+        (
+            css(r.text.primary),
+            css(r.text.secondary),
+            css(r.text.muted),
+        )
     } else {
         let p = r.theme.preview;
         (css(p.line_strong), css(p.line_medium), css(p.line_weak))
@@ -78,7 +93,11 @@ pub fn ui(cx: &App) -> UiColors {
     let u = r.theme.ui;
     let (text, text_secondary, text_muted) = text_colors(&r);
     let bg = parse_css_color(r.theme.preview.background).unwrap_or(Rgba8::rgb(0, 0, 0));
-    let panel = if r.is_dark { ops_core::theme::darken(bg, 8) } else { ops_core::theme::lighten(bg, 4) };
+    let panel = if r.is_dark {
+        ops_core::theme::darken(bg, 8)
+    } else {
+        ops_core::theme::lighten(bg, 4)
+    };
     UiColors {
         page: css(u.page_bg),
         sidebar: css(u.sidebar_bg),
@@ -99,7 +118,21 @@ pub fn ui(cx: &App) -> UiColors {
         terminal_panel_bg: hsla_of(panel),
         term_fg: css(r.theme.preview.line_strong),
         term_accent: css(r.theme.preview.accent),
-        term_border: if r.is_dark { Hsla { h: 0., s: 0., l: 1., a: 0.06 } } else { Hsla { h: 0., s: 0., l: 0., a: 0.08 } },
+        term_border: if r.is_dark {
+            Hsla {
+                h: 0.,
+                s: 0.,
+                l: 1.,
+                a: 0.06,
+            }
+        } else {
+            Hsla {
+                h: 0.,
+                s: 0.,
+                l: 0.,
+                a: 0.08,
+            }
+        },
         term_shell_bg: css(r.theme.preview.background).opacity(0.85),
         term_tab_bg: css(r.theme.preview.background).opacity(0.92),
         is_dark: r.is_dark,
@@ -143,7 +176,11 @@ pub fn apply(cx: &mut App) {
     crate::scale::set_percent(scale as u32);
     let ui = r.theme.ui;
     let accent = r.accent;
-    let mode = if r.is_dark { ThemeMode::Dark } else { ThemeMode::Light };
+    let mode = if r.is_dark {
+        ThemeMode::Dark
+    } else {
+        ThemeMode::Light
+    };
     // Switching the mode reloads that mode's stock colours, so colours are written in a second pass.
     Theme::change(mode, None, cx);
     Theme::update(cx, |t| {
@@ -214,7 +251,13 @@ pub fn apply(cx: &mut App) {
         c.list = sidebar;
         c.list_even = sidebar;
         c.list_hover = hover;
-        c.list_active = css(&format!("rgba({}, {}, {}, {})", css_rgb(accent.base).0, css_rgb(accent.base).1, css_rgb(accent.base).2, if r.is_dark { "0.1" } else { "0.08" }));
+        c.list_active = css(&format!(
+            "rgba({}, {}, {}, {})",
+            css_rgb(accent.base).0,
+            css_rgb(accent.base).1,
+            css_rgb(accent.base).2,
+            if r.is_dark { "0.1" } else { "0.08" }
+        ));
         c.list_active_border = primary;
         c.list_head = header;
 
@@ -253,8 +296,14 @@ pub fn apply(cx: &mut App) {
         c.info = primary;
 
         c.scrollbar = Hsla { a: 0.0, ..border };
-        c.scrollbar_thumb = Hsla { a: 0.35, ..secondary_fg };
-        c.scrollbar_thumb_hover = Hsla { a: 0.55, ..secondary_fg };
+        c.scrollbar_thumb = Hsla {
+            a: 0.35,
+            ..secondary_fg
+        };
+        c.scrollbar_thumb_hover = Hsla {
+            a: 0.55,
+            ..secondary_fg
+        };
         c.skeleton = card;
         c.switch = css(if r.is_dark { "#4b5563" } else { "#c7cdd4" });
         c.switch_thumb = white;
@@ -274,5 +323,7 @@ pub fn apply(cx: &mut App) {
 }
 
 fn css_rgb(s: &str) -> (u8, u8, u8) {
-    parse_css_color(s).map(|c| (c.r, c.g, c.b)).unwrap_or((0, 0, 0))
+    parse_css_color(s)
+        .map(|c| (c.r, c.g, c.b))
+        .unwrap_or((0, 0, 0))
 }

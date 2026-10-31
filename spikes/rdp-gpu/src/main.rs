@@ -26,14 +26,21 @@ fn nal_units(data: &[u8]) -> Vec<&[u8]> {
     let mut starts = Vec::new();
     let mut i = 0;
     while i + 3 <= data.len() {
-        if data[i] == 0 && data[i + 1] == 0 && (data[i + 2] == 1 || (data[i + 2] == 0 && i + 4 <= data.len() && data[i + 3] == 1)) {
+        if data[i] == 0
+            && data[i + 1] == 0
+            && (data[i + 2] == 1 || (data[i + 2] == 0 && i + 4 <= data.len() && data[i + 3] == 1))
+        {
             starts.push(i);
             i += 3;
         } else {
             i += 1;
         }
     }
-    starts.iter().enumerate().map(|(n, &s)| &data[s..starts.get(n + 1).copied().unwrap_or(data.len())]).collect()
+    starts
+        .iter()
+        .enumerate()
+        .map(|(n, &s)| &data[s..starts.get(n + 1).copied().unwrap_or(data.len())])
+        .collect()
 }
 
 struct Stats {
@@ -73,7 +80,14 @@ impl VideoView {
                         for px in buf.chunks_exact_mut(4) {
                             px.swap(0, 2); // RGBA -> BGRA
                         }
-                        if tx.send(Frame4 { w: w as u32, h: h as u32, bgra: buf.clone() }).is_err() {
+                        if tx
+                            .send(Frame4 {
+                                w: w as u32,
+                                h: h as u32,
+                                bgra: buf.clone(),
+                            })
+                            .is_err()
+                        {
                             return;
                         }
                     }
@@ -89,7 +103,14 @@ impl VideoView {
             last_render: None,
             interval_sum_us: 0,
             interval_n: 0,
-            stats: Stats { presented: 0, started: now, ui_cost_us: 0, max_ui_cost_us: 0, last_second: (now, 0), fps_now: 0.0 },
+            stats: Stats {
+                presented: 0,
+                started: now,
+                ui_cost_us: 0,
+                max_ui_cost_us: 0,
+                last_second: (now, 0),
+                fps_now: 0.0,
+            },
         }
     }
 }
@@ -114,14 +135,19 @@ impl Render for VideoView {
             s.ui_cost_us += cost;
             s.max_ui_cost_us = s.max_ui_cost_us.max(cost);
             if s.last_second.0.elapsed() >= Duration::from_secs(1) {
-                s.fps_now = (s.presented - s.last_second.1) as f64 / s.last_second.0.elapsed().as_secs_f64();
+                s.fps_now = (s.presented - s.last_second.1) as f64
+                    / s.last_second.0.elapsed().as_secs_f64();
                 s.last_second = (Instant::now(), s.presented);
             }
         }
         window.request_animation_frame(); // keep pulling frames
 
         let s = &self.stats;
-        let avg = if s.presented > 0 { s.ui_cost_us / s.presented as u128 } else { 0 };
+        let avg = if s.presented > 0 {
+            s.ui_cost_us / s.presented as u128
+        } else {
+            0
+        };
         let label = format!(
             "presented {} | now {:.1} fps | avg {:.1} fps | RenderImage build+swap avg {} us max {} us",
             s.presented,
@@ -137,29 +163,51 @@ impl Render for VideoView {
             .bg(rgb(0x101018))
             .flex()
             .flex_col()
-            .child(div().h(px(22.)).px_2().text_size(px(12.)).text_color(rgb(0x7aa2f7)).child(label))
+            .child(
+                div()
+                    .h(px(22.))
+                    .px_2()
+                    .text_size(px(12.))
+                    .text_color(rgb(0x7aa2f7))
+                    .child(label),
+            )
             .child(match &self.current {
-                Some(img_) => gpui_kit::img(ImageSource::Render(img_.clone())).flex_1().min_h_0().w_full().object_fit(ObjectFit::Contain).into_any_element(),
-                None => div().flex_1().child("waiting for first frame").into_any_element(),
+                Some(img_) => gpui_kit::img(ImageSource::Render(img_.clone()))
+                    .flex_1()
+                    .min_h_0()
+                    .w_full()
+                    .object_fit(ObjectFit::Contain)
+                    .into_any_element(),
+                None => div()
+                    .flex_1()
+                    .child("waiting for first frame")
+                    .into_any_element(),
             })
-            .child(canvas(|_, _, _| (), {
-                let started = started.clone();
-                let acc = paint_acc.clone();
-                move |_, _, _, _| {
-                    // runs in paint order; the img above has already uploaded its texture by now
-                    if let Some(t) = started.get() {
-                        let us = t.elapsed().as_micros();
-                        let (n, sum, max) = acc.get();
-                        acc.set((n + 1, sum + us, max.max(us)));
+            .child(
+                canvas(|_, _, _| (), {
+                    let started = started.clone();
+                    let acc = paint_acc.clone();
+                    move |_, _, _, _| {
+                        // runs in paint order; the img above has already uploaded its texture by now
+                        if let Some(t) = started.get() {
+                            let us = t.elapsed().as_micros();
+                            let (n, sum, max) = acc.get();
+                            acc.set((n + 1, sum + us, max.max(us)));
+                        }
                     }
-                }
-            }).h(px(0.)))
+                })
+                .h(px(0.)),
+            )
     }
 }
 
 fn main() {
-    let path = std::env::var("SPIKE_FILE").unwrap_or_else(|_| "target/spike-data/test1080.h264".into());
-    let exit_after: u64 = std::env::var("SPIKE_EXIT_AFTER").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let path =
+        std::env::var("SPIKE_FILE").unwrap_or_else(|_| "target/spike-data/test1080.h264".into());
+    let exit_after: u64 = std::env::var("SPIKE_EXIT_AFTER")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
     gpui_kit::application().run(move |cx| {
         gpui_kit::init(cx);
         let opts = WindowOptions {

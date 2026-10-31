@@ -10,13 +10,26 @@ fn main() {
     let core = match ops_core::Core::open(&data_dir) {
         Ok(core) => core,
         Err(error) => {
-            eprintln!("failed to open data directory {}: {error}", data_dir.display());
+            eprintln!(
+                "failed to open data directory {}: {error}",
+                data_dir.display()
+            );
             std::process::exit(1);
         }
     };
     opsbatch_app::logging::attach(&core);
-    ops_core::log::append_diagnostic_log(&data_dir, "startup", &format!("app started data_dir={}", data_dir.display()));
-    ops_core::log::emit_log(&core, "info", "system", &ops_i18n::t!("app.title"), "backend");
+    ops_core::log::append_diagnostic_log(
+        &data_dir,
+        "startup",
+        &format!("app started data_dir={}", data_dir.display()),
+    );
+    ops_core::log::emit_log(
+        &core,
+        "info",
+        "system",
+        &ops_i18n::t!("app.title"),
+        "backend",
+    );
     let ctx = ops_ssh::Ctx::new(core);
     opsbatch_app::app::run(ctx);
 }

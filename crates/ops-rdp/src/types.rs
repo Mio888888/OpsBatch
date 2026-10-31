@@ -81,7 +81,6 @@ pub enum RdpTransportMode {
     H264Direct,
 }
 
-
 #[cfg(test)]
 #[derive(Debug, Clone)]
 pub(super) struct RdpFramePayload {

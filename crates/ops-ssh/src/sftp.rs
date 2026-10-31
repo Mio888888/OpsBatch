@@ -1,8 +1,8 @@
 use crate::ctx::Ctx;
-use std::sync::Arc;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -11,9 +11,9 @@ use russh_sftp::client::fs::DirEntry;
 use russh_sftp::protocol::FileAttributes;
 use serde::{Deserialize, Serialize};
 
+use crate::ssh;
 use ops_core::db::Database;
 use ops_core::security::{shell_quote, MAX_SFTP_TREE_NODES};
-use crate::ssh;
 
 const SFTP_TRANSFER_CHUNK_SIZE: usize = 128 * 1024;
 
@@ -477,17 +477,27 @@ pub fn sftp_rename(
         .map_err(|e| format!("rename failed: {}", e))
 }
 /// Sets the permission bits (`0o644` style) of a remote file or directory.
-pub fn sftp_chmod(manager: &SftpManager, host_id: String, path: String, mode: u32) -> Result<(), String> {
-    let entry = manager.sessions.get(&host_id).ok_or("sftp session not found")?;
-    let sftp = entry.sftp.lock().map_err(|e| e.to_string())?;
-    let attrs = FileAttributes { permissions: Some(mode & 0o7777), ..Default::default() };
-    entry.lease.block_on(sftp.set_metadata(&path, attrs)).map_err(|e| format!("chmod failed: {}", e))
-}
-pub fn sftp_remove(
+pub fn sftp_chmod(
     manager: &SftpManager,
     host_id: String,
     path: String,
+    mode: u32,
 ) -> Result<(), String> {
+    let entry = manager
+        .sessions
+        .get(&host_id)
+        .ok_or("sftp session not found")?;
+    let sftp = entry.sftp.lock().map_err(|e| e.to_string())?;
+    let attrs = FileAttributes {
+        permissions: Some(mode & 0o7777),
+        ..Default::default()
+    };
+    entry
+        .lease
+        .block_on(sftp.set_metadata(&path, attrs))
+        .map_err(|e| format!("chmod failed: {}", e))
+}
+pub fn sftp_remove(manager: &SftpManager, host_id: String, path: String) -> Result<(), String> {
     let entry = manager
         .sessions
         .get(&host_id)
@@ -498,11 +508,7 @@ pub fn sftp_remove(
         .block_on(sftp.remove_file(&path))
         .map_err(|e| format!("remove failed: {}", e))
 }
-pub fn sftp_rmdir(
-    manager: &SftpManager,
-    host_id: String,
-    path: String,
-) -> Result<(), String> {
+pub fn sftp_rmdir(manager: &SftpManager, host_id: String, path: String) -> Result<(), String> {
     let entry = manager
         .sessions
         .get(&host_id)
@@ -723,10 +729,7 @@ fn download_file_blocking(
         }
     }
 }
-pub fn sftp_home_dir(
-    manager: &SftpManager,
-    host_id: String,
-) -> Result<String, String> {
+pub fn sftp_home_dir(manager: &SftpManager, host_id: String) -> Result<String, String> {
     let entry = manager
         .sessions
         .get(&host_id)
@@ -737,11 +740,7 @@ pub fn sftp_home_dir(
         .block_on(sftp.canonicalize("."))
         .map_err(|e| format!("home dir failed: {}", e))
 }
-pub fn sftp_exists(
-    manager: &SftpManager,
-    host_id: String,
-    path: String,
-) -> Result<bool, String> {
+pub fn sftp_exists(manager: &SftpManager, host_id: String, path: String) -> Result<bool, String> {
     let entry = manager
         .sessions
         .get(&host_id)

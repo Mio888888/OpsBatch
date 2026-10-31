@@ -1,9 +1,8 @@
-use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 use crate::auth::{ard_server_decrypt, vnc_auth_response};
 use crate::client::*;
 use flate2::Compression;
 use num_bigint::BigUint;
-
+use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 
 const W: u16 = 64;
 const H: u16 = 32;
@@ -15,7 +14,13 @@ async fn read_exact_vec(s: &mut DuplexStream, n: usize) -> Vec<u8> {
 }
 
 /// Plays the server role. `sec` selects the security type; returns Err(()) if the client failed auth.
-async fn mock_server(mut s: DuplexStream, version: &str, sec: u8, user: &str, pass: &str) -> Result<(), ()> {
+async fn mock_server(
+    mut s: DuplexStream,
+    version: &str,
+    sec: u8,
+    user: &str,
+    pass: &str,
+) -> Result<(), ()> {
     s.write_all(version.as_bytes()).await.unwrap();
     let cver = read_exact_vec(&mut s, 12).await;
     let v38 = cver == b"RFB 003.008\n";
@@ -67,7 +72,9 @@ async fn mock_server(mut s: DuplexStream, version: &str, sec: u8, user: &str, pa
     assert_eq!(read_exact_vec(&mut s, 1).await.len(), 1); // ClientInit
     s.write_u16(W).await.unwrap();
     s.write_u16(H).await.unwrap();
-    s.write_all(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]).await.unwrap();
+    s.write_all(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0])
+        .await
+        .unwrap();
     s.write_u32(4).await.unwrap();
     s.write_all(b"mock").await.unwrap();
 
@@ -102,7 +109,9 @@ async fn mock_server(mut s: DuplexStream, version: &str, sec: u8, user: &str, pa
     let mut stream = flate2::Compress::new(Compression::fast(), true);
     let mut chunk = |input: &[u8]| {
         let mut out = Vec::with_capacity(256);
-        stream.compress_vec(input, &mut out, flate2::FlushCompress::Sync).unwrap();
+        stream
+            .compress_vec(input, &mut out, flate2::FlushCompress::Sync)
+            .unwrap();
         out
     };
     let c1 = chunk(&[1, 10, 20, 30]);
@@ -121,11 +130,18 @@ async fn mock_server(mut s: DuplexStream, version: &str, sec: u8, user: &str, pa
 
 fn hex_prime() -> Vec<u8> {
     let s = "ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f24117c4b1fe649286651ece65381ffffffffffffffff";
-    (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+        .collect()
 }
 
 fn opts(user: &str, pass: &str) -> Options {
-    Options { username: Some(user.into()), password: Some(pass.into()), shared: true }
+    Options {
+        username: Some(user.into()),
+        password: Some(pass.into()),
+        shared: true,
+    }
 }
 
 type Reader = RfbReader<tokio::io::ReadHalf<DuplexStream>>;
@@ -135,7 +151,11 @@ fn px(c: &Reader, x: usize, y: usize) -> [u8; 4] {
     c.fb.data[o..o + 4].try_into().unwrap()
 }
 
-async fn run(version: &'static str, sec: u8, cpass: &'static str) -> anyhow::Result<(RfbInfo, Reader)> {
+async fn run(
+    version: &'static str,
+    sec: u8,
+    cpass: &'static str,
+) -> anyhow::Result<(RfbInfo, Reader)> {
     let (cs, ss) = tokio::io::duplex(1 << 16);
     tokio::spawn(async move {
         let _ = mock_server(ss, version, sec, "alice", "pw12").await;
@@ -171,23 +191,42 @@ async fn security_none_rfb38() {
 #[tokio::test]
 async fn security_vnc_auth_ok_and_wrong_password() {
     check_pixels(&run("RFB 003.008\n", SEC_VNC, "pw12").await.unwrap());
-    let err = run("RFB 003.008\n", SEC_VNC, "bad").await.err().unwrap().to_string();
-    assert!(err.contains("authentication failed") && err.contains("VNC 密码") && err.contains("[2]"), "{err}");
+    let err = run("RFB 003.008\n", SEC_VNC, "bad")
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(
+        err.contains("authentication failed") && err.contains("VNC 密码") && err.contains("[2]"),
+        "{err}"
+    );
 }
 
 #[tokio::test]
 async fn security_ard_and_apple_version_string() {
     // Apple servers announce RFB 003.889 and are spoken to as 3.8.
     check_pixels(&run("RFB 003.889\n", SEC_ARD, "pw12").await.unwrap());
-    let err = run("RFB 003.889\n", SEC_ARD, "bad").await.err().unwrap().to_string();
-    assert!(err.contains("authentication failed") && err.contains("Apple ARD") && err.contains("账户名"), "{err}");
+    let err = run("RFB 003.889\n", SEC_ARD, "bad")
+        .await
+        .err()
+        .unwrap()
+        .to_string();
+    assert!(
+        err.contains("authentication failed")
+            && err.contains("Apple ARD")
+            && err.contains("账户名"),
+        "{err}"
+    );
 }
 
 /// A Mac without a VNC password only offers ARD: with no username the client must say so and send nothing, instead of
 /// trying ARD with an empty account name (which fails and, repeated, gets the address temporarily refused).
 #[tokio::test]
 async fn ard_only_server_without_username_asks_for_it_and_sends_nothing() {
-    for (version, offer) in [(&b"RFB 003.889\n"[..], &[2u8, SEC_ARD, 35][..]), (b"RFB 003.003\n", &[0, 0, 0, SEC_ARD])] {
+    for (version, offer) in [
+        (&b"RFB 003.889\n"[..], &[2u8, SEC_ARD, 35][..]),
+        (b"RFB 003.003\n", &[0, 0, 0, SEC_ARD]),
+    ] {
         let (client, mut server) = tokio::io::duplex(1 << 16);
         let srv = tokio::spawn(async move {
             server.write_all(version).await.unwrap();
@@ -197,10 +236,23 @@ async fn ard_only_server_without_username_asks_for_it_and_sends_nothing() {
             server.read_to_end(&mut rest).await.unwrap();
             rest
         });
-        let opts = Options { username: Some("  ".into()), password: Some("pw12".into()), shared: true };
-        let e = format!("{:#}", connect(client, &opts).await.err().expect("must stop before authenticating"));
+        let opts = Options {
+            username: Some("  ".into()),
+            password: Some("pw12".into()),
+            shared: true,
+        };
+        let e = format!(
+            "{:#}",
+            connect(client, &opts)
+                .await
+                .err()
+                .expect("must stop before authenticating")
+        );
         assert!(e.contains("VNC 用户名") && e.contains("Apple ARD"), "{e}");
-        assert!(srv.await.unwrap().is_empty(), "no security type or credentials may be sent");
+        assert!(
+            srv.await.unwrap().is_empty(),
+            "no security type or credentials may be sent"
+        );
     }
 }
 
@@ -210,11 +262,25 @@ async fn rfb33_type_chosen_by_server() {
 }
 
 /// Connects to a server that plays `script` and then hangs up; returns the error text the user would see.
-async fn hang_up_after(script: impl FnOnce(DuplexStream) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + 'static) -> String {
+async fn hang_up_after(
+    script: impl FnOnce(DuplexStream) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+        + Send
+        + 'static,
+) -> String {
     let (client, server) = tokio::io::duplex(1 << 16);
     tokio::spawn(script(server));
-    let opts = Options { username: None, password: Some("pw12".into()), shared: true };
-    format!("{:#}", connect(client, &opts).await.err().expect("the handshake must fail"))
+    let opts = Options {
+        username: None,
+        password: Some("pw12".into()),
+        shared: true,
+    };
+    format!(
+        "{:#}",
+        connect(client, &opts)
+            .await
+            .err()
+            .expect("the handshake must fail")
+    )
 }
 
 #[tokio::test]
@@ -223,11 +289,17 @@ async fn a_server_that_hangs_up_says_at_which_handshake_step() {
     let e = hang_up_after(|_s| Box::pin(async {})).await;
     assert!(e.contains("握手第 1 步") && e.contains("early eof"), "{e}");
     // sends its version, then nothing
-    let e = hang_up_after(|mut s| Box::pin(async move {
-        s.write_all(b"RFB 003.008\n").await.unwrap();
-        read_exact_vec(&mut s, 12).await;
-    })).await;
-    assert!(e.contains("握手第 2 步") && e.contains("RFB 003.008"), "{e}");
+    let e = hang_up_after(|mut s| {
+        Box::pin(async move {
+            s.write_all(b"RFB 003.008\n").await.unwrap();
+            read_exact_vec(&mut s, 12).await;
+        })
+    })
+    .await;
+    assert!(
+        e.contains("握手第 2 步") && e.contains("RFB 003.008"),
+        "{e}"
+    );
     // asks for a password, takes the answer and drops the line (what many servers do with a wrong password)
     let e = hang_up_after(|mut s| {
         Box::pin(async move {
@@ -271,7 +343,6 @@ fn security_choice_follows_the_filled_in_fields() {
     assert!(no_usable_security("RFB 003.008", &[19], true, true).contains("不支持"));
 }
 
-
 // ---------------------------------------------------------------------------
 // Hextile, desktop resize, and a whole session over TCP
 // ---------------------------------------------------------------------------
@@ -286,7 +357,9 @@ async fn simple_server(mut s: DuplexStream, updates: Vec<u8>) {
     read_exact_vec(&mut s, 1).await;
     s.write_u16(32).await.unwrap();
     s.write_u16(32).await.unwrap();
-    s.write_all(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]).await.unwrap();
+    s.write_all(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0])
+        .await
+        .unwrap();
     s.write_u32(1).await.unwrap();
     s.write_all(b"s").await.unwrap();
     read_exact_vec(&mut s, 20).await;
@@ -294,7 +367,10 @@ async fn simple_server(mut s: DuplexStream, updates: Vec<u8>) {
     let n = u16::from_be_bytes([hdr[2], hdr[3]]) as usize;
     let encodings = read_exact_vec(&mut s, n * 4).await;
     // ZRLE (16), Hextile (5), CopyRect (1), Raw (0), DesktopSize (-223) in that order.
-    let expected: Vec<u8> = [16i32, 5, 1, 0, -223].iter().flat_map(|e| e.to_be_bytes()).collect();
+    let expected: Vec<u8> = [16i32, 5, 1, 0, -223]
+        .iter()
+        .flat_map(|e| e.to_be_bytes())
+        .collect();
     assert_eq!(encodings, expected);
     read_exact_vec(&mut s, 10).await;
     s.write_all(&updates).await.unwrap();
@@ -334,7 +410,11 @@ async fn hextile_background_foreground_and_subrects() {
     w.request_update(false).await.unwrap();
     assert!(matches!(r.next_event().await.unwrap(), ServerEvent::Update(v) if v.len() == 1));
     assert_eq!(px(&r, 2, 2), [1, 2, 3, 255], "background");
-    assert_eq!(px(&r, 3, 3), [9, 8, 7, 255], "subrect in the foreground colour");
+    assert_eq!(
+        px(&r, 3, 3),
+        [9, 8, 7, 255],
+        "subrect in the foreground colour"
+    );
     assert_eq!(px(&r, 17, 2), [1, 2, 3, 255]);
     assert_eq!(px(&r, 18, 2), [50, 60, 70, 255], "coloured subrect");
     assert_eq!(px(&r, 19, 2), [1, 2, 3, 255], "inherited background");
@@ -349,7 +429,13 @@ async fn desktop_size_replaces_the_framebuffer() {
     tokio::spawn(simple_server(ss, u));
     let (_info, mut r, mut w) = connect(cs, &opts("", "")).await.unwrap();
     w.request_update(false).await.unwrap();
-    assert!(matches!(r.next_event().await.unwrap(), ServerEvent::Resized { width: 48, height: 40 }));
+    assert!(matches!(
+        r.next_event().await.unwrap(),
+        ServerEvent::Resized {
+            width: 48,
+            height: 40
+        }
+    ));
     assert_eq!((r.fb.width, r.fb.height), (48, 40));
 }
 
@@ -388,7 +474,9 @@ async fn a_session_streams_frames_forwards_input_and_honours_view_only() {
             s.read_exact(&mut one).await.unwrap();
             s.write_u16(4).await.unwrap();
             s.write_u16(2).await.unwrap();
-            s.write_all(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]).await.unwrap();
+            s.write_all(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0])
+                .await
+                .unwrap();
             s.write_u32(4).await.unwrap();
             s.write_all(b"mock").await.unwrap();
             // SetPixelFormat(20) + SetEncodings(4 + 5*4) + first FramebufferUpdateRequest(10)
@@ -420,16 +508,28 @@ async fn a_session_streams_frames_forwards_input_and_honours_view_only() {
             view_only,
             proxy: None,
         });
-        let next = |rx: &flume::Receiver<VncEvent>| rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        let next =
+            |rx: &flume::Receiver<VncEvent>| rx.recv_timeout(Duration::from_secs(5)).unwrap();
         let events = session.events.clone();
         let ev = tokio::task::spawn_blocking({
             let events = events.clone();
-            move || (events.recv_timeout(Duration::from_secs(5)).unwrap(), events.recv_timeout(Duration::from_secs(5)).unwrap())
+            move || {
+                (
+                    events.recv_timeout(Duration::from_secs(5)).unwrap(),
+                    events.recv_timeout(Duration::from_secs(5)).unwrap(),
+                )
+            }
         })
         .await
         .unwrap();
-        assert!(matches!(&ev.0, VncEvent::Connected { width: 4, height: 2, name, apple: false } if name == "mock"), "{:?}", ev.0);
-        let VncEvent::Frame(regions) = &ev.1 else { panic!("{:?}", ev.1) };
+        assert!(
+            matches!(&ev.0, VncEvent::Connected { width: 4, height: 2, name, apple: false } if name == "mock"),
+            "{:?}",
+            ev.0
+        );
+        let VncEvent::Frame(regions) = &ev.1 else {
+            panic!("{:?}", ev.1)
+        };
         assert_eq!(regions.len(), 1);
         assert_eq!(regions[0].1.len(), 4 * 2 * 4);
         assert_eq!(&regions[0].1[28..32], &[7, 7, 7, 255]);
@@ -437,17 +537,37 @@ async fn a_session_streams_frames_forwards_input_and_honours_view_only() {
 
         // The follow-up incremental update request comes first, then input.
         assert_eq!(seen_rx.recv().await.unwrap()[0], 3);
-        session.send(VncCommand::Pointer { x: 3, y: 1, buttons: 1 });
-        session.send(VncCommand::Key { keysym: 0x61, down: true });
+        session.send(VncCommand::Pointer {
+            x: 3,
+            y: 1,
+            buttons: 1,
+        });
+        session.send(VncCommand::Key {
+            keysym: 0x61,
+            down: true,
+        });
         session.send(VncCommand::Refresh);
         let mut got = Vec::new();
-        while let Ok(Some(m)) = tokio::time::timeout(Duration::from_millis(500), seen_rx.recv()).await {
+        while let Ok(Some(m)) =
+            tokio::time::timeout(Duration::from_millis(500), seen_rx.recv()).await
+        {
             got.extend(m);
         }
         let has = |needle: &[u8]| got.windows(needle.len()).any(|w| w == needle);
-        assert!(has(&[3, 0, 0, 0, 0, 0, 0, 4, 0, 2]), "refresh is a non-incremental whole-screen request: {got:?}");
-        assert_eq!(has(&[5, 1, 0, 3, 0, 1]), !view_only, "pointer event iff not view-only: {got:?}");
-        assert_eq!(has(&[4, 1, 0, 0, 0, 0, 0, 0x61]), !view_only, "key event iff not view-only");
+        assert!(
+            has(&[3, 0, 0, 0, 0, 0, 0, 4, 0, 2]),
+            "refresh is a non-incremental whole-screen request: {got:?}"
+        );
+        assert_eq!(
+            has(&[5, 1, 0, 3, 0, 1]),
+            !view_only,
+            "pointer event iff not view-only: {got:?}"
+        );
+        assert_eq!(
+            has(&[4, 1, 0, 0, 0, 0, 0, 0x61]),
+            !view_only,
+            "key event iff not view-only"
+        );
         session.disconnect();
         let closed = tokio::task::spawn_blocking(move || loop {
             match events.recv_timeout(Duration::from_secs(5)).unwrap() {
@@ -467,7 +587,11 @@ async fn connection_failures_are_reported_as_closed_events() {
     use crate::session::{start_session, VncEvent};
     use std::time::Duration;
     // Nothing listens on this port.
-    let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+    let free = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
     let session = start_session(VncHostConfig {
         host: "127.0.0.1".into(),
         port: free,
@@ -478,8 +602,14 @@ async fn connection_failures_are_reported_as_closed_events() {
         proxy: None,
     });
     let events = session.events.clone();
-    let ev = tokio::task::spawn_blocking(move || events.recv_timeout(Duration::from_secs(10)).unwrap()).await.unwrap();
-    assert!(matches!(&ev, VncEvent::Closed { clean: false, reason: Some(r) } if r.contains("VNC TCP 连接失败")), "{ev:?}");
+    let ev =
+        tokio::task::spawn_blocking(move || events.recv_timeout(Duration::from_secs(10)).unwrap())
+            .await
+            .unwrap();
+    assert!(
+        matches!(&ev, VncEvent::Closed { clean: false, reason: Some(r) } if r.contains("VNC TCP 连接失败")),
+        "{ev:?}"
+    );
 }
 
 #[tokio::test]
@@ -504,8 +634,16 @@ async fn copyrect_moves_overlapping_rows_without_smearing_them() {
     assert!(matches!(r.next_event().await.unwrap(), ServerEvent::Update(v) if v.len() == 3));
     let col = |y| px(&r, 0, y)[0];
     // after the first copy rows 4..10 are 1,2,1,2,3,4; the second copy takes rows 6..10 (1,2,3,4) up to rows 2..6
-    assert_eq!([col(6), col(7), col(8), col(9)], [1, 2, 3, 4], "copied down");
-    assert_eq!([col(2), col(3), col(4), col(5)], [1, 2, 3, 4], "copied up from rows that overlap the target");
+    assert_eq!(
+        [col(6), col(7), col(8), col(9)],
+        [1, 2, 3, 4],
+        "copied down"
+    );
+    assert_eq!(
+        [col(2), col(3), col(4), col(5)],
+        [1, 2, 3, 4],
+        "copied up from rows that overlap the target"
+    );
 }
 
 #[tokio::test]
@@ -520,7 +658,9 @@ async fn the_next_update_is_requested_while_the_current_one_is_still_arriving() 
         read_exact_vec(&mut ss, 1).await;
         ss.write_u16(32).await.unwrap();
         ss.write_u16(32).await.unwrap();
-        ss.write_all(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]).await.unwrap();
+        ss.write_all(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0])
+            .await
+            .unwrap();
         ss.write_u32(1).await.unwrap();
         ss.write_all(b"s").await.unwrap();
         read_exact_vec(&mut ss, 20 + 4 + 20).await;
@@ -536,7 +676,10 @@ async fn the_next_update_is_requested_while_the_current_one_is_still_arriving() 
         let _ = tx.send(());
     });
     let decode = tokio::spawn(async move { r.next_event().await.map(|_| ()) });
-    tokio::time::timeout(std::time::Duration::from_secs(2), started.recv()).await.expect("the hook fires when the update starts").unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(2), started.recv())
+        .await
+        .expect("the hook fires when the update starts")
+        .unwrap();
     assert!(!decode.is_finished(), "the pixels have not arrived yet");
     let mut ss = server.await.unwrap();
     ss.write_all(&[0u8; 64]).await.unwrap();
@@ -550,13 +693,40 @@ fn queued_pointer_moves_collapse_but_button_changes_and_keys_keep_their_order() 
     let ptr = |x: u16, y: u16, b: u8| [5, b, (x >> 8) as u8, x as u8, (y >> 8) as u8, y as u8];
     let (bytes, disconnect) = encode_commands(
         vec![
-            Pointer { x: 1, y: 1, buttons: 0 },
-            Pointer { x: 2, y: 2, buttons: 0 },
-            Pointer { x: 3, y: 3, buttons: 0 },
-            Pointer { x: 3, y: 3, buttons: 1 },
-            Pointer { x: 4, y: 4, buttons: 1 },
-            Key { keysym: 0x61, down: true },
-            Pointer { x: 5, y: 5, buttons: 1 },
+            Pointer {
+                x: 1,
+                y: 1,
+                buttons: 0,
+            },
+            Pointer {
+                x: 2,
+                y: 2,
+                buttons: 0,
+            },
+            Pointer {
+                x: 3,
+                y: 3,
+                buttons: 0,
+            },
+            Pointer {
+                x: 3,
+                y: 3,
+                buttons: 1,
+            },
+            Pointer {
+                x: 4,
+                y: 4,
+                buttons: 1,
+            },
+            Key {
+                keysym: 0x61,
+                down: true,
+            },
+            Pointer {
+                x: 5,
+                y: 5,
+                buttons: 1,
+            },
             Refresh,
         ],
         req,
@@ -572,13 +742,68 @@ fn queued_pointer_moves_collapse_but_button_changes_and_keys_keep_their_order() 
     assert_eq!(bytes, want);
 
     // Wheel notches are press+release pairs with different buttons: none of them may be merged away.
-    let (bytes, _) = encode_commands(vec![Pointer { x: 9, y: 9, buttons: 8 }, Pointer { x: 9, y: 9, buttons: 0 }, Pointer { x: 9, y: 9, buttons: 8 }, Pointer { x: 9, y: 9, buttons: 0 }], req, false);
+    let (bytes, _) = encode_commands(
+        vec![
+            Pointer {
+                x: 9,
+                y: 9,
+                buttons: 8,
+            },
+            Pointer {
+                x: 9,
+                y: 9,
+                buttons: 0,
+            },
+            Pointer {
+                x: 9,
+                y: 9,
+                buttons: 8,
+            },
+            Pointer {
+                x: 9,
+                y: 9,
+                buttons: 0,
+            },
+        ],
+        req,
+        false,
+    );
     assert_eq!(bytes.len(), 4 * 6);
 
     // View-only drops input but still refreshes; a disconnect ends the run and drops what follows it.
-    let (bytes, _) = encode_commands(vec![Pointer { x: 1, y: 1, buttons: 0 }, Key { keysym: 1, down: true }, Clipboard("x".into()), Refresh], req, true);
+    let (bytes, _) = encode_commands(
+        vec![
+            Pointer {
+                x: 1,
+                y: 1,
+                buttons: 0,
+            },
+            Key {
+                keysym: 1,
+                down: true,
+            },
+            Clipboard("x".into()),
+            Refresh,
+        ],
+        req,
+        true,
+    );
     assert_eq!(bytes, req(false));
-    let (bytes, disconnect) = encode_commands(vec![Key { keysym: 0x61, down: false }, Disconnect, Key { keysym: 0x62, down: true }], req, false);
+    let (bytes, disconnect) = encode_commands(
+        vec![
+            Key {
+                keysym: 0x61,
+                down: false,
+            },
+            Disconnect,
+            Key {
+                keysym: 0x62,
+                down: true,
+            },
+        ],
+        req,
+        false,
+    );
     assert!(disconnect);
     assert_eq!(bytes, [4, 0, 0, 0, 0, 0, 0, 0x61]);
 }
@@ -589,15 +814,25 @@ fn many_small_rectangles_become_one_box_but_scattered_ones_stay_apart() {
     use crate::session::merge_rects;
     let r = |x, y, w, h| Rect { x, y, w, h };
     // a handful of rectangles is left alone
-    assert_eq!(merge_rects(vec![r(0, 0, 10, 10), r(20, 0, 10, 10)]).len(), 2);
+    assert_eq!(
+        merge_rects(vec![r(0, 0, 10, 10), r(20, 0, 10, 10)]).len(),
+        2
+    );
     // a row of text-sized rectangles is one box
     let row: Vec<Rect> = (0..10).map(|i| r(i * 12, 0, 10, 16)).collect();
     assert_eq!(merge_rects(row), vec![r(0, 0, 118, 16)]);
     // four corners of a big screen would cost far more as one box
-    let corners = vec![r(0, 0, 10, 10), r(1900, 0, 10, 10), r(0, 1060, 10, 10), r(1900, 1060, 10, 10)];
+    let corners = vec![
+        r(0, 0, 10, 10),
+        r(1900, 0, 10, 10),
+        r(0, 1060, 10, 10),
+        r(1900, 1060, 10, 10),
+    ];
     assert_eq!(merge_rects(corners.clone()), corners);
     // too many rectangles are merged whatever the cost
-    let many: Vec<Rect> = (0..65).map(|i| r((i % 60) * 30, (i / 60) * 900, 4, 4)).collect();
+    let many: Vec<Rect> = (0..65)
+        .map(|i| r((i % 60) * 30, (i / 60) * 900, 4, 4))
+        .collect();
     assert_eq!(merge_rects(many).len(), 1);
 }
 
@@ -620,7 +855,9 @@ async fn decode_bench(label: &str, w: u16, h: u16, rects: u16, payload: Vec<u8>)
         s.read_exact(&mut c).await.unwrap();
         s.write_u16(w).await.unwrap();
         s.write_u16(h).await.unwrap();
-        s.write_all(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]).await.unwrap();
+        s.write_all(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0])
+            .await
+            .unwrap();
         s.write_u32(5).await.unwrap();
         s.write_all(b"bench").await.unwrap();
         let mut setup = [0u8; 20 + 4 + 20];
@@ -632,11 +869,25 @@ async fn decode_bench(label: &str, w: u16, h: u16, rects: u16, payload: Vec<u8>)
         let mut sink = [0u8; 64];
         while s.read(&mut sink).await.unwrap_or(0) > 0 {}
     });
-    let opts = Options { username: None, password: None, shared: true };
-    let (_, mut reader, _writer) = connect(TcpStream::connect(addr).await.unwrap(), &opts).await.unwrap();
+    let opts = Options {
+        username: None,
+        password: None,
+        shared: true,
+    };
+    let (_, mut reader, _writer) = connect(TcpStream::connect(addr).await.unwrap(), &opts)
+        .await
+        .unwrap();
     let started = std::time::Instant::now();
     let ev = reader.next_event().await.unwrap();
-    println!("DECODE {label} {w}x{h}: {:?} ({wire} bytes on the wire, {})", started.elapsed(), if matches!(ev, ServerEvent::Update(_)) { "ok" } else { "unexpected event" });
+    println!(
+        "DECODE {label} {w}x{h}: {:?} ({wire} bytes on the wire, {})",
+        started.elapsed(),
+        if matches!(ev, ServerEvent::Update(_)) {
+            "ok"
+        } else {
+            "unexpected event"
+        }
+    );
 }
 
 /// `cargo test -p ops-vnc --release decode_speed -- --ignored --nocapture`
@@ -674,7 +925,10 @@ async fn decode_speed_over_a_real_socket() {
     let mut n = 0usize;
     for ty in 0..(h as usize).div_ceil(64) {
         for tx in 0..(w as usize).div_ceil(64) {
-            let (tw, th) = ((w as usize - tx * 64).min(64), (h as usize - ty * 64).min(64));
+            let (tw, th) = (
+                (w as usize - tx * 64).min(64),
+                (h as usize - ty * 64).min(64),
+            );
             match n % 4 {
                 0 => {
                     tiles.push(0);
@@ -698,7 +952,8 @@ async fn decode_speed_over_a_real_socket() {
     }
     let mut z = flate2::Compress::new(flate2::Compression::fast(), true);
     let mut comp = Vec::with_capacity(tiles.len());
-    z.compress_vec(&tiles, &mut comp, flate2::FlushCompress::Sync).unwrap();
+    z.compress_vec(&tiles, &mut comp, flate2::FlushCompress::Sync)
+        .unwrap();
     let mut m = rect_header(0, 0, w, h, 16);
     m.extend_from_slice(&(comp.len() as u32).to_be_bytes());
     m.extend(comp);

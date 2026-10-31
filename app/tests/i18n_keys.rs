@@ -27,16 +27,27 @@ fn all_translation_keys_used_in_the_app_exist() {
             seen += 1;
             for lang in [ops_i18n::Language::ZhCn, ops_i18n::Language::EnUs] {
                 if ops_i18n::template(lang, &key) == key {
-                    missing.push(format!("{}: {key} ({})", f.file_name().unwrap().to_string_lossy(), lang.code()));
+                    missing.push(format!(
+                        "{}: {key} ({})",
+                        f.file_name().unwrap().to_string_lossy(),
+                        lang.code()
+                    ));
                 }
             }
         }
     }
     assert!(seen > 50, "scanner found only {seen} keys");
-    assert!(missing.is_empty(), "missing translations:\n{}", missing.join("\n"));
+    assert!(
+        missing.is_empty(),
+        "missing translations:\n{}",
+        missing.join("\n")
+    );
     // keys returned by label_key() helpers
     for m in opsbatch_app::workbench::Mode::ALL {
-        assert_ne!(ops_i18n::template(ops_i18n::Language::ZhCn, m.label_key()), m.label_key());
+        assert_ne!(
+            ops_i18n::template(ops_i18n::Language::ZhCn, m.label_key()),
+            m.label_key()
+        );
     }
 }
 
@@ -49,8 +60,15 @@ fn regex_lite_keys() -> impl Fn(&str) -> Vec<String> {
             let after = &rest[i + 4..];
             if let Some(end) = after.find('"') {
                 let key = &after[..end];
-                let before_ok = i == 0 || !rest.as_bytes()[i - 1].is_ascii_alphanumeric() && rest.as_bytes()[i - 1] != b'_';
-                if before_ok && key.contains('.') && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_') {
+                let before_ok = i == 0
+                    || !rest.as_bytes()[i - 1].is_ascii_alphanumeric()
+                        && rest.as_bytes()[i - 1] != b'_';
+                if before_ok
+                    && key.contains('.')
+                    && key
+                        .chars()
+                        .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_')
+                {
                     out.push(key.to_string());
                 }
                 rest = &after[end..];

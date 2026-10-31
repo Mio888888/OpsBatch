@@ -5,9 +5,9 @@ mod common;
 mod ssh_support;
 
 use gpui_kit::{Entity, TestAppContext};
+use ops_ssh::hosts::NewHost;
 use opsbatch_app::terminal::pane::TerminalPane;
 use opsbatch_app::terminal::workspace::{workspace, ConnState, TerminalWorkspace};
-use ops_ssh::hosts::NewHost;
 
 use common::{serial, wait_until};
 
@@ -39,7 +39,9 @@ fn local_shell_tab_connects_and_runs_commands(cx: &mut TestAppContext) {
     let w = ws(cx);
     let key = cx.update(|cx| w.update(cx, |w, cx| w.open_local(cx)));
     cx.update(|cx| assert_eq!(w.read(cx).tab(&key).unwrap().state, ConnState::Connecting));
-    wait_until(cx, "local shell connected", |cx| cx.update(|cx| w.read(cx).tab(&key).unwrap().state == ConnState::Connected));
+    wait_until(cx, "local shell connected", |cx| {
+        cx.update(|cx| w.read(cx).tab(&key).unwrap().state == ConnState::Connected)
+    });
 
     type_line(cx, "echo OPS$((20+22))END");
     wait_until(cx, "command output", |cx| pane_has(cx, "OPS42END"));
@@ -55,13 +57,19 @@ fn tracked_execute_command_returns_exit_code_and_clean_output(cx: &mut TestAppCo
     let _fx = common::setup(cx, |_| {});
     let w = ws(cx);
     let key = cx.update(|cx| w.update(cx, |w, cx| w.open_local(cx)));
-    wait_until(cx, "connected", |cx| cx.update(|cx| w.read(cx).tab(&key).unwrap().state == ConnState::Connected));
+    wait_until(cx, "connected", |cx| {
+        cx.update(|cx| w.read(cx).tab(&key).unwrap().state == ConnState::Connected)
+    });
     let pane = active_pane(cx).unwrap();
     // Let the shell print its prompt first so the tracked command is not typed into startup noise.
     std::thread::sleep(std::time::Duration::from_millis(800));
     cx.run_until_parked();
 
-    let mut rx = cx.update(|cx| pane.update(cx, |p, cx| p.execute_command("echo tracked-$((6*7)); false", None, cx)));
+    let mut rx = cx.update(|cx| {
+        pane.update(cx, |p, cx| {
+            p.execute_command("echo tracked-$((6*7)); false", None, cx)
+        })
+    });
     let mut result = None;
     wait_until(cx, "tracked command finished", |_| {
         if let Ok(Some(r)) = rx.try_recv() {
@@ -70,10 +78,17 @@ fn tracked_execute_command_returns_exit_code_and_clean_output(cx: &mut TestAppCo
         result.is_some()
     });
     let r = result.unwrap();
-    assert_eq!(r.status, opsbatch_app::terminal::executions::ExecStatus::Completed);
+    assert_eq!(
+        r.status,
+        opsbatch_app::terminal::executions::ExecStatus::Completed
+    );
     assert_eq!(r.exit_code, Some(1));
     assert!(r.output.contains("tracked-42"), "{:?}", r.output);
-    assert!(!r.output.contains("__OPSBATCH_AI_DONE_"), "tracker artifacts are stripped: {:?}", r.output);
+    assert!(
+        !r.output.contains("__OPSBATCH_AI_DONE_"),
+        "tracker artifacts are stripped: {:?}",
+        r.output
+    );
     // The marker never reaches the visible terminal either.
     cx.update(|cx| assert!(!pane.read(cx).buffer_text().contains("__OPSBATCH_AI_DONE_")));
 }
@@ -86,7 +101,9 @@ fn dangerous_command_is_blocked_until_confirmed(cx: &mut TestAppContext) {
     let _fx = common::setup(cx, |_| {});
     let w = ws(cx);
     let key = cx.update(|cx| w.update(cx, |w, cx| w.open_local(cx)));
-    wait_until(cx, "connected", |cx| cx.update(|cx| w.read(cx).tab(&key).unwrap().state == ConnState::Connected));
+    wait_until(cx, "connected", |cx| {
+        cx.update(|cx| w.read(cx).tab(&key).unwrap().state == ConnState::Connected)
+    });
     let pane = active_pane(cx).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(800));
     cx.run_until_parked();
@@ -152,17 +169,33 @@ fn ssh_tab_connects_and_failure_shows_error_state(cx: &mut TestAppContext) {
     let w = ws(cx);
 
     // Opening the same host twice focuses the existing tab.
-    let first = cx.update(|cx| w.update(cx, |w, cx| w.open_host(&host_ids[0], "good", "127.0.0.1", cx)));
-    let second = cx.update(|cx| w.update(cx, |w, cx| w.open_host(&host_ids[0], "good", "127.0.0.1", cx)));
+    let first = cx.update(|cx| {
+        w.update(cx, |w, cx| {
+            w.open_host(&host_ids[0], "good", "127.0.0.1", cx)
+        })
+    });
+    let second = cx.update(|cx| {
+        w.update(cx, |w, cx| {
+            w.open_host(&host_ids[0], "good", "127.0.0.1", cx)
+        })
+    });
     assert!(first && !second);
     cx.update(|cx| assert_eq!(w.read(cx).tabs().len(), 1));
-    wait_until(cx, "ssh connected", |cx| cx.update(|cx| w.read(cx).tabs()[0].state == ConnState::Connected));
+    wait_until(cx, "ssh connected", |cx| {
+        cx.update(|cx| w.read(cx).tabs()[0].state == ConnState::Connected)
+    });
     type_line(cx, "echo SSH$((1+2))OK");
     wait_until(cx, "ssh output", |cx| pane_has(cx, "SSH3OK"));
 
     // Unreachable host: error state with a message, retry goes back to connecting.
-    cx.update(|cx| w.update(cx, |w, cx| w.open_host(&host_ids[1], "dead", "127.0.0.1", cx)));
-    wait_until(cx, "error state", |cx| cx.update(|cx| w.read(cx).tabs()[1].state == ConnState::Error));
+    cx.update(|cx| {
+        w.update(cx, |w, cx| {
+            w.open_host(&host_ids[1], "dead", "127.0.0.1", cx)
+        })
+    });
+    wait_until(cx, "error state", |cx| {
+        cx.update(|cx| w.read(cx).tabs()[1].state == ConnState::Error)
+    });
     cx.update(|cx| {
         let tab = &w.read(cx).tabs()[1];
         assert!(tab.error.as_deref().is_some_and(|e| !e.is_empty()));
@@ -170,15 +203,32 @@ fn ssh_tab_connects_and_failure_shows_error_state(cx: &mut TestAppContext) {
     });
     let dead_key = cx.update(|cx| w.read(cx).tabs()[1].key.clone());
     cx.update(|cx| w.update(cx, |w, cx| w.retry(&dead_key, cx)));
-    cx.update(|cx| assert_eq!(w.read(cx).tab(&dead_key).unwrap().state, ConnState::Connecting));
-    wait_until(cx, "error again", |cx| cx.update(|cx| w.read(cx).tab(&dead_key).unwrap().state == ConnState::Error));
+    cx.update(|cx| {
+        assert_eq!(
+            w.read(cx).tab(&dead_key).unwrap().state,
+            ConnState::Connecting
+        )
+    });
+    wait_until(cx, "error again", |cx| {
+        cx.update(|cx| w.read(cx).tab(&dead_key).unwrap().state == ConnState::Error)
+    });
 
     // The backend reports an idle disconnect for the live host: its tab turns into an error with the idle message.
     let live = host_ids[0].clone();
     let ctx = fx.ctx.clone();
-    ctx.core.emit("connection_status_changed", serde_json::json!({"hostId": live, "status": "idle_disconnected"}));
-    wait_until(cx, "idle disconnect applied", |cx| cx.update(|cx| w.read(cx).tabs()[0].state == ConnState::Error));
-    cx.update(|cx| assert_eq!(w.read(cx).tabs()[0].error.as_deref(), Some(ops_i18n::t!("terminal.idleDisconnected").as_str())));
+    ctx.core.emit(
+        "connection_status_changed",
+        serde_json::json!({"hostId": live, "status": "idle_disconnected"}),
+    );
+    wait_until(cx, "idle disconnect applied", |cx| {
+        cx.update(|cx| w.read(cx).tabs()[0].state == ConnState::Error)
+    });
+    cx.update(|cx| {
+        assert_eq!(
+            w.read(cx).tabs()[0].error.as_deref(),
+            Some(ops_i18n::t!("terminal.idleDisconnected").as_str())
+        )
+    });
 }
 
 #[gpui_kit::test]
@@ -187,13 +237,35 @@ fn split_opens_a_second_session_and_closes_it(cx: &mut TestAppContext) {
     let _fx = common::setup(cx, |_| {});
     let w = ws(cx);
     let key = cx.update(|cx| w.update(cx, |w, cx| w.open_local(cx)));
-    wait_until(cx, "connected", |cx| cx.update(|cx| w.read(cx).tab(&key).unwrap().state == ConnState::Connected));
+    wait_until(cx, "connected", |cx| {
+        cx.update(|cx| w.read(cx).tab(&key).unwrap().state == ConnState::Connected)
+    });
     cx.update(|cx| w.update(cx, |w, cx| w.open_split(&key, cx)));
-    cx.update(|cx| assert_eq!(w.read(cx).tab(&key).unwrap().split.as_ref().unwrap().state, ConnState::Connecting));
-    wait_until(cx, "split connected", |cx| cx.update(|cx| w.read(cx).tab(&key).unwrap().split.as_ref().unwrap().state == ConnState::Connected));
+    cx.update(|cx| {
+        assert_eq!(
+            w.read(cx).tab(&key).unwrap().split.as_ref().unwrap().state,
+            ConnState::Connecting
+        )
+    });
+    wait_until(cx, "split connected", |cx| {
+        cx.update(|cx| {
+            w.read(cx).tab(&key).unwrap().split.as_ref().unwrap().state == ConnState::Connected
+        })
+    });
     let (a, b) = cx.update(|cx| {
         let t = w.read(cx).tab(&key).unwrap();
-        (t.pane.as_ref().unwrap().read(cx).session_id.clone(), t.split.as_ref().unwrap().pane.as_ref().unwrap().read(cx).session_id.clone())
+        (
+            t.pane.as_ref().unwrap().read(cx).session_id.clone(),
+            t.split
+                .as_ref()
+                .unwrap()
+                .pane
+                .as_ref()
+                .unwrap()
+                .read(cx)
+                .session_id
+                .clone(),
+        )
     });
     assert_ne!(a, b);
     // A tab cannot be split twice.
@@ -207,18 +279,38 @@ fn closing_tabs_by_mode_picks_the_right_neighbour(cx: &mut TestAppContext) {
     let _s = serial();
     let _fx = common::setup(cx, |_| {});
     let w = ws(cx);
-    let keys: Vec<String> = (0..4).map(|_| cx.update(|cx| w.update(cx, |w, cx| w.open_local(cx)))).collect();
-    wait_until(cx, "all connected", |cx| cx.update(|cx| w.read(cx).tabs().iter().all(|t| t.state == ConnState::Connected)));
+    let keys: Vec<String> = (0..4)
+        .map(|_| cx.update(|cx| w.update(cx, |w, cx| w.open_local(cx))))
+        .collect();
+    wait_until(cx, "all connected", |cx| {
+        cx.update(|cx| {
+            w.read(cx)
+                .tabs()
+                .iter()
+                .all(|t| t.state == ConnState::Connected)
+        })
+    });
     cx.update(|cx| w.update(cx, |w, cx| w.set_active(&keys[1], cx)));
 
     use ops_terminal::tabs::TabCloseMode;
-    cx.update(|cx| w.update(cx, |w, cx| w.close_by_mode(&keys[1], TabCloseMode::Right, cx)));
+    cx.update(|cx| {
+        w.update(cx, |w, cx| {
+            w.close_by_mode(&keys[1], TabCloseMode::Right, cx)
+        })
+    });
     cx.update(|cx| {
         let r = w.read(cx);
-        assert_eq!(r.tabs().iter().map(|t| t.key.clone()).collect::<Vec<_>>(), keys[..2].to_vec());
+        assert_eq!(
+            r.tabs().iter().map(|t| t.key.clone()).collect::<Vec<_>>(),
+            keys[..2].to_vec()
+        );
         assert_eq!(r.active_key(), Some(keys[1].as_str()));
     });
-    cx.update(|cx| w.update(cx, |w, cx| w.close_by_mode(&keys[1], TabCloseMode::Left, cx)));
+    cx.update(|cx| {
+        w.update(cx, |w, cx| {
+            w.close_by_mode(&keys[1], TabCloseMode::Left, cx)
+        })
+    });
     cx.update(|cx| assert_eq!(w.read(cx).tabs().len(), 1));
     cx.update(|cx| w.update(cx, |w, cx| w.close_by_mode(&keys[1], TabCloseMode::All, cx)));
     cx.update(|cx| assert!(w.read(cx).tabs().is_empty()));
@@ -230,7 +322,9 @@ fn opsbatch_bg_runs_detached_and_reports_pid_and_log(cx: &mut TestAppContext) {
     let _fx = common::setup(cx, |_| {});
     let w = ws(cx);
     let key = cx.update(|cx| w.update(cx, |w, cx| w.open_local(cx)));
-    wait_until(cx, "connected", |cx| cx.update(|cx| w.read(cx).tab(&key).unwrap().state == ConnState::Connected));
+    wait_until(cx, "connected", |cx| {
+        cx.update(|cx| w.read(cx).tab(&key).unwrap().state == ConnState::Connected)
+    });
     std::thread::sleep(std::time::Duration::from_millis(800));
     cx.run_until_parked();
     type_line(cx, "opsbatch bg echo BGJOB$((20+22))");
@@ -238,13 +332,26 @@ fn opsbatch_bg_runs_detached_and_reports_pid_and_log(cx: &mut TestAppContext) {
     // The report names the log file; the detached job wrote to it.
     let pane = active_pane(cx).unwrap();
     let text = cx.update(|cx| pane.read(cx).buffer_text());
-    let log = text.lines().find_map(|l| l.split_once(": ").filter(|(k, _)| k.contains("日志") || k.contains("Log")).map(|(_, v)| v.trim().to_string())).expect("log path line");
+    let log = text
+        .lines()
+        .find_map(|l| {
+            l.split_once(": ")
+                .filter(|(k, _)| k.contains("日志") || k.contains("Log"))
+                .map(|(_, v)| v.trim().to_string())
+        })
+        .expect("log path line");
     let start = std::time::Instant::now();
     loop {
-        if std::fs::read_to_string(&log).map(|c| c.contains("BGJOB42")).unwrap_or(false) {
+        if std::fs::read_to_string(&log)
+            .map(|c| c.contains("BGJOB42"))
+            .unwrap_or(false)
+        {
             break;
         }
-        assert!(start.elapsed() < std::time::Duration::from_secs(10), "background job output missing in {log}");
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(10),
+            "background job output missing in {log}"
+        );
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
     // The shell line was cleared, not executed as `opsbatch`.

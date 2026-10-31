@@ -209,11 +209,7 @@ pub async fn delete_repo(db: &Database, id: String) -> Result<(), String> {
     Ok(())
 }
 
-pub async fn toggle_repo(
-    db: &Database,
-    id: String,
-    enabled: bool,
-) -> Result<(), String> {
+pub async fn toggle_repo(db: &Database, id: String, enabled: bool) -> Result<(), String> {
     let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE github_repos SET enabled=?1 WHERE id=?2",
@@ -918,9 +914,7 @@ fn platform_array_to_string(platforms: &[serde_json::Value]) -> String {
     let has_linux = platforms
         .iter()
         .any(|p| p.as_str().is_some_and(|s| s == "linux" || s == "macos"));
-    let has_windows = platforms
-        .iter()
-        .any(|p| p.as_str() == Some("windows"));
+    let has_windows = platforms.iter().any(|p| p.as_str() == Some("windows"));
     if has_linux && has_windows {
         "both".to_string()
     } else if has_windows {
@@ -974,14 +968,7 @@ fn import_commands_recursive(
         let path = entry.path();
         if path.is_dir() {
             import_commands_recursive(
-                conn,
-                repo_id,
-                &path,
-                base_dir,
-                language,
-                item_label,
-                tag_hint,
-                result,
+                conn, repo_id, &path, base_dir, language, item_label, tag_hint, result,
             );
             continue;
         }
@@ -1714,7 +1701,9 @@ pub async fn update_startup_repos(
     Ok(results)
 }
 
-pub async fn run_startup_repo_updates(core: &ops_core::Core) -> Result<Vec<StartupUpdateResult>, String> {
+pub async fn run_startup_repo_updates(
+    core: &ops_core::Core,
+) -> Result<Vec<StartupUpdateResult>, String> {
     let pool = core.db.pool.clone();
     let results = update_startup_repos(core.data_dir().to_path_buf(), pool).await?;
     log_startup_repo_update_summary(core, &results);

@@ -3,7 +3,9 @@
 use gpui_kit::assets::IconName;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Icon, Selectable as _, Sizable as _, TitleBar};
+use gpui_kit::component::{
+    h_flex, v_flex, ActiveTheme as _, Icon, Selectable as _, Sizable as _, TitleBar,
+};
 use gpui_kit::*;
 use ops_i18n::t;
 
@@ -31,7 +33,9 @@ pub struct LibraryWindow {
 impl LibraryWindow {
     pub fn open(tab: LibraryTab, cx: &mut App) {
         let options = window::window_options(WindowKind::Library, &t!("library.windowTitle"), cx);
-        window::open_or_focus("library", options, cx, move |window, cx| cx.new(|cx| Self::new(tab, window, cx)));
+        window::open_or_focus("library", options, cx, move |window, cx| {
+            cx.new(|cx| Self::new(tab, window, cx))
+        });
     }
 
     pub fn new(tab: LibraryTab, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -65,8 +69,18 @@ impl LibraryWindow {
 impl Render for LibraryWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let tab_button = |id: &'static str, label: String, icon: IconName, tab: LibraryTab, cx: &mut Context<Self>| {
-            Button::new(id).ghost().small().icon(Icon::new(icon)).label(label).selected(self.tab == tab).on_click(cx.listener(move |this, _, _, cx| this.set_tab(tab, cx)))
+        let tab_button = |id: &'static str,
+                          label: String,
+                          icon: IconName,
+                          tab: LibraryTab,
+                          cx: &mut Context<Self>| {
+            Button::new(id)
+                .ghost()
+                .small()
+                .icon(Icon::new(icon))
+                .label(label)
+                .selected(self.tab == tab)
+                .on_click(cx.listener(move |this, _, _, cx| this.set_tab(tab, cx)))
         };
         let page: AnyElement = match self.tab {
             LibraryTab::Commands => self.commands.clone().into_any_element(),
@@ -84,10 +98,34 @@ impl Render for LibraryWindow {
                 TitleBar::new().child(
                     h_flex()
                         .gap_1()
-                        .child(tab_button("lib-tab-commands", t!("library.tabCommands"), IconName::SquareTerminal, LibraryTab::Commands, cx))
-                        .child(tab_button("lib-tab-scripts", t!("library.tabScripts"), IconName::FileText, LibraryTab::Scripts, cx))
-                        .child(tab_button("lib-tab-actions", t!("library.tabActions"), IconName::Zap, LibraryTab::Actions, cx))
-                        .child(tab_button("lib-tab-docker", t!("library.tabDocker"), IconName::Cloud, LibraryTab::Docker, cx)),
+                        .child(tab_button(
+                            "lib-tab-commands",
+                            t!("library.tabCommands"),
+                            IconName::SquareTerminal,
+                            LibraryTab::Commands,
+                            cx,
+                        ))
+                        .child(tab_button(
+                            "lib-tab-scripts",
+                            t!("library.tabScripts"),
+                            IconName::FileText,
+                            LibraryTab::Scripts,
+                            cx,
+                        ))
+                        .child(tab_button(
+                            "lib-tab-actions",
+                            t!("library.tabActions"),
+                            IconName::Zap,
+                            LibraryTab::Actions,
+                            cx,
+                        ))
+                        .child(tab_button(
+                            "lib-tab-docker",
+                            t!("library.tabDocker"),
+                            IconName::Cloud,
+                            LibraryTab::Docker,
+                            cx,
+                        )),
                 ),
             )
             .child(div().flex_1().min_h_0().child(page))

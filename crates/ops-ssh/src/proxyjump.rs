@@ -4,8 +4,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs as std_fs;
 use std::path::PathBuf;
 
-use ops_core::db::Database;
 use crate::ssh::SshConnectionRegistry;
+use ops_core::db::Database;
 
 // ---------------------------------------------------------------------------
 // SSH config parsing
@@ -236,10 +236,7 @@ pub fn get_jump_topology(db: &Database) -> Result<JumpTopology, String> {
 
 /// Dijkstra shortest path from "client" (no specific node) to target host.
 /// Returns the ordered list of jump host IDs.
-pub fn resolve_jump_chain(
-    db: &Database,
-    host_id: String,
-) -> Result<Vec<String>, String> {
+pub fn resolve_jump_chain(db: &Database, host_id: String) -> Result<Vec<String>, String> {
     // First check if the host already has an explicit jump_chain
     let conn = db.pool.get().map_err(|e| e.to_string())?;
     let existing_chain: Option<String> = conn

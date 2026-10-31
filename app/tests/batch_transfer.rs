@@ -6,8 +6,8 @@ mod ssh_support;
 
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext as _, TestAppContext};
-use opsbatch_app::transfer::window::BatchTransferWindow;
 use ops_ssh::hosts::NewHost;
+use opsbatch_app::transfer::window::BatchTransferWindow;
 
 use common::{serial, wait_until};
 
@@ -55,20 +55,37 @@ fn uploads_a_file_to_every_target_with_templates_and_reports_per_host(cx: &mut T
 
     let targets = ids.clone();
     let (handle, win) = cx.update(|cx| {
-        let (w, v) = gpui_kit::open_window(Default::default(), cx, |window, cx| cx.new(|cx| BatchTransferWindow::new(targets, window, cx))).unwrap();
+        let (w, v) = gpui_kit::open_window(Default::default(), cx, |window, cx| {
+            cx.new(|cx| BatchTransferWindow::new(targets, window, cx))
+        })
+        .unwrap();
         (w.downcast::<gpui_kit::base::Root>().unwrap(), v)
     });
-    wait_until(cx, "hosts loaded", |cx| cx.update(|cx| win.read(cx).hosts_loaded() == 3));
+    wait_until(cx, "hosts loaded", |cx| {
+        cx.update(|cx| win.read(cx).hosts_loaded() == 3)
+    });
 
     cx.update_window(handle.into(), |_, w, cx| {
         w.render_frame(cx);
-        assert_eq!(w.find("batch-upload").disabled(), Some(true), "needs both paths");
+        assert_eq!(
+            w.find("batch-upload").disabled(),
+            Some(true),
+            "needs both paths"
+        );
     })
     .unwrap();
     let (local, remote) = cx.update(|cx| win.read(cx).inputs());
     cx.update_window(handle.into(), |_, w, cx| {
-        local.update(cx, |s, cx| s.set_value(work.join("payload.txt").to_string_lossy().to_string(), w, cx));
-        remote.update(cx, |s, cx| s.set_value(format!("{}/dest-{{host}}/", work.display()), w, cx));
+        local.update(cx, |s, cx| {
+            s.set_value(
+                work.join("payload.txt").to_string_lossy().to_string(),
+                w,
+                cx,
+            )
+        });
+        remote.update(cx, |s, cx| {
+            s.set_value(format!("{}/dest-{{host}}/", work.display()), w, cx)
+        });
     })
     .unwrap();
     cx.update_window(handle.into(), |_, w, cx| {
@@ -77,15 +94,23 @@ fn uploads_a_file_to_every_target_with_templates_and_reports_per_host(cx: &mut T
         w.click("batch-upload", cx);
     })
     .unwrap();
-    wait_until(cx, "all hosts reported", |cx| cx.update(|cx| !win.read(cx).is_transferring() && win.read(cx).results().len() == 3));
+    wait_until(cx, "all hosts reported", |cx| {
+        cx.update(|cx| !win.read(cx).is_transferring() && win.read(cx).results().len() == 3)
+    });
     cx.update(|cx| {
         let r = win.read(cx).results();
         let by = |n: &str| r.iter().find(|x| x.host_name == n).unwrap().clone();
         assert!(by("web-1").success && by("web-2").success);
         assert!(!by("down").success && by("down").error.is_some());
     });
-    assert_eq!(std::fs::read_to_string(work.join("dest-web-1/payload.txt")).unwrap(), "batch payload");
-    assert_eq!(std::fs::read_to_string(work.join("dest-web-2/payload.txt")).unwrap(), "batch payload");
+    assert_eq!(
+        std::fs::read_to_string(work.join("dest-web-1/payload.txt")).unwrap(),
+        "batch payload"
+    );
+    assert_eq!(
+        std::fs::read_to_string(work.join("dest-web-2/payload.txt")).unwrap(),
+        "batch payload"
+    );
     cx.update_window(handle.into(), |_, w, cx| {
         w.render_frame(cx);
         assert!(w.try_find(("batch-result", 2usize)).is_some());

@@ -1,6 +1,6 @@
-use ops_core::db::Database;
 use base64::Engine;
 use hmac::{Hmac, Mac};
+use ops_core::db::Database;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -40,10 +40,7 @@ pub fn list_cloud_providers(db: &Database) -> Result<Vec<CloudProvider>, String>
         Err(_) => Ok(Vec::new()),
     }
 }
-pub fn save_cloud_providers(
-    db: &Database,
-    providers: Vec<CloudProvider>,
-) -> Result<(), String> {
+pub fn save_cloud_providers(db: &Database, providers: Vec<CloudProvider>) -> Result<(), String> {
     let conn = db.pool.get().map_err(|e| e.to_string())?;
     let json = serde_json::to_string(&providers).map_err(|e| e.to_string())?;
     conn.execute(
@@ -616,28 +613,48 @@ mod tests {
 
     #[test]
     fn sha1_matches_fips_180_vectors() {
-        assert_eq!(hex(&sha1_hash(b"abc")), "a9993e364706816aba3e25717850c26c9cd0d89d");
-        assert_eq!(hex(&sha1_hash(b"")), "da39a3ee5e6b4b0d3255bfef95601890afd80709");
         assert_eq!(
-            hex(&sha1_hash(b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")),
+            hex(&sha1_hash(b"abc")),
+            "a9993e364706816aba3e25717850c26c9cd0d89d"
+        );
+        assert_eq!(
+            hex(&sha1_hash(b"")),
+            "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+        );
+        assert_eq!(
+            hex(&sha1_hash(
+                b"abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq"
+            )),
             "84983e441c3bd26ebaae4aa1f95129e5e54670f1"
         );
     }
 
     #[test]
     fn hmac_sha1_matches_rfc2202_vectors() {
-        assert_eq!(hex(&hmac_sha1(&[0x0b; 20], b"Hi There")), "b617318655057264e28bc0b6fb378c8ef146be00");
-        assert_eq!(hex(&hmac_sha1(b"Jefe", b"what do ya want for nothing?")), "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79");
+        assert_eq!(
+            hex(&hmac_sha1(&[0x0b; 20], b"Hi There")),
+            "b617318655057264e28bc0b6fb378c8ef146be00"
+        );
+        assert_eq!(
+            hex(&hmac_sha1(b"Jefe", b"what do ya want for nothing?")),
+            "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79"
+        );
         // key longer than the block size is hashed first
         assert_eq!(
-            hex(&hmac_sha1(&[0xaa; 80], b"Test Using Larger Than Block-Size Key - Hash Key First")),
+            hex(&hmac_sha1(
+                &[0xaa; 80],
+                b"Test Using Larger Than Block-Size Key - Hash Key First"
+            )),
             "aa4ae5e15272d00e95705637ce8a3b55ed402112"
         );
     }
 
     #[test]
     fn percent_encode_follows_rfc3986_for_aliyun_signatures() {
-        assert_eq!(percent_encode("a b&c=d/e~f-g_h.i*j"), "a%20b%26c%3Dd%2Fe~f-g_h.i%2Aj");
+        assert_eq!(
+            percent_encode("a b&c=d/e~f-g_h.i*j"),
+            "a%20b%26c%3Dd%2Fe~f-g_h.i%2Aj"
+        );
         assert_eq!(percent_encode("中"), "%E4%B8%AD");
     }
 
@@ -655,7 +672,10 @@ mod tests {
         save_cloud_providers(&core.db, vec![p.clone()]).unwrap();
         let back = list_cloud_providers(&core.db).unwrap();
         assert_eq!(back.len(), 1);
-        assert_eq!((back[0].provider.as_str(), back[0].regions.clone()), ("aliyun", vec!["cn-hangzhou".to_string()]));
+        assert_eq!(
+            (back[0].provider.as_str(), back[0].regions.clone()),
+            ("aliyun", vec!["cn-hangzhou".to_string()])
+        );
         // fetching without credentials for that provider fails with a clear message, without any network call
         let err = fetch_cloud_instances(&core.db, "aws".into(), "us-east-1".into()).unwrap_err();
         assert!(err.contains("aws"), "{err}");
@@ -681,7 +701,11 @@ mod tests {
         let core = ops_core::Core::open_temp("cloud-import").unwrap();
         let group = {
             let conn = core.db.pool.get().unwrap();
-            conn.execute("INSERT INTO host_groups (id, name) VALUES ('g1', 'cloud')", []).unwrap();
+            conn.execute(
+                "INSERT INTO host_groups (id, name) VALUES ('g1', 'cloud')",
+                [],
+            )
+            .unwrap();
             "g1".to_string()
         };
         let batch = vec![
@@ -696,16 +720,32 @@ mod tests {
         let rows: Vec<(String, String, String, Option<String>, String)> = conn
             .prepare("SELECT name, ip, os, group_id, remark FROM hosts ORDER BY ip")
             .unwrap()
-            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+            .query_map([], |r| {
+                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
+            })
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(rows[0].0, "web");
-        assert_eq!((rows[0].1.as_str(), rows[0].2.as_str(), rows[0].3.as_deref()), ("1.1.1.1", "linux", Some("g1")));
-        assert_eq!(rows[1].0, "cn-hangzhou-i-2", "unnamed instances use region-id");
-        assert_eq!((rows[1].1.as_str(), rows[1].2.as_str()), ("10.0.0.2", "windows"), "falls back to the inner ip");
+        assert_eq!(
+            (rows[0].1.as_str(), rows[0].2.as_str(), rows[0].3.as_deref()),
+            ("1.1.1.1", "linux", Some("g1"))
+        );
+        assert_eq!(
+            rows[1].0, "cn-hangzhou-i-2",
+            "unnamed instances use region-id"
+        );
+        assert_eq!(
+            (rows[1].1.as_str(), rows[1].2.as_str()),
+            ("10.0.0.2", "windows"),
+            "falls back to the inner ip"
+        );
         assert!(rows[1].4.contains("ecs.c6.large") && rows[1].4.contains("i-2"));
         drop(conn);
-        assert_eq!(import_cloud_instances(&core.db, batch, None).unwrap(), 0, "second import adds nothing");
+        assert_eq!(
+            import_cloud_instances(&core.db, batch, None).unwrap(),
+            0,
+            "second import adds nothing"
+        );
     }
 }

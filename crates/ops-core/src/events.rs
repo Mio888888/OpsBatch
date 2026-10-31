@@ -72,7 +72,10 @@ impl EventBus {
     /// Subscribe to an exact topic, or a prefix with a trailing `*`.
     pub fn subscribe(&self, pattern: impl Into<String>) -> flume::Receiver<Arc<AppEvent>> {
         let (tx, rx) = flume::unbounded();
-        self.subs.lock().push(Subscriber { pattern: pattern.into(), tx });
+        self.subs.lock().push(Subscriber {
+            pattern: pattern.into(),
+            tx,
+        });
         rx
     }
 }

@@ -25,7 +25,11 @@ pub fn verification_system_prompt() -> String {
     .join("\n")
 }
 
-pub fn build_verification_prompt(description: &str, operations: &[String], expected_outcome: Option<&str>) -> String {
+pub fn build_verification_prompt(
+    description: &str,
+    operations: &[String],
+    expected_outcome: Option<&str>,
+) -> String {
     let mut lines = vec![format!("步骤：{description}")];
     if !operations.is_empty() {
         lines.push("已执行的操作：".to_string());
@@ -52,7 +56,10 @@ fn truthy(value: &Value) -> Option<bool> {
 }
 
 fn text_of(value: Option<&Value>) -> String {
-    value.and_then(Value::as_str).map(|s| s.trim().to_string()).unwrap_or_default()
+    value
+        .and_then(Value::as_str)
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
 }
 
 /// Read the verdict out of the model's reply (a tagged block, a fenced block or a bare JSON object).
@@ -69,8 +76,15 @@ pub fn parse_verdict(reply: &str) -> Result<StepVerdict, String> {
         _ => return Err("校验结果不是 JSON".to_string()),
     };
     let value: Value = serde_json::from_str(json).map_err(|e| format!("校验结果无法解析: {e}"))?;
-    let ok = ["ok", "success", "passed", "pass"].iter().find_map(|k| value.get(*k).and_then(truthy)).ok_or_else(|| "校验结果缺少 ok".to_string())?;
-    Ok(StepVerdict { ok, observation: text_of(value.get("observation")), reason: text_of(value.get("reason")) })
+    let ok = ["ok", "success", "passed", "pass"]
+        .iter()
+        .find_map(|k| value.get(*k).and_then(truthy))
+        .ok_or_else(|| "校验结果缺少 ok".to_string())?;
+    Ok(StepVerdict {
+        ok,
+        observation: text_of(value.get("observation")),
+        reason: text_of(value.get("reason")),
+    })
 }
 
 #[cfg(test)]
@@ -80,12 +94,23 @@ mod tests {
     #[test]
     fn verdicts_are_read_from_tagged_fenced_or_bare_json() {
         let tagged = r#"好的。<RDP_VERIFY>{"ok":true,"observation":"记事本已打开","reason":""}</RDP_VERIFY>"#;
-        assert_eq!(parse_verdict(tagged).unwrap(), StepVerdict { ok: true, observation: "记事本已打开".into(), reason: String::new() });
+        assert_eq!(
+            parse_verdict(tagged).unwrap(),
+            StepVerdict {
+                ok: true,
+                observation: "记事本已打开".into(),
+                reason: String::new()
+            }
+        );
         let fenced = "```json\n{\"ok\": false, \"observation\": \"弹出了错误对话框\", \"reason\": \"找不到文件\"}\n```";
         let v = parse_verdict(fenced).unwrap();
         assert!(!v.ok && v.reason == "找不到文件");
         assert!(parse_verdict("{\"success\":\"yes\"}").unwrap().ok);
-        assert!(!parse_verdict("<rdp_verify>{\"ok\":\"失败\",\"reason\":\"x\"}</rdp_verify>").unwrap().ok);
+        assert!(
+            !parse_verdict("<rdp_verify>{\"ok\":\"失败\",\"reason\":\"x\"}</rdp_verify>")
+                .unwrap()
+                .ok
+        );
         // an unterminated block still works
         assert!(parse_verdict("<RDP_VERIFY>{\"ok\":true}").unwrap().ok);
         assert!(parse_verdict("看起来没问题").is_err());
@@ -94,8 +119,16 @@ mod tests {
 
     #[test]
     fn the_prompt_names_the_step_the_operations_and_the_expectation() {
-        let p = build_verification_prompt("打开记事本", &["按 Win".into(), "输入 notepad".into()], Some("记事本窗口出现"));
-        assert!(p.contains("步骤：打开记事本") && p.contains("- 输入 notepad") && p.contains("预期结果：记事本窗口出现"));
+        let p = build_verification_prompt(
+            "打开记事本",
+            &["按 Win".into(), "输入 notepad".into()],
+            Some("记事本窗口出现"),
+        );
+        assert!(
+            p.contains("步骤：打开记事本")
+                && p.contains("- 输入 notepad")
+                && p.contains("预期结果：记事本窗口出现")
+        );
         assert!(build_verification_prompt("x", &[], None).contains("已经发生"));
         assert!(verification_system_prompt().contains("RDP_VERIFY"));
     }

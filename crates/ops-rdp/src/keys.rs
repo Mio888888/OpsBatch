@@ -14,7 +14,10 @@ const fn sc(code: u8, extended: bool) -> Option<Scancode> {
     Some(Scancode { code, extended })
 }
 
-const CONTROL: Scancode = Scancode { code: 0x1d, extended: false };
+const CONTROL: Scancode = Scancode {
+    code: 0x1d,
+    extended: false,
+};
 
 /// `key` is the DOM `KeyboardEvent.key`, `code` the DOM `KeyboardEvent.code` (may be empty).
 pub fn scancode_for_key(key: &str, code: &str) -> Option<Scancode> {
@@ -57,7 +60,10 @@ pub fn scancode_for_key(key: &str, code: &str) -> Option<Scancode> {
 }
 
 fn scancode_for_code(code: &str) -> Option<Scancode> {
-    let digit_row = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9", "Digit0", "Minus", "Equal"];
+    let digit_row = [
+        "Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7", "Digit8", "Digit9",
+        "Digit0", "Minus", "Equal",
+    ];
     if let Some(i) = digit_row.iter().position(|c| *c == code) {
         return sc(0x02 + i as u8, false);
     }
@@ -133,7 +139,9 @@ pub fn web_key_name(gpui_key: &str) -> String {
         "left" => "ArrowLeft".into(),
         "right" => "ArrowRight".into(),
         "space" => " ".into(),
-        k if k.len() >= 2 && k.starts_with('f') && k[1..].chars().all(|c| c.is_ascii_digit()) => k.to_uppercase(),
+        k if k.len() >= 2 && k.starts_with('f') && k[1..].chars().all(|c| c.is_ascii_digit()) => {
+            k.to_uppercase()
+        }
         k => k.to_string(),
     }
 }
@@ -148,24 +156,47 @@ pub struct KeyModifiers {
 }
 
 /// Port of `getRdpKeyboardInputEvents`. `key_char` is the text the key would insert (layout aware).
-pub fn keyboard_input_events(key: &str, key_char: Option<&str>, mods: KeyModifiers, down: bool, repeat: bool) -> Vec<RdpInputEvent> {
+pub fn keyboard_input_events(
+    key: &str,
+    key_char: Option<&str>,
+    mods: KeyModifiers,
+    down: bool,
+    repeat: bool,
+) -> Vec<RdpInputEvent> {
     let web_key = web_key_name(key);
     if web_key == "Meta" {
         return Vec::new();
     }
-    let code = web_key.chars().next().filter(|_| web_key.chars().count() == 1).and_then(dom_code_for_char).unwrap_or_default();
+    let code = web_key
+        .chars()
+        .next()
+        .filter(|_| web_key.chars().count() == 1)
+        .and_then(dom_code_for_char)
+        .unwrap_or_default();
     let special = scancode_for_key(&web_key, &code);
     let has_modifier = mods.control || mods.platform || mods.alt;
     let single_char = web_key.chars().count() == 1;
-    let key_scancode = if single_char { scancode_for_key(&web_key, &code) } else { special };
-    let ev = |s: Scancode, down: bool| RdpInputEvent::KeyScancode { code: s.code, extended: s.extended, down };
+    let key_scancode = if single_char {
+        scancode_for_key(&web_key, &code)
+    } else {
+        special
+    };
+    let ev = |s: Scancode, down: bool| RdpInputEvent::KeyScancode {
+        code: s.code,
+        extended: s.extended,
+        down,
+    };
 
     if mods.platform && single_char {
         if let Some(ks) = key_scancode {
             if repeat && down {
                 return vec![ev(ks, true)];
             }
-            return if down { vec![ev(CONTROL, true), ev(ks, true)] } else { vec![ev(ks, false), ev(CONTROL, false)] };
+            return if down {
+                vec![ev(CONTROL, true), ev(ks, true)]
+            } else {
+                vec![ev(ks, false), ev(CONTROL, false)]
+            };
         }
     }
     if has_modifier {
@@ -177,24 +208,52 @@ pub fn keyboard_input_events(key: &str, key_char: Option<&str>, mods: KeyModifie
         return vec![ev(s, down)];
     }
     // Non-US characters etc.: send the text the key produces.
-    let text = key_char.filter(|t| t.chars().count() == 1).or(single_char.then_some(web_key.as_str()));
+    let text = key_char
+        .filter(|t| t.chars().count() == 1)
+        .or(single_char.then_some(web_key.as_str()));
     match text.and_then(|t| t.chars().next()) {
-        Some(c) => vec![RdpInputEvent::Unicode { character: c.to_string(), down }],
+        Some(c) => vec![RdpInputEvent::Unicode {
+            character: c.to_string(),
+            down,
+        }],
         None => Vec::new(),
     }
 }
 
 /// Press/release events for modifier changes (Shift/Ctrl/Alt); ⌘ is not forwarded.
-pub fn modifier_events(prev_shift: bool, shift: bool, prev: KeyModifiers, now: KeyModifiers) -> Vec<RdpInputEvent> {
+pub fn modifier_events(
+    prev_shift: bool,
+    shift: bool,
+    prev: KeyModifiers,
+    now: KeyModifiers,
+) -> Vec<RdpInputEvent> {
     let mut out = Vec::new();
     let mut push = |changed: bool, s: Scancode, down: bool| {
         if changed {
-            out.push(RdpInputEvent::KeyScancode { code: s.code, extended: s.extended, down });
+            out.push(RdpInputEvent::KeyScancode {
+                code: s.code,
+                extended: s.extended,
+                down,
+            });
         }
     };
-    push(prev_shift != shift, Scancode { code: 0x2a, extended: false }, shift);
+    push(
+        prev_shift != shift,
+        Scancode {
+            code: 0x2a,
+            extended: false,
+        },
+        shift,
+    );
     push(prev.control != now.control, CONTROL, now.control);
-    push(prev.alt != now.alt, Scancode { code: 0x38, extended: false }, now.alt);
+    push(
+        prev.alt != now.alt,
+        Scancode {
+            code: 0x38,
+            extended: false,
+        },
+        now.alt,
+    );
     out
 }
 
@@ -203,7 +262,11 @@ mod tests {
     use super::*;
 
     fn key_ev(code: u8, extended: bool, down: bool) -> RdpInputEvent {
-        RdpInputEvent::KeyScancode { code, extended, down }
+        RdpInputEvent::KeyScancode {
+            code,
+            extended,
+            down,
+        }
     }
 
     #[test]
@@ -223,24 +286,56 @@ mod tests {
 
     #[test]
     fn plain_keys_are_scancodes_and_odd_characters_are_unicode() {
-        assert_eq!(keyboard_input_events("a", Some("a"), KeyModifiers::default(), true, false), vec![key_ev(0x1e, false, true)]);
-        assert_eq!(keyboard_input_events("enter", None, KeyModifiers::default(), false, false), vec![key_ev(0x1c, false, false)]);
-        assert_eq!(keyboard_input_events("up", None, KeyModifiers::default(), true, false), vec![key_ev(0x48, true, true)]);
+        assert_eq!(
+            keyboard_input_events("a", Some("a"), KeyModifiers::default(), true, false),
+            vec![key_ev(0x1e, false, true)]
+        );
+        assert_eq!(
+            keyboard_input_events("enter", None, KeyModifiers::default(), false, false),
+            vec![key_ev(0x1c, false, false)]
+        );
+        assert_eq!(
+            keyboard_input_events("up", None, KeyModifiers::default(), true, false),
+            vec![key_ev(0x48, true, true)]
+        );
         assert_eq!(
             keyboard_input_events("é", Some("é"), KeyModifiers::default(), true, false),
-            vec![RdpInputEvent::Unicode { character: "é".into(), down: true }]
+            vec![RdpInputEvent::Unicode {
+                character: "é".into(),
+                down: true
+            }]
         );
-        assert!(keyboard_input_events("meta", None, KeyModifiers::default(), true, false).is_empty());
+        assert!(
+            keyboard_input_events("meta", None, KeyModifiers::default(), true, false).is_empty()
+        );
     }
 
     #[test]
     fn command_shortcuts_become_control_shortcuts() {
-        let cmd = KeyModifiers { platform: true, ..Default::default() };
-        assert_eq!(keyboard_input_events("c", Some("c"), cmd, true, false), vec![key_ev(0x1d, false, true), key_ev(0x2e, false, true)]);
-        assert_eq!(keyboard_input_events("c", Some("c"), cmd, false, false), vec![key_ev(0x2e, false, false), key_ev(0x1d, false, false)]);
-        assert_eq!(keyboard_input_events("c", Some("c"), cmd, true, true), vec![key_ev(0x2e, false, true)]);
-        let ctrl = KeyModifiers { control: true, ..Default::default() };
-        assert_eq!(keyboard_input_events("v", Some("v"), ctrl, true, false), vec![key_ev(0x2f, false, true)]);
+        let cmd = KeyModifiers {
+            platform: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            keyboard_input_events("c", Some("c"), cmd, true, false),
+            vec![key_ev(0x1d, false, true), key_ev(0x2e, false, true)]
+        );
+        assert_eq!(
+            keyboard_input_events("c", Some("c"), cmd, false, false),
+            vec![key_ev(0x2e, false, false), key_ev(0x1d, false, false)]
+        );
+        assert_eq!(
+            keyboard_input_events("c", Some("c"), cmd, true, true),
+            vec![key_ev(0x2e, false, true)]
+        );
+        let ctrl = KeyModifiers {
+            control: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            keyboard_input_events("v", Some("v"), ctrl, true, false),
+            vec![key_ev(0x2f, false, true)]
+        );
     }
 
     #[test]
@@ -249,15 +344,27 @@ mod tests {
         assert_eq!(web_key_name("space"), " ");
         assert_eq!(web_key_name("f12"), "F12");
         assert_eq!(web_key_name("a"), "a");
-        assert_eq!(keyboard_input_events("space", Some(" "), KeyModifiers::default(), true, false), vec![key_ev(0x39, false, true)]);
+        assert_eq!(
+            keyboard_input_events("space", Some(" "), KeyModifiers::default(), true, false),
+            vec![key_ev(0x39, false, true)]
+        );
     }
 
     #[test]
     fn modifier_changes_emit_press_and_release() {
         let none = KeyModifiers::default();
-        let ctrl = KeyModifiers { control: true, ..none };
-        assert_eq!(modifier_events(false, true, none, ctrl), vec![key_ev(0x2a, false, true), key_ev(0x1d, false, true)]);
-        assert_eq!(modifier_events(true, false, ctrl, none), vec![key_ev(0x2a, false, false), key_ev(0x1d, false, false)]);
+        let ctrl = KeyModifiers {
+            control: true,
+            ..none
+        };
+        assert_eq!(
+            modifier_events(false, true, none, ctrl),
+            vec![key_ev(0x2a, false, true), key_ev(0x1d, false, true)]
+        );
+        assert_eq!(
+            modifier_events(true, false, ctrl, none),
+            vec![key_ev(0x2a, false, false), key_ev(0x1d, false, false)]
+        );
         assert!(modifier_events(false, false, none, none).is_empty());
     }
 }

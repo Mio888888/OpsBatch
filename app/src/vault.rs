@@ -54,9 +54,19 @@ pub fn init(cx: &mut App) {
     // the system keychain (the startup password is `demo`; `broken` fails until the third try).
     #[cfg(debug_assertions)]
     if let Ok(mode) = std::env::var("OPSBATCH_VAULT_DEMO") {
-        backend = Arc::new(DemoVault { mode, tries: std::sync::atomic::AtomicUsize::new(0), unlocked: std::sync::atomic::AtomicBool::new(false) });
+        backend = Arc::new(DemoVault {
+            mode,
+            tries: std::sync::atomic::AtomicUsize::new(0),
+            unlocked: std::sync::atomic::AtomicBool::new(false),
+        });
     }
-    cx.set_global(Vault { backend, waiters: Vec::new(), requests: Vec::new(), dialog_open: false, dialog: None });
+    cx.set_global(Vault {
+        backend,
+        waiters: Vec::new(),
+        requests: Vec::new(),
+        dialog_open: false,
+        dialog: None,
+    });
 }
 
 #[cfg(debug_assertions)]
@@ -75,7 +85,9 @@ impl VaultBackend for DemoVault {
         std::thread::sleep(std::time::Duration::from_millis(600));
         let tries = self.tries.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
         if self.mode == "broken" && tries < 3 {
-            return Err(format!("macOS keychain 读取失败: 演示错误（第 {tries} 次）"));
+            return Err(format!(
+                "macOS keychain 读取失败: 演示错误（第 {tries} 次）"
+            ));
         }
         match master_key.as_deref().map(str::trim) {
             None | Some("") if self.mode == "broken" => {
@@ -107,7 +119,9 @@ pub fn backend(cx: &App) -> Arc<dyn VaultBackend> {
 }
 
 pub fn is_unlocked(cx: &App) -> bool {
-    cx.try_global::<Vault>().map(|v| v.backend.is_unlocked()).unwrap_or(true)
+    cx.try_global::<Vault>()
+        .map(|v| v.backend.is_unlocked())
+        .unwrap_or(true)
 }
 
 /// Runs `f` now when the vault is open, else right after it gets unlocked.
@@ -141,7 +155,9 @@ pub fn request_unlock(window: &mut Window, cx: &mut App) -> oneshot::Receiver<bo
 
 /// The dialog that is showing, if any.
 pub fn dialog(cx: &App) -> Option<Entity<crate::vault_dialog::VaultDialog>> {
-    cx.try_global::<Vault>().and_then(|v| v.dialog.as_ref()).and_then(|d| d.upgrade())
+    cx.try_global::<Vault>()
+        .and_then(|v| v.dialog.as_ref())
+        .and_then(|d| d.upgrade())
 }
 
 pub(crate) fn dialog_closed(cx: &mut App) {
@@ -152,7 +168,10 @@ pub(crate) fn dialog_closed(cx: &mut App) {
 pub(crate) fn unlocked(cx: &mut App) {
     let (requests, waiters) = {
         let v = cx.global_mut::<Vault>();
-        (std::mem::take(&mut v.requests), std::mem::take(&mut v.waiters))
+        (
+            std::mem::take(&mut v.requests),
+            std::mem::take(&mut v.waiters),
+        )
     };
     for tx in requests {
         let _ = tx.send(true);

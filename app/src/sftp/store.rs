@@ -10,8 +10,14 @@ use ops_ssh::sftp::FileEntry;
 use serde::{Deserialize, Serialize};
 
 /// Run blocking backend code (the sync SFTP/forward services `block_on` internally) off the UI and async threads.
-pub fn blocking<T: Send + 'static>(f: impl FnOnce() -> Result<T, String> + Send + 'static) -> impl Future<Output = Result<T, String>> {
-    let fut = ops_core::rt::run(async move { tokio::task::spawn_blocking(f).await.map_err(|e| e.to_string())? });
+pub fn blocking<T: Send + 'static>(
+    f: impl FnOnce() -> Result<T, String> + Send + 'static,
+) -> impl Future<Output = Result<T, String>> {
+    let fut = ops_core::rt::run(async move {
+        tokio::task::spawn_blocking(f)
+            .await
+            .map_err(|e| e.to_string())?
+    });
     async move { fut.await.and_then(|r| r) }
 }
 
@@ -138,9 +144,16 @@ impl SftpStore {
         tasks.push(cx.spawn(async move |this, cx| {
             while let Ok(ev) = events.recv_async().await {
                 let mut parts = ev.topic.splitn(3, ':');
-                let (_, Some(id), Some(kind)) = (parts.next(), parts.next(), parts.next()) else { continue };
+                let (_, Some(id), Some(kind)) = (parts.next(), parts.next(), parts.next()) else {
+                    continue;
+                };
                 let (id, kind, payload) = (id.to_string(), kind.to_string(), ev.payload.clone());
-                if this.update(cx, |this, cx| this.on_transfer_event(&id, &kind, &payload, cx)).is_err() {
+                if this
+                    .update(cx, |this, cx| {
+                        this.on_transfer_event(&id, &kind, &payload, cx)
+                    })
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -148,9 +161,17 @@ impl SftpStore {
 
         let c2 = ctx.clone();
         tasks.push(cx.spawn(async move |this, cx| {
-            let settings = ops_core::rt::run(async move { ops_core::settings::get_general_settings(&c2.db).await }).await.and_then(|r| r);
+            let settings =
+                ops_core::rt::run(
+                    async move { ops_core::settings::get_general_settings(&c2.db).await },
+                )
+                .await
+                .and_then(|r| r);
             if let Ok(map) = settings {
-                if let Some(list) = map.get(BOOKMARKS_KEY).and_then(|raw| serde_json::from_str::<Vec<Bookmark>>(raw).ok()) {
+                if let Some(list) = map
+                    .get(BOOKMARKS_KEY)
+                    .and_then(|raw| serde_json::from_str::<Vec<Bookmark>>(raw).ok())
+                {
                     let _ = this.update(cx, |this, cx| {
                         if this.bookmarks.is_empty() {
                             this.bookmarks = list;
@@ -204,7 +225,10 @@ impl SftpStore {
         let ctx = crate::services::ctx(cx);
         let host = host_id.to_string();
         cx.spawn(async move |this, cx| {
-            let result = ops_core::rt::run(async move { ops_ssh::sftp::sftp_open(ctx, host).await }).await.and_then(|r| r);
+            let result =
+                ops_core::rt::run(async move { ops_ssh::sftp::sftp_open(ctx, host).await })
+                    .await
+                    .and_then(|r| r);
             let _ = this.update(cx, |this, cx| {
                 if seq != this.open_seq {
                     return;
@@ -223,7 +247,9 @@ impl SftpStore {
     }
 
     pub fn close_session(&mut self, cx: &mut Context<Self>) {
-        let Some(host) = self.host_id.take() else { return };
+        let Some(host) = self.host_id.take() else {
+            return;
+        };
         self.open_seq += 1;
         self.session = SessionState::Idle;
         let ctx = crate::services::ctx(cx);
@@ -268,7 +294,9 @@ impl SftpStore {
         let path = path.to_string();
         match side {
             Side::Remote => {
-                let Some(host) = self.host_id.clone() else { return };
+                let Some(host) = self.host_id.clone() else {
+                    return;
+                };
                 self.remote_seq += 1;
                 let seq = self.remote_seq;
                 self.remote_loading = true;
@@ -276,7 +304,11 @@ impl SftpStore {
                 cx.notify();
                 cx.spawn(async move |this, cx| {
                     let p = path.clone();
-                    let result = ops_core::rt::run(async move { ops_ssh::sftp::sftp_list_dir(ctx, host, p).await }).await.and_then(|r| r);
+                    let result = ops_core::rt::run(async move {
+                        ops_ssh::sftp::sftp_list_dir(ctx, host, p).await
+                    })
+                    .await
+                    .and_then(|r| r);
                     let _ = this.update(cx, |this, cx| {
                         if seq != this.remote_seq {
                             return;
@@ -303,7 +335,11 @@ impl SftpStore {
                 cx.notify();
                 cx.spawn(async move |this, cx| {
                     let p = path.clone();
-                    let result = ops_core::rt::run(async move { ops_ssh::local_fs::local_list_dir(&ctx.local_fs, p).await }).await.and_then(|r| r);
+                    let result = ops_core::rt::run(async move {
+                        ops_ssh::local_fs::local_list_dir(&ctx.local_fs, p).await
+                    })
+                    .await
+                    .and_then(|r| r);
                     let _ = this.update(cx, |this, cx| {
                         if seq != this.local_seq {
                             return;
@@ -345,11 +381,30 @@ impl SftpStore {
 
     // ---- transfers ----
 
-    fn start_transfer(&mut self, direction: Direction, local_path: String, remote_path: String, cx: &mut Context<Self>) {
-        let Some(host) = self.host_id.clone() else { return };
+    fn start_transfer(
+        &mut self,
+        direction: Direction,
+        local_path: String,
+        remote_path: String,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(host) = self.host_id.clone() else {
+            return;
+        };
         let ctx = crate::services::ctx(cx);
-        let id = new_id(if direction == Direction::Upload { "upload" } else { "download" });
-        let file_name = basename_from_path(if direction == Direction::Upload { &local_path } else { &remote_path }, "file");
+        let id = new_id(if direction == Direction::Upload {
+            "upload"
+        } else {
+            "download"
+        });
+        let file_name = basename_from_path(
+            if direction == Direction::Upload {
+                &local_path
+            } else {
+                &remote_path
+            },
+            "file",
+        );
         self.transfer_index.insert(id.clone(), self.transfers.len());
         self.transfers.push(Transfer {
             id: id.clone(),
@@ -369,15 +424,23 @@ impl SftpStore {
         cx.spawn(async move |this, cx| {
             let result = ops_core::rt::run(async move {
                 match direction {
-                    Direction::Upload => ops_ssh::sftp::sftp_upload(ctx, host, local_path, remote_path, task_id).await,
-                    Direction::Download => ops_ssh::sftp::sftp_download(ctx, host, remote_path, local_path, task_id).await,
+                    Direction::Upload => {
+                        ops_ssh::sftp::sftp_upload(ctx, host, local_path, remote_path, task_id)
+                            .await
+                    }
+                    Direction::Download => {
+                        ops_ssh::sftp::sftp_download(ctx, host, remote_path, local_path, task_id)
+                            .await
+                    }
                 }
             })
             .await
             .and_then(|r| r);
             if let Err(error) = result {
                 // The backend also emits a `done` event; this covers failures before that point (no session...).
-                let _ = this.update(cx, |this, cx| this.finish_transfer(&id, false, None, None, Some(error), cx));
+                let _ = this.update(cx, |this, cx| {
+                    this.finish_transfer(&id, false, None, None, Some(error), cx)
+                });
             }
         })
         .detach();
@@ -398,8 +461,16 @@ impl SftpStore {
         self.start_transfer(Direction::Download, local, remote_path.to_string(), cx);
     }
 
-    fn on_transfer_event(&mut self, id: &str, kind: &str, payload: &serde_json::Value, cx: &mut Context<Self>) {
-        let Some(&ix) = self.transfer_index.get(id) else { return };
+    fn on_transfer_event(
+        &mut self,
+        id: &str,
+        kind: &str,
+        payload: &serde_json::Value,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(&ix) = self.transfer_index.get(id) else {
+            return;
+        };
         match kind {
             "start" => {
                 if let Some(size) = payload.get("fileSize").and_then(|v| v.as_u64()) {
@@ -408,23 +479,43 @@ impl SftpStore {
                 }
             }
             "done" => {
-                let success = payload.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+                let success = payload
+                    .get("success")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
                 let size = payload.get("fileSize").and_then(|v| v.as_u64());
                 let dur = payload.get("durationMs").and_then(|v| v.as_u64());
-                let err = payload.get("error").and_then(|v| v.as_str()).map(str::to_string);
+                let err = payload
+                    .get("error")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string);
                 self.finish_transfer(id, success, size, dur, err, cx);
             }
             _ => {}
         }
     }
 
-    fn finish_transfer(&mut self, id: &str, success: bool, size: Option<u64>, duration_ms: Option<u64>, error: Option<String>, cx: &mut Context<Self>) {
-        let Some(&ix) = self.transfer_index.get(id) else { return };
+    fn finish_transfer(
+        &mut self,
+        id: &str,
+        success: bool,
+        size: Option<u64>,
+        duration_ms: Option<u64>,
+        error: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(&ix) = self.transfer_index.get(id) else {
+            return;
+        };
         let t = &mut self.transfers[ix];
         if matches!(t.status, TransferStatus::Done | TransferStatus::Error) {
             return; // first outcome wins (done event vs. command result)
         }
-        t.status = if success { TransferStatus::Done } else { TransferStatus::Error };
+        t.status = if success {
+            TransferStatus::Done
+        } else {
+            TransferStatus::Error
+        };
         if success {
             t.progress = 100.0;
         }
@@ -439,14 +530,29 @@ impl SftpStore {
         };
         let direction = t.direction;
         if success {
-            self.refresh(if direction == Direction::Upload { Side::Remote } else { Side::Local }, cx);
+            self.refresh(
+                if direction == Direction::Upload {
+                    Side::Remote
+                } else {
+                    Side::Local
+                },
+                cx,
+            );
         }
         cx.emit(SftpEvent::TransferFinished { success });
         cx.notify();
     }
 
     pub fn active_transfers(&self) -> usize {
-        self.transfers.iter().filter(|t| matches!(t.status, TransferStatus::Transferring | TransferStatus::Pending)).count()
+        self.transfers
+            .iter()
+            .filter(|t| {
+                matches!(
+                    t.status,
+                    TransferStatus::Transferring | TransferStatus::Pending
+                )
+            })
+            .count()
     }
 
     // ---- file operations (each resolves with the backend result and refreshes the listing) ----
@@ -455,7 +561,9 @@ impl SftpStore {
         &mut self,
         side: Side,
         cx: &mut Context<Self>,
-        f: impl FnOnce(std::sync::Arc<ops_ssh::Ctx>, Option<String>) -> Result<T, String> + Send + 'static,
+        f: impl FnOnce(std::sync::Arc<ops_ssh::Ctx>, Option<String>) -> Result<T, String>
+            + Send
+            + 'static,
     ) -> Task<Result<T, String>> {
         let ctx = crate::services::ctx(cx);
         let host = self.host_id.clone();
@@ -468,53 +576,105 @@ impl SftpStore {
         })
     }
 
-    pub fn create_file(&mut self, side: Side, path: String, cx: &mut Context<Self>) -> Task<Result<(), String>> {
+    pub fn create_file(
+        &mut self,
+        side: Side,
+        path: String,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<(), String>> {
         match side {
             Side::Remote => self.op(Side::Remote, cx, move |ctx, host| {
                 let host = host.ok_or("no SFTP session")?;
-                ops_ssh::sftp::sftp_write_file(&ctx.db, &ctx.sftp, &ctx.registry, host, path, String::new())
+                ops_ssh::sftp::sftp_write_file(
+                    &ctx.db,
+                    &ctx.sftp,
+                    &ctx.registry,
+                    host,
+                    path,
+                    String::new(),
+                )
             }),
             Side::Local => self.op(Side::Local, cx, move |ctx, _| {
                 ctx.local_fs.ensure_authorized(&path)?;
-                std::fs::File::create(&path).map(|_| ()).map_err(|e| format!("create failed: {e}"))
+                std::fs::File::create(&path)
+                    .map(|_| ())
+                    .map_err(|e| format!("create failed: {e}"))
             }),
         }
     }
 
-    pub fn mkdir(&mut self, side: Side, path: String, cx: &mut Context<Self>) -> Task<Result<(), String>> {
+    pub fn mkdir(
+        &mut self,
+        side: Side,
+        path: String,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<(), String>> {
         match side {
             Side::Remote => self.op(Side::Remote, cx, move |ctx, host| {
                 let host = host.ok_or("no SFTP session")?;
                 ops_ssh::sftp::sftp_mkdir(&ctx.db, &ctx.sftp, &ctx.registry, host, path)
             }),
-            Side::Local => self.op(Side::Local, cx, move |ctx, _| ops_ssh::local_fs::local_mkdir(&ctx.local_fs, path)),
+            Side::Local => self.op(Side::Local, cx, move |ctx, _| {
+                ops_ssh::local_fs::local_mkdir(&ctx.local_fs, path)
+            }),
         }
     }
 
-    pub fn rename(&mut self, side: Side, old: String, new: String, cx: &mut Context<Self>) -> Task<Result<(), String>> {
+    pub fn rename(
+        &mut self,
+        side: Side,
+        old: String,
+        new: String,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<(), String>> {
         match side {
             Side::Remote => self.op(Side::Remote, cx, move |ctx, host| {
                 let host = host.ok_or("no SFTP session")?;
                 ops_ssh::sftp::sftp_rename(&ctx.sftp, host, old, new)
             }),
-            Side::Local => self.op(Side::Local, cx, move |ctx, _| ops_ssh::local_fs::local_rename(&ctx.local_fs, old, new)),
+            Side::Local => self.op(Side::Local, cx, move |ctx, _| {
+                ops_ssh::local_fs::local_rename(&ctx.local_fs, old, new)
+            }),
         }
     }
 
-    pub fn remove(&mut self, side: Side, path: String, is_dir: bool, cx: &mut Context<Self>) -> Task<Result<(), String>> {
+    pub fn remove(
+        &mut self,
+        side: Side,
+        path: String,
+        is_dir: bool,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<(), String>> {
         match side {
             Side::Remote => self.op(Side::Remote, cx, move |ctx, host| {
                 let host = host.ok_or("no SFTP session")?;
-                if is_dir { ops_ssh::sftp::sftp_rmdir(&ctx.sftp, host, path) } else { ops_ssh::sftp::sftp_remove(&ctx.sftp, host, path) }
+                if is_dir {
+                    ops_ssh::sftp::sftp_rmdir(&ctx.sftp, host, path)
+                } else {
+                    ops_ssh::sftp::sftp_remove(&ctx.sftp, host, path)
+                }
             }),
-            Side::Local => self.op(Side::Local, cx, move |ctx, _| ops_ssh::local_fs::local_remove(&ctx.local_fs, path)),
+            Side::Local => self.op(Side::Local, cx, move |ctx, _| {
+                ops_ssh::local_fs::local_remove(&ctx.local_fs, path)
+            }),
         }
     }
 
-    pub fn extract_archive(&mut self, archive: String, cx: &mut Context<Self>) -> Task<Result<(), String>> {
+    pub fn extract_archive(
+        &mut self,
+        archive: String,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<(), String>> {
         self.op(Side::Remote, cx, move |ctx, host| {
             let host = host.ok_or("no SFTP session")?;
-            ops_ssh::sftp::sftp_extract_archive(&ctx.db, &ctx.registry, host, archive, String::new()).map(|_| ())
+            ops_ssh::sftp::sftp_extract_archive(
+                &ctx.db,
+                &ctx.registry,
+                host,
+                archive,
+                String::new(),
+            )
+            .map(|_| ())
         })
     }
 
@@ -526,11 +686,25 @@ impl SftpStore {
         }
         let kind = super::kinds::preview_kind(&entry.name);
         if kind.opens_externally() {
-            self.preview = Some(Preview { side, entry, data: None, loading: false, error: None, external: true });
+            self.preview = Some(Preview {
+                side,
+                entry,
+                data: None,
+                loading: false,
+                error: None,
+                external: true,
+            });
             cx.notify();
             return;
         }
-        self.preview = Some(Preview { side, entry: entry.clone(), data: None, loading: true, error: None, external: false });
+        self.preview = Some(Preview {
+            side,
+            entry: entry.clone(),
+            data: None,
+            loading: true,
+            error: None,
+            external: false,
+        });
         cx.notify();
         let ctx = crate::services::ctx(cx);
         let host = self.host_id.clone();
@@ -540,15 +714,31 @@ impl SftpStore {
             let result = ops_core::rt::run(async move {
                 use base64::Engine as _;
                 let b64 = match side {
-                    Side::Remote => ops_ssh::sftp::sftp_read_file(ctx, host.ok_or("no SFTP session")?, path, Some(max)).await?,
-                    Side::Local => ops_ssh::local_fs::local_read_file(&ctx.local_fs, path, Some(max)).await?,
+                    Side::Remote => {
+                        ops_ssh::sftp::sftp_read_file(
+                            ctx,
+                            host.ok_or("no SFTP session")?,
+                            path,
+                            Some(max),
+                        )
+                        .await?
+                    }
+                    Side::Local => {
+                        ops_ssh::local_fs::local_read_file(&ctx.local_fs, path, Some(max)).await?
+                    }
                 };
-                base64::engine::general_purpose::STANDARD.decode(b64).map_err(|e| e.to_string())
+                base64::engine::general_purpose::STANDARD
+                    .decode(b64)
+                    .map_err(|e| e.to_string())
             })
             .await
             .and_then(|r| r);
             let _ = this.update(cx, |this, cx| {
-                if let Some(p) = this.preview.as_mut().filter(|p| p.entry.path == entry.path && p.side == side) {
+                if let Some(p) = this
+                    .preview
+                    .as_mut()
+                    .filter(|p| p.entry.path == entry.path && p.side == side)
+                {
                     p.loading = false;
                     match result {
                         Ok(bytes) => p.data = Some(bytes),
@@ -568,21 +758,29 @@ impl SftpStore {
     /// Open the previewed file with the operating system's default application. Remote files are downloaded to a
     /// temporary folder first.
     pub fn open_preview_externally(&mut self, cx: &mut Context<Self>) {
-        let Some(p) = self.preview.as_mut() else { return };
+        let Some(p) = self.preview.as_mut() else {
+            return;
+        };
         let (side, entry) = (p.side, p.entry.clone());
         if side == Side::Local {
             let opener = self.system_opener.clone();
             opener(std::path::Path::new(&entry.path), cx);
             return;
         }
-        let Some(host) = self.host_id.clone() else { return };
+        let Some(host) = self.host_id.clone() else {
+            return;
+        };
         p.loading = true;
         p.error = None;
         cx.notify();
         let ctx = crate::services::ctx(cx);
         let dir = ctx.core.data_dir().join("previews").join(new_id("pv"));
         let target = dir.join(&entry.name);
-        let (remote, local, task_id) = (entry.path.clone(), target.display().to_string(), new_id("preview"));
+        let (remote, local, task_id) = (
+            entry.path.clone(),
+            target.display().to_string(),
+            new_id("preview"),
+        );
         cx.spawn(async move |this, cx| {
             let result = ops_core::rt::run(async move {
                 std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
@@ -620,7 +818,12 @@ impl SftpStore {
             return;
         }
         let name = basename_from_path(&path, &path);
-        self.bookmarks.push(Bookmark { id: new_id("bm"), name, path, side });
+        self.bookmarks.push(Bookmark {
+            id: new_id("bm"),
+            name,
+            path,
+            side,
+        });
         self.persist_bookmarks(cx);
     }
 

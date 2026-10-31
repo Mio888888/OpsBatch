@@ -1,9 +1,9 @@
 //! A code editor whose grammar can change: `EditorState` fixes the language at construction, so switching rebuilds
 //! the state with the same text.
 
+use crate::scale::px;
 use gpui_kit::component::input::{Editor, EditorState, InputEvent};
 use gpui_kit::*;
-use crate::scale::px;
 
 pub fn editor_language(language: &str) -> &'static str {
     match language {
@@ -22,13 +22,32 @@ pub struct CodeBox {
 }
 
 impl CodeBox {
-    pub fn new(text: &str, language: &str, read_only: bool, height: Pixels, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let mut this = Self { state: Self::make(text, language, read_only, window, cx), language: language.to_string(), read_only, height, sub: None };
+    pub fn new(
+        text: &str,
+        language: &str,
+        read_only: bool,
+        height: Pixels,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut this = Self {
+            state: Self::make(text, language, read_only, window, cx),
+            language: language.to_string(),
+            read_only,
+            height,
+            sub: None,
+        };
         this.watch(cx);
         this
     }
 
-    fn make(text: &str, language: &str, read_only: bool, window: &mut Window, cx: &mut Context<Self>) -> Entity<EditorState> {
+    fn make(
+        text: &str,
+        language: &str,
+        read_only: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<EditorState> {
         let lang = editor_language(language);
         let state = cx.new(|cx| EditorState::new(window, cx).language(lang));
         let text = text.to_string();
@@ -78,6 +97,13 @@ impl CodeBox {
 impl Render for CodeBox {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         use gpui_kit::component::ActiveTheme as _;
-        div().h(self.height).w_full().border_1().border_color(cx.theme().border).rounded(px(8.)).overflow_hidden().child(Editor::new(&self.state).size_full())
+        div()
+            .h(self.height)
+            .w_full()
+            .border_1()
+            .border_color(cx.theme().border)
+            .rounded(px(8.))
+            .overflow_hidden()
+            .child(Editor::new(&self.state).size_full())
     }
 }

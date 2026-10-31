@@ -23,7 +23,17 @@ pub struct TerminalColors {
 }
 
 fn rgb_of(css: &str) -> Rgb {
-    parse_css_color(css).map(|c| Rgb { r: c.r, g: c.g, b: c.b }).unwrap_or(Rgb { r: 255, g: 0, b: 255 })
+    parse_css_color(css)
+        .map(|c| Rgb {
+            r: c.r,
+            g: c.g,
+            b: c.b,
+        })
+        .unwrap_or(Rgb {
+            r: 255,
+            g: 0,
+            b: 255,
+        })
 }
 
 impl TerminalColors {
@@ -49,7 +59,11 @@ impl TerminalColors {
             16..=231 => {
                 let i = i - 16;
                 let level = |v: u8| if v == 0 { 0 } else { 55 + v * 40 };
-                Rgb { r: level(i / 36), g: level((i / 6) % 6), b: level(i % 6) }
+                Rgb {
+                    r: level(i / 36),
+                    g: level((i / 6) % 6),
+                    b: level(i % 6),
+                }
             }
             _ => {
                 let v = 8 + (i - 232) * 10;
@@ -59,7 +73,12 @@ impl TerminalColors {
     }
 
     /// Resolve a cell colour. `overrides` are colours a program changed at runtime (OSC 4/10/11).
-    pub fn resolve(&self, color: Color, overrides: &alacritty_terminal::term::color::Colors, is_fg: bool) -> Rgb {
+    pub fn resolve(
+        &self,
+        color: Color,
+        overrides: &alacritty_terminal::term::color::Colors,
+        is_fg: bool,
+    ) -> Rgb {
         match color {
             Color::Spec(rgb) => rgb,
             Color::Indexed(i) => overrides[i as usize].unwrap_or_else(|| self.indexed(i)),
@@ -76,7 +95,9 @@ impl TerminalColors {
                         let i = n as usize;
                         if i < 16 {
                             self.ansi[i]
-                        } else if (NamedColor::DimBlack as usize..=NamedColor::DimWhite as usize).contains(&i) {
+                        } else if (NamedColor::DimBlack as usize..=NamedColor::DimWhite as usize)
+                            .contains(&i)
+                        {
                             dim(self.ansi[i - NamedColor::DimBlack as usize])
                         } else if is_fg {
                             self.foreground
@@ -91,7 +112,11 @@ impl TerminalColors {
 }
 
 fn dim(c: Rgb) -> Rgb {
-    Rgb { r: (c.r as u16 * 2 / 3) as u8, g: (c.g as u16 * 2 / 3) as u8, b: (c.b as u16 * 2 / 3) as u8 }
+    Rgb {
+        r: (c.r as u16 * 2 / 3) as u8,
+        g: (c.g as u16 * 2 / 3) as u8,
+        b: (c.b as u16 * 2 / 3) as u8,
+    }
 }
 
 /// What the emulator asks its host to do after consuming output.
@@ -153,10 +178,21 @@ pub struct Engine {
 impl Engine {
     pub fn new(cols: usize, lines: usize, scrollback: usize, colors: TerminalColors) -> Self {
         let (tx, events) = flume::unbounded();
-        let config = Config { scrolling_history: scrollback, ..Config::default() };
+        let config = Config {
+            scrolling_history: scrollback,
+            ..Config::default()
+        };
         let (cols, lines) = (cols.max(2), lines.max(1));
         let term = Term::new(config, &Size { cols, lines }, Listener { tx });
-        Self { term, parser: Processor::new(), events, colors, cols, lines, cell_px: (8, 16) }
+        Self {
+            term,
+            parser: Processor::new(),
+            events,
+            colors,
+            cols,
+            lines,
+            cell_px: (8, 16),
+        }
     }
 
     pub fn term(&self) -> &Term<Listener> {
@@ -180,7 +216,10 @@ impl Engine {
     }
 
     pub fn set_scrollback(&mut self, scrollback: usize) {
-        self.term.set_options(Config { scrolling_history: scrollback, ..Config::default() });
+        self.term.set_options(Config {
+            scrolling_history: scrollback,
+            ..Config::default()
+        });
     }
 
     /// Feed PTY output and collect what the emulator wants to send back.
@@ -203,7 +242,8 @@ impl Engine {
                         256 => self.colors.foreground,
                         257 => self.colors.background,
                         258 => self.colors.cursor,
-                        i => self.term.colors()[i].unwrap_or_else(|| self.colors.indexed(i.min(255) as u8)),
+                        i => self.term.colors()[i]
+                            .unwrap_or_else(|| self.colors.indexed(i.min(255) as u8)),
                     };
                     out.writes.push(format(c));
                 }
@@ -301,7 +341,10 @@ impl Engine {
     pub fn screen_text(&self) -> String {
         let start = Point::new(Line(0), Column(0));
         let end = Point::new(Line(self.lines as i32 - 1), Column(self.cols - 1));
-        self.term.bounds_to_string(start, end).trim_end().to_string()
+        self.term
+            .bounds_to_string(start, end)
+            .trim_end()
+            .to_string()
     }
 
     /// Text of the screen row under the cursor, trimmed.
@@ -343,7 +386,11 @@ impl Engine {
             let trimmed = text.trim_end_matches(' ').chars().count();
             text = text.chars().take(trimmed).collect();
             columns.truncate(trimmed);
-            rows.push(SearchRow { row: (line.0 + history) as usize, text, columns });
+            rows.push(SearchRow {
+                row: (line.0 + history) as usize,
+                text,
+                columns,
+            });
             line += 1;
         }
         rows
@@ -367,13 +414,22 @@ impl Engine {
 
     /// Select `len` characters starting at character `char_col` of absolute row `row` and scroll them into view.
     pub fn select_match(&mut self, rows: &[SearchRow], row: usize, char_col: usize, len: usize) {
-        let Some(r) = rows.iter().find(|r| r.row == row) else { return };
-        let (Some(&first), Some(&last)) = (r.columns.get(char_col), r.columns.get((char_col + len).saturating_sub(1))) else {
+        let Some(r) = rows.iter().find(|r| r.row == row) else {
+            return;
+        };
+        let (Some(&first), Some(&last)) = (
+            r.columns.get(char_col),
+            r.columns.get((char_col + len).saturating_sub(1)),
+        ) else {
             return;
         };
         let history = self.history_size() as i32;
         let line = Line(row as i32 - history);
-        let mut sel = Selection::new(SelectionType::Simple, Point::new(line, Column(first)), Side::Left);
+        let mut sel = Selection::new(
+            SelectionType::Simple,
+            Point::new(line, Column(first)),
+            Side::Left,
+        );
         sel.update(Point::new(line, Column(last)), Side::Right);
         self.term.selection = Some(sel);
         self.scroll_line_into_view(line);
@@ -400,7 +456,12 @@ mod tests {
     use ops_core::theme::THEMES;
 
     fn engine(cols: usize, lines: usize) -> Engine {
-        Engine::new(cols, lines, 1000, TerminalColors::from_palette(&THEMES[0].terminal))
+        Engine::new(
+            cols,
+            lines,
+            1000,
+            TerminalColors::from_palette(&THEMES[0].terminal),
+        )
     }
 
     #[test]
@@ -437,8 +498,16 @@ mod tests {
     fn device_queries_produce_replies() {
         let mut e = engine(20, 3);
         let out = e.feed(b"\x1b[c\x1b[6n");
-        assert!(out.writes.iter().any(|w| w.starts_with("\x1b[?")), "primary DA answered: {:?}", out.writes);
-        assert!(out.writes.iter().any(|w| w == "\x1b[1;1R"), "cursor position report: {:?}", out.writes);
+        assert!(
+            out.writes.iter().any(|w| w.starts_with("\x1b[?")),
+            "primary DA answered: {:?}",
+            out.writes
+        );
+        assert!(
+            out.writes.iter().any(|w| w == "\x1b[1;1R"),
+            "cursor position report: {:?}",
+            out.writes
+        );
     }
 
     #[test]
@@ -446,14 +515,20 @@ mod tests {
         let mut e = engine(20, 3);
         let out = e.feed(b"\x1b]11;?\x1b\\");
         let bg = e.colors.background;
-        let expected = format!("\x1b]11;rgb:{:02x}{:02x}/{:02x}{:02x}/{:02x}{:02x}\x1b\\", bg.r, bg.r, bg.g, bg.g, bg.b, bg.b);
+        let expected = format!(
+            "\x1b]11;rgb:{:02x}{:02x}/{:02x}{:02x}/{:02x}{:02x}\x1b\\",
+            bg.r, bg.r, bg.g, bg.g, bg.b, bg.b
+        );
         assert_eq!(out.writes, vec![expected]);
     }
 
     #[test]
     fn title_changes_are_reported() {
         let mut e = engine(20, 3);
-        assert_eq!(e.feed(b"\x1b]0;root@web\x07").title, Some(Some("root@web".to_string())));
+        assert_eq!(
+            e.feed(b"\x1b]0;root@web\x07").title,
+            Some(Some("root@web".to_string()))
+        );
     }
 
     #[test]
@@ -516,7 +591,14 @@ mod tests {
     fn indexed_colors_follow_xterm_cube() {
         let c = TerminalColors::from_palette(&THEMES[0].terminal);
         assert_eq!(c.indexed(16), Rgb { r: 0, g: 0, b: 0 });
-        assert_eq!(c.indexed(231), Rgb { r: 255, g: 255, b: 255 });
+        assert_eq!(
+            c.indexed(231),
+            Rgb {
+                r: 255,
+                g: 255,
+                b: 255
+            }
+        );
         assert_eq!(c.indexed(232), Rgb { r: 8, g: 8, b: 8 });
         assert_eq!(c.indexed(1), c.ansi[1]);
     }

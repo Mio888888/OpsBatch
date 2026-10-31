@@ -15,17 +15,20 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use ironrdp::pdu::PduResult;
 use ironrdp::rdpdr::pdu::efs::{
-    Boolean, Characteristics, ClientDriveQueryDirectoryResponse, ClientDriveQueryInformationResponse,
-    ClientDriveQueryVolumeInformationResponse, ClientDriveSetInformationResponse, CreateDisposition, CreateOptions,
-    DesiredAccess, DeviceCloseRequest, DeviceCloseResponse, DeviceControlRequest, DeviceControlResponse,
-    DeviceCreateRequest, DeviceCreateResponse, DeviceIoResponse, DeviceReadRequest, DeviceReadResponse,
-    DeviceWriteRequest, DeviceWriteResponse, FileAttributeTagInformation, FileAttributes, FileBasicInformation,
-    FileBothDirectoryInformation, FileDirectoryInformation, FileFsAttributeInformation, FileFsDeviceInformation,
-    FileFsFullSizeInformation, FileFsSizeInformation, FileFsVolumeInformation, FileFullDirectoryInformation,
+    Boolean, Characteristics, ClientDriveQueryDirectoryResponse,
+    ClientDriveQueryInformationResponse, ClientDriveQueryVolumeInformationResponse,
+    ClientDriveSetInformationResponse, CreateDisposition, CreateOptions, DesiredAccess,
+    DeviceCloseRequest, DeviceCloseResponse, DeviceControlRequest, DeviceControlResponse,
+    DeviceCreateRequest, DeviceCreateResponse, DeviceIoResponse, DeviceReadRequest,
+    DeviceReadResponse, DeviceWriteRequest, DeviceWriteResponse, FileAttributeTagInformation,
+    FileAttributes, FileBasicInformation, FileBothDirectoryInformation, FileDirectoryInformation,
+    FileFsAttributeInformation, FileFsDeviceInformation, FileFsFullSizeInformation,
+    FileFsSizeInformation, FileFsVolumeInformation, FileFullDirectoryInformation,
     FileInformationClass, FileInformationClassLevel, FileNamesInformation, FileRenameInformation,
-    FileStandardInformation, FileSystemAttributes, FileSystemInformationClass, FileSystemInformationClassLevel,
-    Information, NtStatus, ServerDeviceAnnounceResponse, ServerDriveIoRequest, ServerDriveLockControlRequest,
-    ServerDriveQueryDirectoryRequest, ServerDriveQueryInformationRequest, ServerDriveQueryVolumeInformationRequest,
+    FileStandardInformation, FileSystemAttributes, FileSystemInformationClass,
+    FileSystemInformationClassLevel, Information, NtStatus, ServerDeviceAnnounceResponse,
+    ServerDriveIoRequest, ServerDriveLockControlRequest, ServerDriveQueryDirectoryRequest,
+    ServerDriveQueryInformationRequest, ServerDriveQueryVolumeInformationRequest,
     ServerDriveSetInformationRequest,
 };
 use ironrdp::rdpdr::pdu::esc::{ScardCall, ScardIoCtlCode};
@@ -70,7 +73,9 @@ struct Open {
 enum Node {
     File(File),
     /// `pending` is the listing of the directory still to be handed out, one entry per request.
-    Dir { pending: Option<VecDeque<DirEntry>> },
+    Dir {
+        pending: Option<VecDeque<DirEntry>>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -92,12 +97,23 @@ struct Meta {
 
 impl DriveBackend {
     pub(crate) fn new(root: &Path) -> Result<Self, String> {
-        let root = root.canonicalize().map_err(|e| format!("共享目录不可用 {}: {e}", root.display()))?;
+        let root = root
+            .canonicalize()
+            .map_err(|e| format!("共享目录不可用 {}: {e}", root.display()))?;
         if !root.is_dir() {
             return Err(format!("共享路径不是目录: {}", root.display()));
         }
-        let label = root.file_name().map(|n| n.to_string_lossy().into_owned()).filter(|n| !n.is_empty()).unwrap_or_else(|| "OpsBatch".to_string());
-        Ok(Self { root, label, open: HashMap::new(), next_file_id: 1 })
+        let label = root
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| "OpsBatch".to_string());
+        Ok(Self {
+            root,
+            label,
+            open: HashMap::new(),
+            next_file_id: 1,
+        })
     }
 
     /// The name the remote machine shows for the drive.
@@ -108,16 +124,24 @@ impl DriveBackend {
     fn handle(&mut self, req: ServerDriveIoRequest) -> Vec<RdpdrPdu> {
         match req {
             ServerDriveIoRequest::ServerCreateDriveRequest(r) => vec![self.create(r)],
-            ServerDriveIoRequest::ServerDriveQueryInformationRequest(r) => vec![self.query_information(r)],
+            ServerDriveIoRequest::ServerDriveQueryInformationRequest(r) => {
+                vec![self.query_information(r)]
+            }
             ServerDriveIoRequest::DeviceCloseRequest(r) => vec![self.close(r)],
-            ServerDriveIoRequest::ServerDriveQueryDirectoryRequest(r) => vec![self.query_directory(r)],
+            ServerDriveIoRequest::ServerDriveQueryDirectoryRequest(r) => {
+                vec![self.query_directory(r)]
+            }
             // A change notification stays pending until something changes; there is nothing to watch, so it is never answered.
             ServerDriveIoRequest::ServerDriveNotifyChangeDirectoryRequest(_) => Vec::new(),
-            ServerDriveIoRequest::ServerDriveQueryVolumeInformationRequest(r) => vec![self.query_volume(r)],
+            ServerDriveIoRequest::ServerDriveQueryVolumeInformationRequest(r) => {
+                vec![self.query_volume(r)]
+            }
             ServerDriveIoRequest::DeviceControlRequest(r) => vec![device_control(r)],
             ServerDriveIoRequest::DeviceReadRequest(r) => vec![self.read(r)],
             ServerDriveIoRequest::DeviceWriteRequest(r) => vec![self.write(r)],
-            ServerDriveIoRequest::ServerDriveSetInformationRequest(r) => vec![self.set_information(r)],
+            ServerDriveIoRequest::ServerDriveSetInformationRequest(r) => {
+                vec![self.set_information(r)]
+            }
             ServerDriveIoRequest::ServerDriveLockControlRequest(r) => vec![lock_control(r)],
         }
     }
@@ -131,12 +155,18 @@ impl DriveBackend {
             match part {
                 "" | "." => continue,
                 ".." => return Err(NtStatus::ACCESS_DENIED),
-                p if p.contains(':') || p.contains('\0') => return Err(NtStatus::from(STATUS_OBJECT_NAME_INVALID)),
+                p if p.contains(':') || p.contains('\0') => {
+                    return Err(NtStatus::from(STATUS_OBJECT_NAME_INVALID))
+                }
                 _ => {}
             }
             let direct = current.join(part);
             // Windows looks names up without regard to case; a case-sensitive disk has to be searched for the match.
-            current = if direct.symlink_metadata().is_ok() { direct } else { case_insensitive_child(&current, part).unwrap_or(direct) };
+            current = if direct.symlink_metadata().is_ok() {
+                direct
+            } else {
+                case_insensitive_child(&current, part).unwrap_or(direct)
+            };
         }
         if self.inside_root(&current) {
             Ok(current)
@@ -154,7 +184,11 @@ impl DriveBackend {
                 Ok(real) => return real.starts_with(&self.root),
                 Err(_) => {
                     // a link whose target is missing could be created through: refuse it
-                    if probe.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+                    if probe
+                        .symlink_metadata()
+                        .map(|m| m.file_type().is_symlink())
+                        .unwrap_or(false)
+                    {
                         return false;
                     }
                     match probe.parent() {
@@ -169,7 +203,14 @@ impl DriveBackend {
     fn insert(&mut self, path: PathBuf, node: Node, delete_on_close: bool) -> u32 {
         let id = self.next_file_id;
         self.next_file_id = self.next_file_id.wrapping_add(1).max(1);
-        self.open.insert(id, Open { path, node, delete_on_close });
+        self.open.insert(
+            id,
+            Open {
+                path,
+                node,
+                delete_on_close,
+            },
+        );
         id
     }
 
@@ -178,29 +219,51 @@ impl DriveBackend {
     fn create(&mut self, r: DeviceCreateRequest) -> RdpdrPdu {
         let io = r.device_io_request.clone();
         let reply = |status: NtStatus, file_id: u32, information: Information| {
-            RdpdrPdu::DeviceCreateResponse(DeviceCreateResponse { device_io_reply: DeviceIoResponse::new(io.clone(), status), file_id, information })
+            RdpdrPdu::DeviceCreateResponse(DeviceCreateResponse {
+                device_io_reply: DeviceIoResponse::new(io.clone(), status),
+                file_id,
+                information,
+            })
         };
         let path = match self.resolve(&r.path) {
             Ok(p) => p,
             Err(status) => return reply(status, 0, Information::empty()),
         };
-        let wants_directory = r.create_options.contains(CreateOptions::FILE_DIRECTORY_FILE);
-        let forbids_directory = r.create_options.contains(CreateOptions::FILE_NON_DIRECTORY_FILE);
-        let delete_on_close = r.create_options.contains(CreateOptions::FILE_DELETE_ON_CLOSE);
+        let wants_directory = r
+            .create_options
+            .contains(CreateOptions::FILE_DIRECTORY_FILE);
+        let forbids_directory = r
+            .create_options
+            .contains(CreateOptions::FILE_NON_DIRECTORY_FILE);
+        let delete_on_close = r
+            .create_options
+            .contains(CreateOptions::FILE_DELETE_ON_CLOSE);
         let disposition = r.create_disposition;
         let wants_write = r.desired_access.intersects(
-            DesiredAccess::FILE_WRITE_DATA_OR_FILE_ADD_FILE | DesiredAccess::FILE_APPEND_DATA_OR_FILE_ADD_SUBDIRECTORY | DesiredAccess::GENERIC_WRITE | DesiredAccess::GENERIC_ALL,
+            DesiredAccess::FILE_WRITE_DATA_OR_FILE_ADD_FILE
+                | DesiredAccess::FILE_APPEND_DATA_OR_FILE_ADD_SUBDIRECTORY
+                | DesiredAccess::GENERIC_WRITE
+                | DesiredAccess::GENERIC_ALL,
         );
 
         match fs::metadata(&path) {
             Ok(m) if m.is_dir() => {
                 if forbids_directory {
-                    return reply(NtStatus::from(STATUS_FILE_IS_A_DIRECTORY), 0, Information::empty());
+                    return reply(
+                        NtStatus::from(STATUS_FILE_IS_A_DIRECTORY),
+                        0,
+                        Information::empty(),
+                    );
                 }
                 if disposition == CreateDisposition::FILE_CREATE {
                     return reply(NtStatus::OBJECT_NAME_COLLISION, 0, Information::empty());
                 }
-                if matches!(disposition, CreateDisposition::FILE_OVERWRITE | CreateDisposition::FILE_OVERWRITE_IF | CreateDisposition::FILE_SUPERSEDE) {
+                if matches!(
+                    disposition,
+                    CreateDisposition::FILE_OVERWRITE
+                        | CreateDisposition::FILE_OVERWRITE_IF
+                        | CreateDisposition::FILE_SUPERSEDE
+                ) {
                     return reply(NtStatus::ACCESS_DENIED, 0, Information::empty());
                 }
                 let id = self.insert(path, Node::Dir { pending: None }, delete_on_close);
@@ -213,13 +276,23 @@ impl DriveBackend {
                 if disposition == CreateDisposition::FILE_CREATE {
                     return reply(NtStatus::OBJECT_NAME_COLLISION, 0, Information::empty());
                 }
-                let overwrite = matches!(disposition, CreateDisposition::FILE_OVERWRITE | CreateDisposition::FILE_OVERWRITE_IF | CreateDisposition::FILE_SUPERSEDE);
+                let overwrite = matches!(
+                    disposition,
+                    CreateDisposition::FILE_OVERWRITE
+                        | CreateDisposition::FILE_OVERWRITE_IF
+                        | CreateDisposition::FILE_SUPERSEDE
+                );
                 let information = match disposition {
                     CreateDisposition::FILE_SUPERSEDE => Information::FILE_SUPERSEDED,
                     _ if overwrite => Information::FILE_OVERWRITTEN,
                     _ => Information::FILE_OPENED,
                 };
-                match OpenOptions::new().read(true).write(wants_write || overwrite).truncate(overwrite).open(&path) {
+                match OpenOptions::new()
+                    .read(true)
+                    .write(wants_write || overwrite)
+                    .truncate(overwrite)
+                    .open(&path)
+                {
                     Ok(file) => {
                         let id = self.insert(path, Node::File(file), delete_on_close);
                         reply(NtStatus::SUCCESS, id, information)
@@ -228,19 +301,28 @@ impl DriveBackend {
                 }
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                if matches!(disposition, CreateDisposition::FILE_OPEN | CreateDisposition::FILE_OVERWRITE) {
+                if matches!(
+                    disposition,
+                    CreateDisposition::FILE_OPEN | CreateDisposition::FILE_OVERWRITE
+                ) {
                     return reply(NtStatus::NO_SUCH_FILE, 0, Information::empty());
                 }
                 if wants_directory {
                     return match fs::create_dir(&path) {
                         Ok(()) => {
-                            let id = self.insert(path, Node::Dir { pending: None }, delete_on_close);
+                            let id =
+                                self.insert(path, Node::Dir { pending: None }, delete_on_close);
                             reply(NtStatus::SUCCESS, id, Information::FILE_SUPERSEDED)
                         }
                         Err(e) => reply(create_status_of(&e), 0, Information::empty()),
                     };
                 }
-                match OpenOptions::new().read(true).write(true).create_new(true).open(&path) {
+                match OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create_new(true)
+                    .open(&path)
+                {
                     Ok(file) => {
                         let id = self.insert(path, Node::File(file), delete_on_close);
                         reply(NtStatus::SUCCESS, id, Information::FILE_SUPERSEDED)
@@ -256,30 +338,51 @@ impl DriveBackend {
         let io = r.device_io_request;
         let status = match self.open.remove(&io.file_id) {
             None => NtStatus::from(STATUS_INVALID_HANDLE),
-            Some(Open { path, node, delete_on_close }) => {
+            Some(Open {
+                path,
+                node,
+                delete_on_close,
+            }) => {
                 let is_dir = matches!(node, Node::Dir { .. });
                 // the file has to be closed before it can be removed (Windows)
                 drop(node);
                 if delete_on_close && path != self.root {
-                    let result = if is_dir { fs::remove_dir(&path) } else { fs::remove_file(&path) };
+                    let result = if is_dir {
+                        fs::remove_dir(&path)
+                    } else {
+                        fs::remove_file(&path)
+                    };
                     result.err().map_or(NtStatus::SUCCESS, |e| status_of(&e))
                 } else {
                     NtStatus::SUCCESS
                 }
             }
         };
-        RdpdrPdu::DeviceCloseResponse(DeviceCloseResponse { device_io_response: DeviceIoResponse::new(io, status) })
+        RdpdrPdu::DeviceCloseResponse(DeviceCloseResponse {
+            device_io_response: DeviceIoResponse::new(io, status),
+        })
     }
 
     fn read(&mut self, r: DeviceReadRequest) -> RdpdrPdu {
         let io = r.device_io_request;
-        let reply = |status: NtStatus, read_data: Vec<u8>| RdpdrPdu::DeviceReadResponse(DeviceReadResponse { device_io_reply: DeviceIoResponse::new(io.clone(), status), read_data });
-        let Some(Open { node: Node::File(file), .. }) = self.open.get_mut(&io.file_id) else {
+        let reply = |status: NtStatus, read_data: Vec<u8>| {
+            RdpdrPdu::DeviceReadResponse(DeviceReadResponse {
+                device_io_reply: DeviceIoResponse::new(io.clone(), status),
+                read_data,
+            })
+        };
+        let Some(Open {
+            node: Node::File(file),
+            ..
+        }) = self.open.get_mut(&io.file_id)
+        else {
             return reply(NtStatus::from(STATUS_INVALID_HANDLE), Vec::new());
         };
         let want = r.length.min(MAX_READ) as usize;
         let mut data = Vec::with_capacity(want.min(64 * 1024));
-        let result = file.seek(SeekFrom::Start(r.offset)).and_then(|_| file.take(want as u64).read_to_end(&mut data));
+        let result = file
+            .seek(SeekFrom::Start(r.offset))
+            .and_then(|_| file.take(want as u64).read_to_end(&mut data));
         match result {
             Ok(_) => reply(NtStatus::SUCCESS, data),
             Err(e) => reply(status_of(&e), Vec::new()),
@@ -288,11 +391,23 @@ impl DriveBackend {
 
     fn write(&mut self, r: DeviceWriteRequest) -> RdpdrPdu {
         let io = r.device_io_request;
-        let reply = |status: NtStatus, length: u32| RdpdrPdu::DeviceWriteResponse(DeviceWriteResponse { device_io_reply: DeviceIoResponse::new(io.clone(), status), length });
-        let Some(Open { node: Node::File(file), .. }) = self.open.get_mut(&io.file_id) else {
+        let reply = |status: NtStatus, length: u32| {
+            RdpdrPdu::DeviceWriteResponse(DeviceWriteResponse {
+                device_io_reply: DeviceIoResponse::new(io.clone(), status),
+                length,
+            })
+        };
+        let Some(Open {
+            node: Node::File(file),
+            ..
+        }) = self.open.get_mut(&io.file_id)
+        else {
             return reply(NtStatus::from(STATUS_INVALID_HANDLE), 0);
         };
-        match file.seek(SeekFrom::Start(r.offset)).and_then(|_| file.write_all(&r.write_data)) {
+        match file
+            .seek(SeekFrom::Start(r.offset))
+            .and_then(|_| file.write_all(&r.write_data))
+        {
             Ok(()) => reply(NtStatus::SUCCESS, r.write_data.len() as u32),
             Err(e) => reply(status_of(&e), 0),
         }
@@ -301,31 +416,49 @@ impl DriveBackend {
     fn query_information(&mut self, r: ServerDriveQueryInformationRequest) -> RdpdrPdu {
         let io = r.device_io_request;
         let reply = |status: NtStatus, buffer: Option<FileInformationClass>| {
-            RdpdrPdu::ClientDriveQueryInformationResponse(ClientDriveQueryInformationResponse { device_io_response: DeviceIoResponse::new(io.clone(), status), buffer })
+            RdpdrPdu::ClientDriveQueryInformationResponse(ClientDriveQueryInformationResponse {
+                device_io_response: DeviceIoResponse::new(io.clone(), status),
+                buffer,
+            })
         };
-        let Some(open) = self.open.get(&io.file_id) else { return reply(NtStatus::from(STATUS_INVALID_HANDLE), None) };
-        let name = open.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let Some(open) = self.open.get(&io.file_id) else {
+            return reply(NtStatus::from(STATUS_INVALID_HANDLE), None);
+        };
+        let name = open
+            .path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let delete_pending = open.delete_on_close;
         let meta = match Meta::read(&open.path, &name) {
             Ok(m) => m,
             Err(e) => return reply(status_of(&e), None),
         };
         let class = match r.file_info_class_lvl {
-            FileInformationClassLevel::FILE_BASIC_INFORMATION => FileInformationClass::Basic(FileBasicInformation {
-                creation_time: meta.created,
-                last_access_time: meta.accessed,
-                last_write_time: meta.written,
-                change_time: meta.written,
-                file_attributes: meta.attributes(),
-            }),
-            FileInformationClassLevel::FILE_STANDARD_INFORMATION => FileInformationClass::Standard(FileStandardInformation {
-                allocation_size: meta.size as i64,
-                end_of_file: meta.size as i64,
-                number_of_links: 1,
-                delete_pending: boolean(delete_pending),
-                directory: boolean(meta.is_dir),
-            }),
-            FileInformationClassLevel::FILE_ATTRIBUTE_TAG_INFORMATION => FileInformationClass::AttributeTag(FileAttributeTagInformation { file_attributes: meta.attributes(), reparse_tag: 0 }),
+            FileInformationClassLevel::FILE_BASIC_INFORMATION => {
+                FileInformationClass::Basic(FileBasicInformation {
+                    creation_time: meta.created,
+                    last_access_time: meta.accessed,
+                    last_write_time: meta.written,
+                    change_time: meta.written,
+                    file_attributes: meta.attributes(),
+                })
+            }
+            FileInformationClassLevel::FILE_STANDARD_INFORMATION => {
+                FileInformationClass::Standard(FileStandardInformation {
+                    allocation_size: meta.size as i64,
+                    end_of_file: meta.size as i64,
+                    number_of_links: 1,
+                    delete_pending: boolean(delete_pending),
+                    directory: boolean(meta.is_dir),
+                })
+            }
+            FileInformationClassLevel::FILE_ATTRIBUTE_TAG_INFORMATION => {
+                FileInformationClass::AttributeTag(FileAttributeTagInformation {
+                    file_attributes: meta.attributes(),
+                    reparse_tag: 0,
+                })
+            }
             _ => return reply(NtStatus::NOT_SUPPORTED, None),
         };
         reply(NtStatus::SUCCESS, Some(class))
@@ -334,14 +467,29 @@ impl DriveBackend {
     fn query_directory(&mut self, r: ServerDriveQueryDirectoryRequest) -> RdpdrPdu {
         let io = r.device_io_request.clone();
         let reply = |status: NtStatus, buffer: Option<FileInformationClass>| {
-            RdpdrPdu::ClientDriveQueryDirectoryResponse(ClientDriveQueryDirectoryResponse { device_io_reply: DeviceIoResponse::new(io.clone(), status), buffer })
+            RdpdrPdu::ClientDriveQueryDirectoryResponse(ClientDriveQueryDirectoryResponse {
+                device_io_reply: DeviceIoResponse::new(io.clone(), status),
+                buffer,
+            })
         };
-        let is_root = self.open.get(&io.file_id).is_some_and(|o| o.path == self.root);
-        let Some(open) = self.open.get_mut(&io.file_id) else { return reply(NtStatus::from(STATUS_INVALID_HANDLE), None) };
-        let Node::Dir { pending } = &mut open.node else { return reply(NtStatus::NOT_A_DIRECTORY, None) };
+        let is_root = self
+            .open
+            .get(&io.file_id)
+            .is_some_and(|o| o.path == self.root);
+        let Some(open) = self.open.get_mut(&io.file_id) else {
+            return reply(NtStatus::from(STATUS_INVALID_HANDLE), None);
+        };
+        let Node::Dir { pending } = &mut open.node else {
+            return reply(NtStatus::NOT_A_DIRECTORY, None);
+        };
         if r.initial_query != 0 || pending.is_none() {
             // the pattern is the last part of the path the request carries (`\*`, `\sub\*.txt`)
-            let pattern = r.path.rsplit(['\\', '/']).next().filter(|p| !p.is_empty()).unwrap_or("*");
+            let pattern = r
+                .path
+                .rsplit(['\\', '/'])
+                .next()
+                .filter(|p| !p.is_empty())
+                .unwrap_or("*");
             match list_directory(&open.path, is_root, pattern) {
                 Ok(entries) if entries.is_empty() => {
                     *pending = Some(VecDeque::new());
@@ -353,7 +501,10 @@ impl DriveBackend {
         }
         match pending.as_mut().and_then(VecDeque::pop_front) {
             None => reply(NtStatus::NO_MORE_FILES, None),
-            Some(entry) => reply(NtStatus::SUCCESS, Some(directory_class(&r.file_info_class_lvl, entry))),
+            Some(entry) => reply(
+                NtStatus::SUCCESS,
+                Some(directory_class(&r.file_info_class_lvl, entry)),
+            ),
         }
     }
 
@@ -361,45 +512,73 @@ impl DriveBackend {
         let status = NtStatus::SUCCESS;
         let io = r.device_io_request.clone();
         let unit = u64::from(BYTES_PER_SECTOR) * u64::from(SECTORS_PER_UNIT);
-        let (total, available) = (fs4::total_space(&self.root).unwrap_or(1 << 40), fs4::available_space(&self.root).unwrap_or(1 << 39));
+        let (total, available) = (
+            fs4::total_space(&self.root).unwrap_or(1 << 40),
+            fs4::available_space(&self.root).unwrap_or(1 << 39),
+        );
         let class = match r.fs_info_class_lvl {
-            FileSystemInformationClassLevel::FILE_FS_VOLUME_INFORMATION => FileSystemInformationClass::FileFsVolumeInformation(FileFsVolumeInformation {
-                volume_creation_time: Meta::read(&self.root, "").map(|m| m.created).unwrap_or(0),
-                volume_serial_number: 0x0b5b_a7c4,
-                supports_objects: Boolean::False,
-                volume_label: self.label.clone(),
-            }),
-            FileSystemInformationClassLevel::FILE_FS_SIZE_INFORMATION => FileSystemInformationClass::FileFsSizeInformation(FileFsSizeInformation {
-                total_alloc_units: (total / unit) as i64,
-                available_alloc_units: (available / unit) as i64,
-                sectors_per_alloc_unit: SECTORS_PER_UNIT,
-                bytes_per_sector: BYTES_PER_SECTOR,
-            }),
-            FileSystemInformationClassLevel::FILE_FS_FULL_SIZE_INFORMATION => FileSystemInformationClass::FileFsFullSizeInformation(FileFsFullSizeInformation {
-                total_alloc_units: (total / unit) as i64,
-                caller_available_alloc_units: (available / unit) as i64,
-                actual_available_alloc_units: (available / unit) as i64,
-                sectors_per_alloc_unit: SECTORS_PER_UNIT,
-                bytes_per_sector: BYTES_PER_SECTOR,
-            }),
-            FileSystemInformationClassLevel::FILE_FS_ATTRIBUTE_INFORMATION => FileSystemInformationClass::FileFsAttributeInformation(FileFsAttributeInformation {
-                file_system_attributes: FileSystemAttributes::FILE_CASE_PRESERVED_NAMES | FileSystemAttributes::FILE_UNICODE_ON_DISK,
-                max_component_name_len: 255,
-                file_system_name: "NTFS".to_string(),
-            }),
-            FileSystemInformationClassLevel::FILE_FS_DEVICE_INFORMATION => FileSystemInformationClass::FileFsDeviceInformation(FileFsDeviceInformation {
-                // FILE_DEVICE_DISK
-                device_type: 7,
-                characteristics: Characteristics::empty(),
-            }),
-            _ => return RdpdrPdu::ClientDriveQueryVolumeInformationResponse(ClientDriveQueryVolumeInformationResponse::new(io, NtStatus::NOT_SUPPORTED, None)),
+            FileSystemInformationClassLevel::FILE_FS_VOLUME_INFORMATION => {
+                FileSystemInformationClass::FileFsVolumeInformation(FileFsVolumeInformation {
+                    volume_creation_time: Meta::read(&self.root, "")
+                        .map(|m| m.created)
+                        .unwrap_or(0),
+                    volume_serial_number: 0x0b5b_a7c4,
+                    supports_objects: Boolean::False,
+                    volume_label: self.label.clone(),
+                })
+            }
+            FileSystemInformationClassLevel::FILE_FS_SIZE_INFORMATION => {
+                FileSystemInformationClass::FileFsSizeInformation(FileFsSizeInformation {
+                    total_alloc_units: (total / unit) as i64,
+                    available_alloc_units: (available / unit) as i64,
+                    sectors_per_alloc_unit: SECTORS_PER_UNIT,
+                    bytes_per_sector: BYTES_PER_SECTOR,
+                })
+            }
+            FileSystemInformationClassLevel::FILE_FS_FULL_SIZE_INFORMATION => {
+                FileSystemInformationClass::FileFsFullSizeInformation(FileFsFullSizeInformation {
+                    total_alloc_units: (total / unit) as i64,
+                    caller_available_alloc_units: (available / unit) as i64,
+                    actual_available_alloc_units: (available / unit) as i64,
+                    sectors_per_alloc_unit: SECTORS_PER_UNIT,
+                    bytes_per_sector: BYTES_PER_SECTOR,
+                })
+            }
+            FileSystemInformationClassLevel::FILE_FS_ATTRIBUTE_INFORMATION => {
+                FileSystemInformationClass::FileFsAttributeInformation(FileFsAttributeInformation {
+                    file_system_attributes: FileSystemAttributes::FILE_CASE_PRESERVED_NAMES
+                        | FileSystemAttributes::FILE_UNICODE_ON_DISK,
+                    max_component_name_len: 255,
+                    file_system_name: "NTFS".to_string(),
+                })
+            }
+            FileSystemInformationClassLevel::FILE_FS_DEVICE_INFORMATION => {
+                FileSystemInformationClass::FileFsDeviceInformation(FileFsDeviceInformation {
+                    // FILE_DEVICE_DISK
+                    device_type: 7,
+                    characteristics: Characteristics::empty(),
+                })
+            }
+            _ => {
+                return RdpdrPdu::ClientDriveQueryVolumeInformationResponse(
+                    ClientDriveQueryVolumeInformationResponse::new(
+                        io,
+                        NtStatus::NOT_SUPPORTED,
+                        None,
+                    ),
+                )
+            }
         };
-        RdpdrPdu::ClientDriveQueryVolumeInformationResponse(ClientDriveQueryVolumeInformationResponse::new(io, status, Some(class)))
+        RdpdrPdu::ClientDriveQueryVolumeInformationResponse(
+            ClientDriveQueryVolumeInformationResponse::new(io, status, Some(class)),
+        )
     }
 
     fn set_information(&mut self, r: ServerDriveSetInformationRequest) -> RdpdrPdu {
         let status = self.set_information_status(&r);
-        ClientDriveSetInformationResponse::new(&r, status).map(RdpdrPdu::ClientDriveSetInformationResponse).unwrap_or(RdpdrPdu::EmptyResponse)
+        ClientDriveSetInformationResponse::new(&r, status)
+            .map(RdpdrPdu::ClientDriveSetInformationResponse)
+            .unwrap_or(RdpdrPdu::EmptyResponse)
     }
 
     fn set_information_status(&mut self, r: &ServerDriveSetInformationRequest) -> NtStatus {
@@ -407,7 +586,9 @@ impl DriveBackend {
         if let FileInformationClass::Rename(rename) = &r.set_buffer {
             return self.rename(id, rename);
         }
-        let Some(open) = self.open.get_mut(&id) else { return NtStatus::from(STATUS_INVALID_HANDLE) };
+        let Some(open) = self.open.get_mut(&id) else {
+            return NtStatus::from(STATUS_INVALID_HANDLE);
+        };
         match &r.set_buffer {
             FileInformationClass::Basic(b) => {
                 let mut status = NtStatus::SUCCESS;
@@ -418,14 +599,19 @@ impl DriveBackend {
                         status = status_of(&e);
                     }
                 }
-                if let (Node::File(file), Some(time)) = (&open.node, filetime_to_system(b.last_write_time)) {
+                if let (Node::File(file), Some(time)) =
+                    (&open.node, filetime_to_system(b.last_write_time))
+                {
                     // not being able to set a time is not worth failing a copy for
                     let _ = file.set_modified(time);
                 }
                 status
             }
             FileInformationClass::EndOfFile(e) => match &open.node {
-                Node::File(file) => file.set_len(e.end_of_file.max(0) as u64).err().map_or(NtStatus::SUCCESS, |e| status_of(&e)),
+                Node::File(file) => file
+                    .set_len(e.end_of_file.max(0) as u64)
+                    .err()
+                    .map_or(NtStatus::SUCCESS, |e| status_of(&e)),
                 Node::Dir { .. } => NtStatus::ACCESS_DENIED,
             },
             FileInformationClass::Allocation(_) => NtStatus::SUCCESS,
@@ -437,7 +623,11 @@ impl DriveBackend {
                 if open.path == self.root {
                     return NtStatus::ACCESS_DENIED;
                 }
-                if matches!(open.node, Node::Dir { .. }) && fs::read_dir(&open.path).map(|mut d| d.next().is_some()).unwrap_or(false) {
+                if matches!(open.node, Node::Dir { .. })
+                    && fs::read_dir(&open.path)
+                        .map(|mut d| d.next().is_some())
+                        .unwrap_or(false)
+                {
                     return NtStatus::DIRECTORY_NOT_EMPTY;
                 }
                 open.delete_on_close = true;
@@ -452,7 +642,9 @@ impl DriveBackend {
             Ok(t) => t,
             Err(status) => return status,
         };
-        let Some(open) = self.open.get_mut(&id) else { return NtStatus::from(STATUS_INVALID_HANDLE) };
+        let Some(open) = self.open.get_mut(&id) else {
+            return NtStatus::from(STATUS_INVALID_HANDLE);
+        };
         if open.path == self.root || target == self.root {
             return NtStatus::ACCESS_DENIED;
         }
@@ -473,11 +665,18 @@ impl DriveBackend {
 }
 
 impl RdpdrBackend for DriveBackend {
-    fn handle_server_device_announce_response(&mut self, _pdu: ServerDeviceAnnounceResponse) -> PduResult<()> {
+    fn handle_server_device_announce_response(
+        &mut self,
+        _pdu: ServerDeviceAnnounceResponse,
+    ) -> PduResult<()> {
         Ok(())
     }
 
-    fn handle_scard_call(&mut self, _req: DeviceControlRequest<ScardIoCtlCode>, _call: ScardCall) -> PduResult<()> {
+    fn handle_scard_call(
+        &mut self,
+        _req: DeviceControlRequest<ScardIoCtlCode>,
+        _call: ScardCall,
+    ) -> PduResult<()> {
         Ok(())
     }
 
@@ -493,7 +692,9 @@ fn device_control(r: DeviceControlRequest<ironrdp::rdpdr::pdu::efs::AnyIoCtlCode
 
 /// File locks are not enforced; the lock request is answered as done.
 fn lock_control(r: ServerDriveLockControlRequest) -> RdpdrPdu {
-    RdpdrPdu::DeviceCloseResponse(DeviceCloseResponse { device_io_response: DeviceIoResponse::new(r.device_io_request, NtStatus::SUCCESS) })
+    RdpdrPdu::DeviceCloseResponse(DeviceCloseResponse {
+        device_io_response: DeviceIoResponse::new(r.device_io_request, NtStatus::SUCCESS),
+    })
 }
 
 // ---- helpers ----
@@ -530,12 +731,20 @@ fn create_status_of(e: &io::Error) -> NtStatus {
 
 fn case_insensitive_child(dir: &Path, name: &str) -> Option<PathBuf> {
     let wanted = name.to_lowercase();
-    fs::read_dir(dir).ok()?.flatten().find(|e| e.file_name().to_string_lossy().to_lowercase() == wanted).map(|e| e.path())
+    fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .find(|e| e.file_name().to_string_lossy().to_lowercase() == wanted)
+        .map(|e| e.path())
 }
 
 fn system_to_filetime(time: io::Result<SystemTime>) -> i64 {
-    let since_unix = time.ok().and_then(|t| t.duration_since(UNIX_EPOCH).ok()).unwrap_or_default();
-    ((since_unix.as_secs() + WINDOWS_TO_UNIX_SECS) * 10_000_000 + u64::from(since_unix.subsec_nanos() / 100)) as i64
+    let since_unix = time
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .unwrap_or_default();
+    ((since_unix.as_secs() + WINDOWS_TO_UNIX_SECS) * 10_000_000
+        + u64::from(since_unix.subsec_nanos() / 100)) as i64
 }
 
 /// `None` for the "leave it as it is" values a remote machine sends (0 and -1) and for times before 1970.
@@ -552,7 +761,11 @@ fn set_readonly(path: &Path, readonly: bool) -> io::Result<()> {
         use std::os::unix::fs::PermissionsExt;
         let mode = permissions.mode();
         // only the owner's write bit: set_readonly(false) would make the file writable for everybody
-        permissions.set_mode(if readonly { mode & !0o222 } else { mode | 0o200 });
+        permissions.set_mode(if readonly {
+            mode & !0o222
+        } else {
+            mode | 0o200
+        });
     }
     #[cfg(not(unix))]
     permissions.set_readonly(readonly);
@@ -566,8 +779,14 @@ impl Meta {
         Ok(Self {
             is_dir: m.is_dir(),
             size: if m.is_dir() { 0 } else { m.len() },
-            created: m.created().map(|t| system_to_filetime(Ok(t))).unwrap_or(written),
-            accessed: m.accessed().map(|t| system_to_filetime(Ok(t))).unwrap_or(written),
+            created: m
+                .created()
+                .map(|t| system_to_filetime(Ok(t)))
+                .unwrap_or(written),
+            accessed: m
+                .accessed()
+                .map(|t| system_to_filetime(Ok(t)))
+                .unwrap_or(written),
             written,
             readonly: m.permissions().readonly(),
             hidden: name.starts_with('.') && name != "." && name != "..",
@@ -575,7 +794,11 @@ impl Meta {
     }
 
     fn attributes(&self) -> FileAttributes {
-        let mut attributes = if self.is_dir { FileAttributes::FILE_ATTRIBUTE_DIRECTORY } else { FileAttributes::empty() };
+        let mut attributes = if self.is_dir {
+            FileAttributes::FILE_ATTRIBUTE_DIRECTORY
+        } else {
+            FileAttributes::empty()
+        };
         if self.readonly && !self.is_dir {
             attributes |= FileAttributes::FILE_ATTRIBUTE_READONLY;
         }
@@ -609,7 +832,13 @@ fn list_directory(dir: &Path, is_root: bool, pattern: &str) -> io::Result<VecDeq
         for dots in [".", ".."] {
             if wildcard_matches(pattern, dots) {
                 if let Ok(meta) = Meta::read(dir, dots) {
-                    list.push_back(DirEntry { name: dots.to_string(), meta: Meta { hidden: false, ..meta } });
+                    list.push_back(DirEntry {
+                        name: dots.to_string(),
+                        meta: Meta {
+                            hidden: false,
+                            ..meta
+                        },
+                    });
                 }
             }
         }
@@ -620,12 +849,32 @@ fn list_directory(dir: &Path, is_root: bool, pattern: &str) -> io::Result<VecDeq
 
 fn directory_class(level: &FileInformationClassLevel, entry: DirEntry) -> FileInformationClass {
     let m = entry.meta;
-    let (created, accessed, written, change, size, attributes, name) = (m.created, m.accessed, m.written, m.written, m.size as i64, m.attributes(), entry.name);
+    let (created, accessed, written, change, size, attributes, name) = (
+        m.created,
+        m.accessed,
+        m.written,
+        m.written,
+        m.size as i64,
+        m.attributes(),
+        entry.name,
+    );
     match *level {
-        FileInformationClassLevel::FILE_NAMES_INFORMATION => FileInformationClass::Names(FileNamesInformation::new(name)),
-        FileInformationClassLevel::FILE_FULL_DIRECTORY_INFORMATION => FileInformationClass::FullDirectory(FileFullDirectoryInformation::new(created, accessed, written, change, size, attributes, name)),
-        FileInformationClassLevel::FILE_BOTH_DIRECTORY_INFORMATION => FileInformationClass::BothDirectory(FileBothDirectoryInformation::new(created, accessed, written, change, size, attributes, name)),
-        _ => FileInformationClass::Directory(FileDirectoryInformation::new(created, accessed, written, change, size, attributes, name)),
+        FileInformationClassLevel::FILE_NAMES_INFORMATION => {
+            FileInformationClass::Names(FileNamesInformation::new(name))
+        }
+        FileInformationClassLevel::FILE_FULL_DIRECTORY_INFORMATION => {
+            FileInformationClass::FullDirectory(FileFullDirectoryInformation::new(
+                created, accessed, written, change, size, attributes, name,
+            ))
+        }
+        FileInformationClassLevel::FILE_BOTH_DIRECTORY_INFORMATION => {
+            FileInformationClass::BothDirectory(FileBothDirectoryInformation::new(
+                created, accessed, written, change, size, attributes, name,
+            ))
+        }
+        _ => FileInformationClass::Directory(FileDirectoryInformation::new(
+            created, accessed, written, change, size, attributes, name,
+        )),
     }
 }
 
@@ -634,11 +883,15 @@ fn wildcard_matches(pattern: &str, name: &str) -> bool {
     if pattern == "*.*" {
         return true;
     }
-    let p: Vec<char> = pattern.to_lowercase().chars().map(|c| match c {
-        '<' => '*',
-        '>' | '"' => '?',
-        c => c,
-    }).collect();
+    let p: Vec<char> = pattern
+        .to_lowercase()
+        .chars()
+        .map(|c| match c {
+            '<' => '*',
+            '>' | '"' => '?',
+            c => c,
+        })
+        .collect();
     let n: Vec<char> = name.to_lowercase().chars().collect();
     let (mut pi, mut ni) = (0usize, 0usize);
     let (mut star, mut mark) = (None::<usize>, 0usize);

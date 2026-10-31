@@ -10,10 +10,10 @@ mod search;
 mod tools;
 pub mod ui;
 
+use crate::scale::px;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::v_flex;
 use gpui_kit::*;
-use crate::scale::px;
 use ops_i18n::t;
 
 use super::prefs_store::{PrefsEvent, PrefsStore};
@@ -35,7 +35,13 @@ pub enum AiTab {
 }
 
 impl AiTab {
-    pub const ALL: [AiTab; 5] = [AiTab::Providers, AiTab::Agents, AiTab::Tools, AiTab::Search, AiTab::Safety];
+    pub const ALL: [AiTab; 5] = [
+        AiTab::Providers,
+        AiTab::Agents,
+        AiTab::Tools,
+        AiTab::Search,
+        AiTab::Safety,
+    ];
 
     fn label(self) -> String {
         match self {
@@ -62,11 +68,17 @@ pub struct AiSettingsView {
 impl AiSettingsView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let store = super::prefs_store::shared(cx);
-        let subs = vec![cx.subscribe_in(&store, window, |_, _, ev: &PrefsEvent, window, cx| {
-            if let PrefsEvent::SaveFailed(e) = ev {
-                toast::error(window, cx, t!("ncai.providers.headers.saveError").to_string() + " " + e);
-            }
-        })];
+        let subs = vec![
+            cx.subscribe_in(&store, window, |_, _, ev: &PrefsEvent, window, cx| {
+                if let PrefsEvent::SaveFailed(e) = ev {
+                    toast::error(
+                        window,
+                        cx,
+                        t!("ncai.providers.headers.saveError").to_string() + " " + e,
+                    );
+                }
+            }),
+        ];
         Self {
             providers: cx.new(|cx| ProvidersTab::new(store.clone(), window, cx)),
             agents: cx.new(|cx| AgentsTab::new(store.clone(), window, cx)),
@@ -114,9 +126,15 @@ impl Render for AiSettingsView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let tabs: Vec<(AiTab, String)> = AiTab::ALL.iter().map(|t| (*t, t.label())).collect();
         let weak = cx.entity().downgrade();
-        let bar = ui::tab_bar("ai-tabs", &tabs, self.tab, move |tab, _, cx| {
-            let _ = weak.update(cx, |this, cx| this.select_tab(tab, cx));
-        }, cx);
+        let bar = ui::tab_bar(
+            "ai-tabs",
+            &tabs,
+            self.tab,
+            move |tab, _, cx| {
+                let _ = weak.update(cx, |this, cx| this.select_tab(tab, cx));
+            },
+            cx,
+        );
         let body: AnyElement = match self.tab {
             AiTab::Providers => self.providers.clone().into_any_element(),
             AiTab::Agents => self.agents.clone().into_any_element(),
@@ -124,6 +142,12 @@ impl Render for AiSettingsView {
             AiTab::Search => self.search.clone().into_any_element(),
             AiTab::Safety => self.safety.clone().into_any_element(),
         };
-        v_flex().id("ai-settings").test_support().w_full().gap(px(20.)).child(bar).child(body)
+        v_flex()
+            .id("ai-settings")
+            .test_support()
+            .w_full()
+            .gap(px(20.))
+            .child(bar)
+            .child(body)
     }
 }

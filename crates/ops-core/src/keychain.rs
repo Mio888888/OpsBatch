@@ -43,12 +43,20 @@ fn key(kind: &str, id: &str) -> String {
 }
 
 fn put(kind: &str, id: &str, value: &str) -> Result<(), String> {
-    store().lock().unwrap().insert(key(kind, id), value.to_string());
+    store()
+        .lock()
+        .unwrap()
+        .insert(key(kind, id), value.to_string());
     Ok(())
 }
 
 fn get(kind: &str, id: &str) -> Result<String, SecretError> {
-    store().lock().unwrap().get(&key(kind, id)).cloned().ok_or(SecretError::Missing)
+    store()
+        .lock()
+        .unwrap()
+        .get(&key(kind, id))
+        .cloned()
+        .ok_or(SecretError::Missing)
 }
 
 fn del(kind: &str, id: &str) -> Result<(), String> {
@@ -76,30 +84,72 @@ pub fn unlock_local_vault(_master_key: Option<String>) -> Result<(), String> {
     Ok(())
 }
 
-pub fn store_api_key(provider: &str, api_key: &str) -> Result<(), String> { put("api_key", provider, api_key) }
-pub fn get_api_key(provider: &str) -> Result<String, SecretError> { get("api_key", provider) }
-pub fn delete_api_key(provider: &str) -> Result<(), String> { del("api_key", provider) }
+pub fn store_api_key(provider: &str, api_key: &str) -> Result<(), String> {
+    put("api_key", provider, api_key)
+}
+pub fn get_api_key(provider: &str) -> Result<String, SecretError> {
+    get("api_key", provider)
+}
+pub fn delete_api_key(provider: &str) -> Result<(), String> {
+    del("api_key", provider)
+}
 
-pub fn store_host_password(host_id: &str, value: &str) -> Result<(), String> { put("host_password", host_id, value) }
-pub fn get_host_password(host_id: &str) -> Result<String, SecretError> { get("host_password", host_id) }
-pub fn host_password_debug_label(host_id: &str) -> String { format!("memory:host_password:{host_id}") }
-pub fn delete_host_password(host_id: &str) -> Result<(), String> { del("host_password", host_id) }
+pub fn store_host_password(host_id: &str, value: &str) -> Result<(), String> {
+    put("host_password", host_id, value)
+}
+pub fn get_host_password(host_id: &str) -> Result<String, SecretError> {
+    get("host_password", host_id)
+}
+pub fn host_password_debug_label(host_id: &str) -> String {
+    format!("memory:host_password:{host_id}")
+}
+pub fn delete_host_password(host_id: &str) -> Result<(), String> {
+    del("host_password", host_id)
+}
 
-pub fn store_host_private_key(host_id: &str, value: &str) -> Result<(), String> { put("host_private_key", host_id, value) }
-pub fn get_host_private_key(host_id: &str) -> Result<String, SecretError> { get("host_private_key", host_id) }
-pub fn delete_host_private_key(host_id: &str) -> Result<(), String> { del("host_private_key", host_id) }
+pub fn store_host_private_key(host_id: &str, value: &str) -> Result<(), String> {
+    put("host_private_key", host_id, value)
+}
+pub fn get_host_private_key(host_id: &str) -> Result<String, SecretError> {
+    get("host_private_key", host_id)
+}
+pub fn delete_host_private_key(host_id: &str) -> Result<(), String> {
+    del("host_private_key", host_id)
+}
 
-pub fn store_host_vnc_password(host_id: &str, value: &str) -> Result<(), String> { put("host_vnc_password", host_id, value) }
-pub fn get_host_vnc_password(host_id: &str) -> Result<String, SecretError> { get("host_vnc_password", host_id) }
-pub fn delete_host_vnc_password(host_id: &str) -> Result<(), String> { del("host_vnc_password", host_id) }
+pub fn store_host_vnc_password(host_id: &str, value: &str) -> Result<(), String> {
+    put("host_vnc_password", host_id, value)
+}
+pub fn get_host_vnc_password(host_id: &str) -> Result<String, SecretError> {
+    get("host_vnc_password", host_id)
+}
+pub fn delete_host_vnc_password(host_id: &str) -> Result<(), String> {
+    del("host_vnc_password", host_id)
+}
 
-pub fn store_host_proxy_password(host_id: &str, value: &str) -> Result<(), String> { put("host_proxy_password", host_id, value) }
-pub fn get_host_proxy_password(host_id: &str) -> Result<String, SecretError> { get("host_proxy_password", host_id) }
-pub fn delete_host_proxy_password(host_id: &str) -> Result<(), String> { del("host_proxy_password", host_id) }
+pub fn store_host_proxy_password(host_id: &str, value: &str) -> Result<(), String> {
+    put("host_proxy_password", host_id, value)
+}
+pub fn get_host_proxy_password(host_id: &str) -> Result<String, SecretError> {
+    get("host_proxy_password", host_id)
+}
+pub fn delete_host_proxy_password(host_id: &str) -> Result<(), String> {
+    del("host_proxy_password", host_id)
+}
 
-pub fn store_github_token(repo_id: &str, value: &str) -> Result<(), String> { put("github_token", repo_id, value) }
-pub fn get_github_token(repo_id: &str) -> Result<String, SecretError> { get("github_token", repo_id) }
-pub fn delete_github_token(repo_id: &str) -> Result<(), String> { del("github_token", repo_id) }
+pub fn store_github_token(repo_id: &str, value: &str) -> Result<(), String> {
+    put("github_token", repo_id, value)
+}
+pub fn get_github_token(repo_id: &str) -> Result<String, SecretError> {
+    get("github_token", repo_id)
+}
+pub fn delete_github_token(repo_id: &str) -> Result<(), String> {
+    del("github_token", repo_id)
+}
 
-pub fn store_ssh_host_key(host_id: &str, fingerprint: &str) -> Result<(), String> { put("ssh_host_key", host_id, fingerprint) }
-pub fn get_ssh_host_key(host_id: &str) -> Result<String, SecretError> { get("ssh_host_key", host_id) }
+pub fn store_ssh_host_key(host_id: &str, fingerprint: &str) -> Result<(), String> {
+    put("ssh_host_key", host_id, fingerprint)
+}
+pub fn get_ssh_host_key(host_id: &str) -> Result<String, SecretError> {
+    get("ssh_host_key", host_id)
+}

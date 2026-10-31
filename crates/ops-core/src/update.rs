@@ -22,7 +22,9 @@ pub struct UpdateSource {
 /// The updater key: injected at build time like the original's `__TAURI_UPDATER_PUBKEY__` placeholder, or given at
 /// run time through `OPSBATCH_UPDATER_PUBKEY` (tests, mirrors with their own key).
 fn configured_pubkey() -> Option<String> {
-    let value = std::env::var("OPSBATCH_UPDATER_PUBKEY").ok().or_else(|| option_env!("OPSBATCH_UPDATER_PUBKEY").map(str::to_string))?;
+    let value = std::env::var("OPSBATCH_UPDATER_PUBKEY")
+        .ok()
+        .or_else(|| option_env!("OPSBATCH_UPDATER_PUBKEY").map(str::to_string))?;
     let value = value.trim().to_string();
     (!value.is_empty()).then_some(value)
 }
@@ -30,7 +32,10 @@ fn configured_pubkey() -> Option<String> {
 fn base64_decode(input: &str) -> Result<Vec<u8>, String> {
     let mut out = Vec::with_capacity(input.len() * 3 / 4);
     let (mut acc, mut bits) = (0u32, 0u32);
-    for c in input.bytes().filter(|b| !b.is_ascii_whitespace() && *b != b'=') {
+    for c in input
+        .bytes()
+        .filter(|b| !b.is_ascii_whitespace() && *b != b'=')
+    {
         let v = match c {
             b'A'..=b'Z' => c - b'A',
             b'a'..=b'z' => c - b'a' + 26,
@@ -57,12 +62,22 @@ fn decode_minisign_text(b64: &str) -> Result<String, String> {
 
 impl UpdateSource {
     pub fn github() -> Self {
-        Self { releases_page_url: RELEASES_PAGE_URL.into(), releases_atom_url: RELEASES_ATOM_URL.into(), download_base: RELEASES_DOWNLOAD_BASE.into(), pubkey: configured_pubkey() }
+        Self {
+            releases_page_url: RELEASES_PAGE_URL.into(),
+            releases_atom_url: RELEASES_ATOM_URL.into(),
+            download_base: RELEASES_DOWNLOAD_BASE.into(),
+            pubkey: configured_pubkey(),
+        }
     }
 
     pub fn with_base(base: &str) -> Self {
         let base = base.trim_end_matches('/');
-        Self { releases_page_url: format!("{base}/releases/latest"), releases_atom_url: format!("{base}/releases.atom"), download_base: format!("{base}/releases/download"), pubkey: configured_pubkey() }
+        Self {
+            releases_page_url: format!("{base}/releases/latest"),
+            releases_atom_url: format!("{base}/releases.atom"),
+            download_base: format!("{base}/releases/download"),
+            pubkey: configured_pubkey(),
+        }
     }
 
     pub fn from_env() -> Self {
@@ -96,7 +111,10 @@ pub async fn check_app_update(current_version: &str) -> Result<AppUpdateInfo, St
     check_app_update_from(&UpdateSource::from_env(), current_version).await
 }
 
-pub async fn check_app_update_from(source: &UpdateSource, current_version: &str) -> Result<AppUpdateInfo, String> {
+pub async fn check_app_update_from(
+    source: &UpdateSource,
+    current_version: &str,
+) -> Result<AppUpdateInfo, String> {
     let current_version = current_version.to_string();
     let response = reqwest::Client::new()
         .get(&source.releases_page_url)
@@ -162,7 +180,8 @@ pub fn parse_sha256sums(listing: &str, name: &str) -> Option<String> {
     listing.lines().find_map(|line| {
         let mut parts = line.trim().splitn(2, char::is_whitespace);
         let (hash, file) = (parts.next()?, parts.next()?.trim().trim_start_matches('*'));
-        (file == name && hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit())).then(|| hash.to_lowercase())
+        (file == name && hash.len() == 64 && hash.chars().all(|c| c.is_ascii_hexdigit()))
+            .then(|| hash.to_lowercase())
     })
 }
 
@@ -181,10 +200,14 @@ pub async fn download_update(
     dest_dir: &Path,
     mut on_progress: impl FnMut(u64, Option<u64>),
 ) -> Result<PathBuf, String> {
-    let name = installer_asset_name(tag, os, arch).ok_or_else(|| format!("当前平台暂无可安装的更新包 ({os}/{arch})"))?;
+    let name = installer_asset_name(tag, os, arch)
+        .ok_or_else(|| format!("当前平台暂无可安装的更新包 ({os}/{arch})"))?;
     let client = reqwest::Client::new();
     let get = |url: String| {
-        client.get(url).header(reqwest::header::USER_AGENT, "OpsBatch updater").send()
+        client
+            .get(url)
+            .header(reqwest::header::USER_AGENT, "OpsBatch updater")
+            .send()
     };
     let base = source.download_base.trim_end_matches('/');
     let sums = get(format!("{base}/{tag}/SHA256SUMS"))
@@ -194,11 +217,13 @@ pub async fn download_update(
         .text()
         .await
         .map_err(|e| format!("读取校验文件失败: {e}"))?;
-    let expected = parse_sha256sums(&sums, &name).ok_or_else(|| format!("校验文件中没有 {name}"))?;
+    let expected =
+        parse_sha256sums(&sums, &name).ok_or_else(|| format!("校验文件中没有 {name}"))?;
     // with an updater key configured the installer's minisign signature is mandatory (the Tauri updater's rule)
     let signature = match &source.pubkey {
         Some(key) => {
-            let public = minisign_verify::PublicKey::decode(&decode_minisign_text(key)?).map_err(|e| format!("更新公钥无效: {e}"))?;
+            let public = minisign_verify::PublicKey::decode(&decode_minisign_text(key)?)
+                .map_err(|e| format!("更新公钥无效: {e}"))?;
             let sig_b64 = get(format!("{base}/{tag}/{name}.sig"))
                 .await
                 .and_then(|r| r.error_for_status())
@@ -206,7 +231,8 @@ pub async fn download_update(
                 .text()
                 .await
                 .map_err(|e| format!("读取签名文件失败: {e}"))?;
-            let sig = minisign_verify::Signature::decode(&decode_minisign_text(&sig_b64)?).map_err(|e| format!("签名文件无效: {e}"))?;
+            let sig = minisign_verify::Signature::decode(&decode_minisign_text(&sig_b64)?)
+                .map_err(|e| format!("签名文件无效: {e}"))?;
             Some((public, sig))
         }
         None => None,
@@ -216,18 +242,31 @@ pub async fn download_update(
     let part = dest_dir.join(format!("{name}.part"));
     let target = dest_dir.join(&name);
     let result = async {
-        let mut response = get(format!("{base}/{tag}/{name}")).await.and_then(|r| r.error_for_status()).map_err(|e| format!("下载失败: {e}"))?;
+        let mut response = get(format!("{base}/{tag}/{name}"))
+            .await
+            .and_then(|r| r.error_for_status())
+            .map_err(|e| format!("下载失败: {e}"))?;
         let total = response.content_length();
-        let mut file = std::fs::File::create(&part).map_err(|e| format!("写入下载文件失败: {e}"))?;
+        let mut file =
+            std::fs::File::create(&part).map_err(|e| format!("写入下载文件失败: {e}"))?;
         let mut hasher = Sha256::new();
         let mut verifier = match &signature {
-            Some((public, sig)) => Some(public.verify_stream(sig).map_err(|e| format!("签名校验失败: {e}"))?),
+            Some((public, sig)) => Some(
+                public
+                    .verify_stream(sig)
+                    .map_err(|e| format!("签名校验失败: {e}"))?,
+            ),
             None => None,
         };
         let mut downloaded = 0u64;
         on_progress(0, total);
-        while let Some(chunk) = response.chunk().await.map_err(|e| format!("下载失败: {e}"))? {
-            std::io::Write::write_all(&mut file, &chunk).map_err(|e| format!("写入下载文件失败: {e}"))?;
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|e| format!("下载失败: {e}"))?
+        {
+            std::io::Write::write_all(&mut file, &chunk)
+                .map_err(|e| format!("写入下载文件失败: {e}"))?;
             hasher.update(&chunk);
             if let Some(v) = verifier.as_mut() {
                 v.update(&chunk);
@@ -240,7 +279,8 @@ pub async fn download_update(
             return Err(format!("下载不完整: {downloaded}/{}", total.unwrap_or(0)));
         }
         if let Some(v) = verifier.as_mut() {
-            v.finalize().map_err(|e| format!("安装包签名校验失败: {e}"))?;
+            v.finalize()
+                .map_err(|e| format!("安装包签名校验失败: {e}"))?;
         }
         let actual = hex(&hasher.finalize());
         if actual != expected {
@@ -263,12 +303,17 @@ pub fn open_installer(path: &Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let status = Command::new("open").arg(path).status();
     #[cfg(target_os = "windows")]
-    let status = Command::new("cmd").args(["/C", "start", ""]).arg(path).status();
+    let status = Command::new("cmd")
+        .args(["/C", "start", ""])
+        .arg(path)
+        .status();
     #[cfg(all(unix, not(target_os = "macos")))]
     let status = {
         use std::os::unix::fs::PermissionsExt;
         let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755));
-        Command::new("xdg-open").arg(path.parent().unwrap_or(path)).status()
+        Command::new("xdg-open")
+            .arg(path.parent().unwrap_or(path))
+            .status()
     };
     match status {
         Ok(s) if s.success() => Ok(()),
@@ -447,9 +492,18 @@ mod tests {
 
     #[test]
     fn installer_names_follow_the_release_convention() {
-        assert_eq!(installer_asset_name("v0.2.0", "macos", "aarch64").as_deref(), Some("OpsBatch-0.2.0-macos-aarch64.dmg"));
-        assert_eq!(installer_asset_name("0.2.0", "windows", "amd64").as_deref(), Some("OpsBatch-0.2.0-windows-x86_64-setup.exe"));
-        assert_eq!(installer_asset_name("0.2.0", "linux", "x86_64").as_deref(), Some("OpsBatch-0.2.0-linux-x86_64.AppImage"));
+        assert_eq!(
+            installer_asset_name("v0.2.0", "macos", "aarch64").as_deref(),
+            Some("OpsBatch-0.2.0-macos-aarch64.dmg")
+        );
+        assert_eq!(
+            installer_asset_name("0.2.0", "windows", "amd64").as_deref(),
+            Some("OpsBatch-0.2.0-windows-x86_64-setup.exe")
+        );
+        assert_eq!(
+            installer_asset_name("0.2.0", "linux", "x86_64").as_deref(),
+            Some("OpsBatch-0.2.0-linux-x86_64.AppImage")
+        );
         assert!(installer_asset_name("0.2.0", "freebsd", "x86_64").is_none());
         assert!(installer_asset_name("0.2.0", "macos", "riscv64").is_none());
     }
@@ -457,9 +511,18 @@ mod tests {
     #[test]
     fn checksum_listing_is_parsed_strictly() {
         let h = "a".repeat(64);
-        let listing = format!("{h}  OpsBatch-1.0.0-macos-aarch64.dmg\n{}  *other.exe\nbad  short.bin\n", "B".repeat(64));
-        assert_eq!(parse_sha256sums(&listing, "OpsBatch-1.0.0-macos-aarch64.dmg"), Some(h));
-        assert_eq!(parse_sha256sums(&listing, "other.exe"), Some("b".repeat(64)));
+        let listing = format!(
+            "{h}  OpsBatch-1.0.0-macos-aarch64.dmg\n{}  *other.exe\nbad  short.bin\n",
+            "B".repeat(64)
+        );
+        assert_eq!(
+            parse_sha256sums(&listing, "OpsBatch-1.0.0-macos-aarch64.dmg"),
+            Some(h)
+        );
+        assert_eq!(
+            parse_sha256sums(&listing, "other.exe"),
+            Some("b".repeat(64))
+        );
         assert_eq!(parse_sha256sums(&listing, "short.bin"), None);
         assert_eq!(parse_sha256sums(&listing, "missing"), None);
     }

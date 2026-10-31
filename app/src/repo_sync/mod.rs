@@ -6,7 +6,13 @@ use ops_library::github::PullResult;
 
 /// (added, updated, deleted, errors, total) of a sync result.
 pub fn result_stats(r: &PullResult) -> (usize, usize, usize, usize, usize) {
-    (r.added.len(), r.updated.len(), r.deleted.len(), r.errors.len(), r.added.len() + r.updated.len() + r.deleted.len() + r.errors.len())
+    (
+        r.added.len(),
+        r.updated.len(),
+        r.deleted.len(),
+        r.errors.len(),
+        r.added.len() + r.updated.len() + r.deleted.len() + r.errors.len(),
+    )
 }
 
 /// Lines of the result list in display order, each with its sigil: `+` added, `~` updated, `-` deleted, `!` error.
@@ -29,7 +35,12 @@ mod tests {
     use super::*;
 
     fn result() -> PullResult {
-        PullResult { added: vec!["a".into(), "b".into()], updated: vec!["c".into()], deleted: vec!["3 items removed".into()], errors: vec!["bad".into()] }
+        PullResult {
+            added: vec!["a".into(), "b".into()],
+            updated: vec!["c".into()],
+            deleted: vec!["3 items removed".into()],
+            errors: vec!["bad".into()],
+        }
     }
 
     #[test]
@@ -39,6 +50,15 @@ mod tests {
         assert_eq!(change_count(&r), 3);
         let lines = result_lines(&r);
         assert_eq!(lines.iter().map(|(c, _)| *c).collect::<String>(), "++~-!");
-        assert_eq!(result_stats(&PullResult { added: vec![], updated: vec![], deleted: vec![], errors: vec![] }).4, 0);
+        assert_eq!(
+            result_stats(&PullResult {
+                added: vec![],
+                updated: vec![],
+                deleted: vec![],
+                errors: vec![]
+            })
+            .4,
+            0
+        );
     }
 }

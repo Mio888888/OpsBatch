@@ -6,19 +6,23 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::scale::px;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Icon, Selectable as _, Sizable as _, TitleBar};
+use gpui_kit::component::{
+    h_flex, v_flex, ActiveTheme as _, Icon, Selectable as _, Sizable as _, TitleBar,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use crate::scale::px;
 use ops_ai::parser::RdpOperation;
 use ops_i18n::t;
 use ops_rdp::frame::decode_frame_payload;
 use ops_rdp::keys::{keyboard_input_events, modifier_events, KeyModifiers};
-use ops_rdp::{RdpConnectRequest, RdpInputEvent, RdpMetricsPayload, RdpStatusPayload, RdpTransportMode};
+use ops_rdp::{
+    RdpConnectRequest, RdpInputEvent, RdpMetricsPayload, RdpStatusPayload, RdpTransportMode,
+};
 
 use super::agent::{execute_operations, wait_for_settle};
 use super::ai_panel::RdpAiPanel;
@@ -54,7 +58,15 @@ pub fn forget_no_avc(host_id: &str) {
 
 fn preferred_transport(host: Option<&HostRequest>) -> RdpTransportMode {
     match host {
-        Some(h) if NO_AVC_HOSTS.lock().unwrap().iter().any(|id| id == &h.host_id) => RdpTransportMode::LegacyBitmap,
+        Some(h)
+            if NO_AVC_HOSTS
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|id| id == &h.host_id) =>
+        {
+            RdpTransportMode::LegacyBitmap
+        }
         _ => PREFERRED_TRANSPORT,
     }
 }
@@ -125,15 +137,24 @@ impl RdpState {
 }
 
 pub fn create_session_id(host_id: &str) -> String {
-    format!("rdp-{host_id}-{}-{}", chrono::Utc::now().timestamp_millis(), &uuid::Uuid::new_v4().simple().to_string()[..8])
+    format!(
+        "rdp-{host_id}-{}-{}",
+        chrono::Utc::now().timestamp_millis(),
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    )
 }
 
 /// The remote desktop size to request for a stage of this size (never above 1920×1080, never below 640×480).
 pub fn desktop_request_size(stage_w: f32, stage_h: f32) -> (u16, u16) {
     let (w, h) = (f64::from(stage_w.max(1.0)), f64::from(stage_h.max(1.0)));
-    let scale = (f64::from(MAX_DESKTOP.0) / w).min(f64::from(MAX_DESKTOP.1) / h).min(1.0);
+    let scale = (f64::from(MAX_DESKTOP.0) / w)
+        .min(f64::from(MAX_DESKTOP.1) / h)
+        .min(1.0);
     let clamp = |v: f64, lo: u32, hi: u32| ((v * scale).round() as u32).clamp(lo, hi) as u16;
-    (clamp(w, MIN_DESKTOP.0, MAX_DESKTOP.0), clamp(h, MIN_DESKTOP.1, MAX_DESKTOP.1))
+    (
+        clamp(w, MIN_DESKTOP.0, MAX_DESKTOP.0),
+        clamp(h, MIN_DESKTOP.1, MAX_DESKTOP.1),
+    )
 }
 
 struct FpsCounter {
@@ -181,19 +202,35 @@ impl RdpWindow {
     pub fn open(host: HostRequest, cx: &mut App) {
         let options = window::window_options(WindowKind::Rdp, &t!("rdp.windowTitle"), cx);
         let label = format!("rdp-{}", host.host_id);
-        window::open_or_focus(&label, options, cx, move |window, cx| cx.new(|cx| Self::new(Some(host), String::new(), window, cx)));
+        window::open_or_focus(&label, options, cx, move |window, cx| {
+            cx.new(|cx| Self::new(Some(host), String::new(), window, cx))
+        });
     }
 
     /// Window without a host (the original's `/rdp` page opened without a target).
     pub fn open_empty(query_host_id: &str, cx: &mut App) {
         let options = window::window_options(WindowKind::Rdp, &t!("rdp.windowTitle"), cx);
         let q = query_host_id.to_string();
-        window::open_or_focus("rdp", options, cx, move |window, cx| cx.new(|cx| Self::new(None, q, window, cx)));
+        window::open_or_focus("rdp", options, cx, move |window, cx| {
+            cx.new(|cx| Self::new(None, q, window, cx))
+        });
     }
 
-    pub fn new(host: Option<HostRequest>, query_host_id: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        host: Option<HostRequest>,
+        query_host_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let weak = cx.entity().downgrade();
-        let ai = cx.new(|cx| RdpAiPanel::new(weak, host.as_ref().map(|h| h.host_id.clone()).unwrap_or_default(), window, cx));
+        let ai = cx.new(|cx| {
+            RdpAiPanel::new(
+                weak,
+                host.as_ref().map(|h| h.host_id.clone()).unwrap_or_default(),
+                window,
+                cx,
+            )
+        });
         let transport = preferred_transport(host.as_ref());
         let mut this = Self {
             host,
@@ -206,7 +243,11 @@ impl RdpWindow {
             tiles: TileLayer::default(),
             focus: cx.focus_handle(),
             stage_bounds: Rc::new(Cell::new((0.0, 0.0, 0.0, 0.0))),
-            fps: FpsCounter { frames: 0, since: Instant::now(), shown: None },
+            fps: FpsCounter {
+                frames: 0,
+                since: Instant::now(),
+                shown: None,
+            },
             metrics: None,
             // the original opens the assistant with the window; here it starts closed (the toolbar button opens it)
             ai_open: false,
@@ -300,7 +341,10 @@ impl RdpWindow {
     fn stage_size(&self, window: &Window) -> (f32, f32) {
         let vp = window.viewport_size();
         let aside = if self.ai_open { AI_ASIDE_WIDTH } else { 0.0 };
-        (f32::from(vp.width) - aside, f32::from(vp.height) - TOOLBAR_HEIGHT)
+        (
+            f32::from(vp.width) - aside,
+            f32::from(vp.height) - TOOLBAR_HEIGHT,
+        )
     }
 
     pub fn disconnect_active(&mut self) {
@@ -311,7 +355,9 @@ impl RdpWindow {
     }
 
     pub fn connect(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(host) = self.host.clone() else { return };
+        let Some(host) = self.host.clone() else {
+            return;
+        };
         self.disconnect_active();
         self.generation += 1;
         let generation = self.generation;
@@ -321,17 +367,27 @@ impl RdpWindow {
         self.session_id = Some(sid.clone());
         self.desktop = (width, height);
         self.state = RdpState::Connecting;
-        self.status_message = Some(if let Some(m) = self.status_message.take().filter(|_| self.fell_back && self.transport == RdpTransportMode::LegacyBitmap) {
-            m
-        } else if self.transport == RdpTransportMode::H264Direct {
-            "正在进行 RDP TCP、TLS、NLA 与 EGFX 握手".to_string()
-        } else {
-            "正在进行 RDP TCP、TLS 与 NLA 握手".to_string()
-        });
+        self.status_message = Some(
+            if let Some(m) = self
+                .status_message
+                .take()
+                .filter(|_| self.fell_back && self.transport == RdpTransportMode::LegacyBitmap)
+            {
+                m
+            } else if self.transport == RdpTransportMode::H264Direct {
+                "正在进行 RDP TCP、TLS、NLA 与 EGFX 握手".to_string()
+            } else {
+                "正在进行 RDP TCP、TLS 与 NLA 握手".to_string()
+            },
+        );
         self.surface.clear();
         self.tiles.clear(window);
         self.metrics = None;
-        self.fps = FpsCounter { frames: 0, since: Instant::now(), shown: None };
+        self.fps = FpsCounter {
+            frames: 0,
+            since: Instant::now(),
+            shown: None,
+        };
         cx.notify();
 
         let ctx = crate::services::ctx(cx);
@@ -350,29 +406,42 @@ impl RdpWindow {
                         Err(_) => break,
                     }
                 }
-                if this.update_in(cx, |this, _, cx| this.apply_frames(generation, batch, cx)).is_err() {
+                if this
+                    .update_in(cx, |this, _, cx| this.apply_frames(generation, batch, cx))
+                    .is_err()
+                {
                     break;
                 }
             }
         }));
         self.tasks.push(cx.spawn_in(window, async move |this, cx| {
             while let Ok(ev) = status_rx.recv_async().await {
-                let Some(payload) = ev.parse::<RdpStatusPayload>() else { continue };
-                if this.update_in(cx, |this, window, cx| this.on_status(generation, payload, window, cx)).is_err() {
+                let Some(payload) = ev.parse::<RdpStatusPayload>() else {
+                    continue;
+                };
+                if this
+                    .update_in(cx, |this, window, cx| {
+                        this.on_status(generation, payload, window, cx)
+                    })
+                    .is_err()
+                {
                     break;
                 }
             }
         }));
         self.tasks.push(cx.spawn(async move |this, cx| {
             while let Ok(ev) = metrics_rx.recv_async().await {
-                let Some(payload) = ev.parse::<RdpMetricsPayload>() else { continue };
-                if this.update(cx, |this, cx| {
-                    if this.generation == generation {
-                        this.metrics = Some(payload);
-                        cx.notify();
-                    }
-                })
-                .is_err()
+                let Some(payload) = ev.parse::<RdpMetricsPayload>() else {
+                    continue;
+                };
+                if this
+                    .update(cx, |this, cx| {
+                        if this.generation == generation {
+                            this.metrics = Some(payload);
+                            cx.notify();
+                        }
+                    })
+                    .is_err()
                 {
                     break;
                 }
@@ -390,18 +459,36 @@ impl RdpWindow {
                 if failed > 0 {
                     parts.push(format!("{failed} 个文件下载失败"));
                 }
-                if !parts.is_empty() && this.update(cx, |this, cx| this.show_toast(parts.join("，"), Duration::from_secs(5), cx)).is_err() {
+                if !parts.is_empty()
+                    && this
+                        .update(cx, |this, cx| {
+                            this.show_toast(parts.join("，"), Duration::from_secs(5), cx)
+                        })
+                        .is_err()
+                {
                     break;
                 }
             }
         }));
 
-        let request = RdpConnectRequest { host_id: host.host_id.clone(), session_id: Some(sid.clone()), width: Some(width), height: Some(height), domain: None, transport_mode: Some(self.transport) };
+        let request = RdpConnectRequest {
+            host_id: host.host_id.clone(),
+            session_id: Some(sid.clone()),
+            width: Some(width),
+            height: Some(height),
+            domain: None,
+            transport_mode: Some(self.transport),
+        };
         let manager = rdp_manager(cx);
         let core = ctx.core.clone();
         self.tasks.push(cx.spawn(async move |this, cx| {
             let result = ops_core::rt::run(async move {
-                match tokio::time::timeout(CONNECT_TIMEOUT, manager.connect_host(&core, request, frame_tx)).await {
+                match tokio::time::timeout(
+                    CONNECT_TIMEOUT,
+                    manager.connect_host(&core, request, frame_tx),
+                )
+                .await
+                {
                     Ok(r) => r,
                     Err(_) => Err("RDP 连接超时".to_string()),
                 }
@@ -415,7 +502,10 @@ impl RdpWindow {
                 match result {
                     Ok(resp) => {
                         this.desktop = (resp.width, resp.height);
-                        if !matches!(this.state, RdpState::Error | RdpState::Terminated | RdpState::Disconnected) {
+                        if !matches!(
+                            this.state,
+                            RdpState::Error | RdpState::Terminated | RdpState::Disconnected
+                        ) {
                             this.state = RdpState::Connected;
                             this.status_message = None;
                         }
@@ -430,19 +520,32 @@ impl RdpWindow {
         }));
     }
 
-    pub fn on_status(&mut self, generation: u64, payload: RdpStatusPayload, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn on_status(
+        &mut self,
+        generation: u64,
+        payload: RdpStatusPayload,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.generation != generation {
             return;
         }
-        let unavailable = matches!(payload.detail, Some(ops_rdp::RdpStatusDetail::H264DirectUnavailable { .. }));
+        let unavailable = matches!(
+            payload.detail,
+            Some(ops_rdp::RdpStatusDetail::H264DirectUnavailable { .. })
+        );
         if unavailable {
             if let Some(host) = &self.host {
                 remember_no_avc(&host.host_id);
             }
         }
-        let decode_failed = payload.state == "error" && payload.message.as_deref().is_some_and(is_h264_failure);
+        let decode_failed =
+            payload.state == "error" && payload.message.as_deref().is_some_and(is_h264_failure);
         if self.transport == RdpTransportMode::H264Direct && (unavailable || decode_failed) {
-            let reason = payload.message.clone().unwrap_or_else(|| "服务器不支持 H.264 直显。".to_string());
+            let reason = payload
+                .message
+                .clone()
+                .unwrap_or_else(|| "服务器不支持 H.264 直显。".to_string());
             self.fall_back_to_bitmap(&reason, window, cx);
             return;
         }
@@ -451,13 +554,19 @@ impl RdpWindow {
         }
         if payload.state == "error" && payload.message.as_deref().is_some_and(is_connection_lost) {
             // a session that held for 30s starts the count again
-            if self.connected_at.is_some_and(|t| t.elapsed() > Duration::from_secs(30)) {
+            if self
+                .connected_at
+                .is_some_and(|t| t.elapsed() > Duration::from_secs(30))
+            {
                 self.auto_retries = 0;
             }
             if self.connected_at.is_some() && self.auto_retries < MAX_AUTO_RECONNECTS {
                 self.auto_retries += 1;
                 let (attempt, delay) = (self.auto_retries, reconnect_delay(self.auto_retries));
-                let message = format!("连接中断，{} 秒后自动重连（{attempt}/{MAX_AUTO_RECONNECTS}）", delay.as_secs());
+                let message = format!(
+                    "连接中断，{} 秒后自动重连（{attempt}/{MAX_AUTO_RECONNECTS}）",
+                    delay.as_secs()
+                );
                 self.state = RdpState::Connecting;
                 self.status_message = Some(message.clone());
                 self.show_toast(message, delay + Duration::from_secs(2), cx);
@@ -509,10 +618,20 @@ impl RdpWindow {
                     // The cursor the client draws itself moves with every mouse event; only larger repaints
                     // (windows, menus, page loads) count as the remote screen reacting.
                     if f.region_width > 72 || f.region_height > 72 {
-                        self.activity.store(self.clock_base.elapsed().as_millis() as u64, std::sync::atomic::Ordering::Relaxed);
+                        self.activity.store(
+                            self.clock_base.elapsed().as_millis() as u64,
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
                     }
                     self.desktop = (f.width, f.height);
-                    match self.surface.apply_rgba((f.width, f.height), f.x, f.y, f.region_width, f.region_height, f.rgba) {
+                    match self.surface.apply_rgba(
+                        (f.width, f.height),
+                        f.x,
+                        f.y,
+                        f.region_width,
+                        f.region_height,
+                        f.rgba,
+                    ) {
                         Ok(()) => drew += 1,
                         Err(_) => self.status_message = Some(t!("rdp.invalidFrame")),
                     }
@@ -524,7 +643,8 @@ impl RdpWindow {
             self.fps.frames += drew;
             let elapsed = self.fps.since.elapsed();
             if elapsed >= Duration::from_secs(1) {
-                self.fps.shown = Some((f64::from(self.fps.frames) / elapsed.as_secs_f64()).round() as u32);
+                self.fps.shown =
+                    Some((f64::from(self.fps.frames) / elapsed.as_secs_f64()).round() as u32);
                 self.fps.frames = 0;
                 self.fps.since = Instant::now();
             }
@@ -556,11 +676,15 @@ impl RdpWindow {
     // ---- input ----
 
     fn connected_session(&self) -> Option<&str> {
-        (self.state == RdpState::Connected).then_some(self.session_id.as_deref()).flatten()
+        (self.state == RdpState::Connected)
+            .then_some(self.session_id.as_deref())
+            .flatten()
     }
 
     fn send_input(&self, event: RdpInputEvent, cx: &App) {
-        let Some(sid) = self.connected_session() else { return };
+        let Some(sid) = self.connected_session() else {
+            return;
+        };
         let ctx = crate::services::ctx(cx);
         if let Err(e) = rdp_manager(cx).send_input(&ctx.core, sid, event) {
             log::warn!("rdp input failed: {e}");
@@ -568,24 +692,50 @@ impl RdpWindow {
     }
 
     fn remote_point(&self, pos: Point<Pixels>) -> Option<(u16, u16)> {
-        map_point_fit(self.stage_bounds.get(), self.desktop, (f32::from(pos.x), f32::from(pos.y)), false)
+        map_point_fit(
+            self.stage_bounds.get(),
+            self.desktop,
+            (f32::from(pos.x), f32::from(pos.y)),
+            false,
+        )
     }
 
-    fn mouse_button(&mut self, button: MouseButton, pos: Point<Pixels>, down: bool, window: &mut Window, cx: &mut Context<Self>) {
+    fn mouse_button(
+        &mut self,
+        button: MouseButton,
+        pos: Point<Pixels>,
+        down: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if down {
             window.focus(&self.focus, cx);
         }
         self.pointer = Some(pos);
-        let Some((x, y)) = self.remote_point(pos) else { return };
-        let Some(code) = button_code(button) else { return };
-        self.send_input(RdpInputEvent::MouseButton { x, y, button: code, down }, cx);
+        let Some((x, y)) = self.remote_point(pos) else {
+            return;
+        };
+        let Some(code) = button_code(button) else {
+            return;
+        };
+        self.send_input(
+            RdpInputEvent::MouseButton {
+                x,
+                y,
+                button: code,
+                down,
+            },
+            cx,
+        );
     }
 
     /// Sent at once: the session keeps only the last of the moves that pile up while a write is in flight, and a move
     /// needs no repaint here (the remote picture draws the pointer itself).
     fn mouse_moved(&mut self, pos: Point<Pixels>, cx: &mut Context<Self>) {
         self.pointer = Some(pos);
-        let Some((x, y)) = self.remote_point(pos) else { return };
+        let Some((x, y)) = self.remote_point(pos) else {
+            return;
+        };
         self.send_input(RdpInputEvent::MouseMove { x, y }, cx);
     }
 
@@ -602,15 +752,33 @@ impl RdpWindow {
         // GPUI scrolls content down for positive deltas, i.e. the wheel turned "up"; RDP positive = up as well.
         // Sideways it is the other way round: content moving right means scrolling left.
         for (vertical, delta) in self.wheel.push(dx, dy) {
-            self.send_input(RdpInputEvent::Wheel { x, y, delta, vertical }, cx);
+            self.send_input(
+                RdpInputEvent::Wheel {
+                    x,
+                    y,
+                    delta,
+                    vertical,
+                },
+                cx,
+            );
         }
         cx.stop_propagation();
     }
 
     fn key(&mut self, ev: &KeyDownEvent, down: bool, cx: &mut Context<Self>) {
         let m = ev.keystroke.modifiers;
-        let mods = KeyModifiers { control: m.control, alt: m.alt, platform: m.platform };
-        let events = keyboard_input_events(&ev.keystroke.key, ev.keystroke.key_char.as_deref(), mods, down, ev.is_held);
+        let mods = KeyModifiers {
+            control: m.control,
+            alt: m.alt,
+            platform: m.platform,
+        };
+        let events = keyboard_input_events(
+            &ev.keystroke.key,
+            ev.keystroke.key_char.as_deref(),
+            mods,
+            down,
+            ev.is_held,
+        );
         if events.is_empty() {
             return;
         }
@@ -621,7 +789,11 @@ impl RdpWindow {
     }
 
     fn modifiers_changed(&mut self, now: Modifiers, cx: &mut Context<Self>) {
-        let km = |m: Modifiers| KeyModifiers { control: m.control, alt: m.alt, platform: m.platform };
+        let km = |m: Modifiers| KeyModifiers {
+            control: m.control,
+            alt: m.alt,
+            platform: m.platform,
+        };
         for e in modifier_events(self.last_mods.shift, now.shift, km(self.last_mods), km(now)) {
             self.send_input(e, cx);
         }
@@ -629,16 +801,34 @@ impl RdpWindow {
     }
 
     fn drop_files(&mut self, paths: &ExternalPaths, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(sid) = self.session_id.clone().filter(|_| self.state == RdpState::Connected) else { return };
-        let list: Vec<String> = paths.paths().iter().map(|p| p.to_string_lossy().into_owned()).collect();
+        let Some(sid) = self
+            .session_id
+            .clone()
+            .filter(|_| self.state == RdpState::Connected)
+        else {
+            return;
+        };
+        let list: Vec<String> = paths
+            .paths()
+            .iter()
+            .map(|p| p.to_string_lossy().into_owned())
+            .collect();
         if list.is_empty() {
             return;
         }
         let position = self.remote_point(window.mouse_position());
-        self.show_toast(format!("正在上传 {} 个文件...", list.len()), Duration::from_secs(4), cx);
+        self.show_toast(
+            format!("正在上传 {} 个文件...", list.len()),
+            Duration::from_secs(4),
+            cx,
+        );
         let count = list.len();
         match rdp_manager(cx).upload_files(&sid, list, position) {
-            Ok(()) => self.show_toast(format!("正在粘贴 {count} 个文件到远程桌面..."), Duration::from_secs(4), cx),
+            Ok(()) => self.show_toast(
+                format!("正在粘贴 {count} 个文件到远程桌面..."),
+                Duration::from_secs(4),
+                cx,
+            ),
             Err(e) => self.show_toast(format!("上传失败: {e}"), Duration::from_secs(5), cx),
         }
     }
@@ -646,8 +836,16 @@ impl RdpWindow {
     // ---- AI agent ----
 
     /// Play AI operations on the remote desktop; resolves when the plan (including the settle pause) is done.
-    pub fn execute_operations(&self, ops: Vec<RdpOperation>, cx: &mut Context<Self>) -> Task<Result<(), String>> {
-        let Some(sid) = self.session_id.clone().filter(|_| self.state == RdpState::Connected) else {
+    pub fn execute_operations(
+        &self,
+        ops: Vec<RdpOperation>,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<(), String>> {
+        let Some(sid) = self
+            .session_id
+            .clone()
+            .filter(|_| self.state == RdpState::Connected)
+        else {
             return Task::ready(Err("RDP 会话未连接，无法执行 AI 操作".to_string()));
         };
         let manager = rdp_manager(cx);
@@ -708,9 +906,21 @@ impl RdpWindow {
     fn pill_style(&self, cx: &App) -> (Hsla, Hsla, Hsla) {
         let ui = crate::theme::ui(cx);
         match self.state {
-            RdpState::Connecting => (rgb(0x5a4312).into(), rgb(0xfff4d6).into(), rgb(0xf6d786).into()),
-            RdpState::Error | RdpState::Terminated => (rgb(0x8c1d18).into(), rgb(0xfde1df).into(), rgb(0xf6aaa5).into()),
-            RdpState::Connected => (rgb(0x0f5132).into(), rgb(0xd9f7e7).into(), rgb(0xa7e6c2).into()),
+            RdpState::Connecting => (
+                rgb(0x5a4312).into(),
+                rgb(0xfff4d6).into(),
+                rgb(0xf6d786).into(),
+            ),
+            RdpState::Error | RdpState::Terminated => (
+                rgb(0x8c1d18).into(),
+                rgb(0xfde1df).into(),
+                rgb(0xf6aaa5).into(),
+            ),
+            RdpState::Connected => (
+                rgb(0x0f5132).into(),
+                rgb(0xd9f7e7).into(),
+                rgb(0xa7e6c2).into(),
+            ),
             _ => (ui.text_secondary, ui.main, ui.border_strong),
         }
     }
@@ -725,12 +935,24 @@ fn stage_grid(color: Hsla) -> impl IntoElement {
             let (ox, oy) = (f32::from(bounds.origin.x), f32::from(bounds.origin.y));
             let mut x = 0.0;
             while x < w {
-                window.paint_quad(fill(Bounds::new(point(gpui_kit::px(ox + x), gpui_kit::px(oy)), size(gpui_kit::px(1.), gpui_kit::px(h))), color));
+                window.paint_quad(fill(
+                    Bounds::new(
+                        point(gpui_kit::px(ox + x), gpui_kit::px(oy)),
+                        size(gpui_kit::px(1.), gpui_kit::px(h)),
+                    ),
+                    color,
+                ));
                 x += 18.0;
             }
             let mut y = 0.0;
             while y < h {
-                window.paint_quad(fill(Bounds::new(point(gpui_kit::px(ox), gpui_kit::px(oy + y)), size(gpui_kit::px(w), gpui_kit::px(1.))), color));
+                window.paint_quad(fill(
+                    Bounds::new(
+                        point(gpui_kit::px(ox), gpui_kit::px(oy + y)),
+                        size(gpui_kit::px(w), gpui_kit::px(1.)),
+                    ),
+                    color,
+                ));
                 y += 18.0;
             }
         },
@@ -746,7 +968,13 @@ fn rdp_manager_for_drop() -> Arc<ops_rdp::RdpManager> {
 /// The local input method (Pinyin, Kana, Hangul...) composes text; what the user commits is typed on the remote
 /// desktop as Unicode. While composing, the text is shown under the picture (the remote has no notion of it).
 impl EntityInputHandler for RdpWindow {
-    fn text_for_range(&mut self, range: std::ops::Range<usize>, adjusted: &mut Option<std::ops::Range<usize>>, _: &mut Window, _: &mut Context<Self>) -> Option<String> {
+    fn text_for_range(
+        &mut self,
+        range: std::ops::Range<usize>,
+        adjusted: &mut Option<std::ops::Range<usize>>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<String> {
         // the only text this view holds is the composition
         let text = self.marked.as_deref()?;
         let units: Vec<u16> = text.encode_utf16().collect();
@@ -755,13 +983,28 @@ impl EntityInputHandler for RdpWindow {
         String::from_utf16(&units[start..end]).ok()
     }
 
-    fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> {
+    fn selected_text_range(
+        &mut self,
+        _: bool,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<UTF16Selection> {
         let end = self.marked.as_deref().map(utf16_len).unwrap_or(0);
-        Some(UTF16Selection { range: end..end, reversed: false })
+        Some(UTF16Selection {
+            range: end..end,
+            reversed: false,
+        })
     }
 
-    fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<std::ops::Range<usize>> {
-        self.marked.as_deref().filter(|m| !m.is_empty()).map(|m| 0..utf16_len(m))
+    fn marked_text_range(
+        &self,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<std::ops::Range<usize>> {
+        self.marked
+            .as_deref()
+            .filter(|m| !m.is_empty())
+            .map(|m| 0..utf16_len(m))
     }
 
     fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
@@ -770,7 +1013,13 @@ impl EntityInputHandler for RdpWindow {
         }
     }
 
-    fn replace_text_in_range(&mut self, _: Option<std::ops::Range<usize>>, text: &str, _: &mut Window, cx: &mut Context<Self>) {
+    fn replace_text_in_range(
+        &mut self,
+        _: Option<std::ops::Range<usize>>,
+        text: &str,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.marked = None;
         for e in text_events(text) {
             self.send_input(e, cx);
@@ -778,18 +1027,44 @@ impl EntityInputHandler for RdpWindow {
         cx.notify();
     }
 
-    fn replace_and_mark_text_in_range(&mut self, _: Option<std::ops::Range<usize>>, new_text: &str, _: Option<std::ops::Range<usize>>, _: &mut Window, cx: &mut Context<Self>) {
+    fn replace_and_mark_text_in_range(
+        &mut self,
+        _: Option<std::ops::Range<usize>>,
+        new_text: &str,
+        _: Option<std::ops::Range<usize>>,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.marked = Some(new_text.to_string()).filter(|t| !t.is_empty());
         cx.notify();
     }
 
-    fn bounds_for_range(&mut self, _: std::ops::Range<usize>, element_bounds: Bounds<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<Bounds<Pixels>> {
+    fn bounds_for_range(
+        &mut self,
+        _: std::ops::Range<usize>,
+        element_bounds: Bounds<Pixels>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
         // the candidate list opens next to the pointer (where the user is most likely typing), else at the bottom
-        let at = self.pointer.unwrap_or_else(|| point(element_bounds.origin.x + element_bounds.size.width / 2.0, element_bounds.origin.y + element_bounds.size.height - px(48.)));
-        Some(Bounds { origin: at, size: size(px(2.), px(20.)) })
+        let at = self.pointer.unwrap_or_else(|| {
+            point(
+                element_bounds.origin.x + element_bounds.size.width / 2.0,
+                element_bounds.origin.y + element_bounds.size.height - px(48.),
+            )
+        });
+        Some(Bounds {
+            origin: at,
+            size: size(px(2.), px(20.)),
+        })
     }
 
-    fn character_index_for_point(&mut self, _: Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
+    fn character_index_for_point(
+        &mut self,
+        _: Point<Pixels>,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Option<usize> {
         Some(0)
     }
 
@@ -821,33 +1096,72 @@ impl Render for RdpWindow {
                 .size_full()
                 .bg(theme.background)
                 .text_color(theme.foreground)
-                .child(TitleBar::new().child(div().text_size(px(13.)).child(format!("{} · {}", t!("rdp.windowTitle"), if self.query_host_id.is_empty() { t!("rdp.state.idle") } else { self.query_host_id.clone() }))))
+                .child(
+                    TitleBar::new().child(div().text_size(px(13.)).child(format!(
+                        "{} · {}",
+                        t!("rdp.windowTitle"),
+                        if self.query_host_id.is_empty() {
+                            t!("rdp.state.idle")
+                        } else {
+                            self.query_host_id.clone()
+                        }
+                    ))),
+                )
                 .child(
                     v_flex()
                         .flex_1()
                         .items_center()
                         .justify_center()
                         .gap_2()
-                        .child(div().font_weight(FontWeight::SEMIBOLD).child(t!("rdp.emptyTitle")))
-                        .child(div().text_size(px(12.)).text_color(theme.muted_foreground).child(t!("rdp.emptySubtitle")))
-                        .child(Button::new("rdp-open-assets").primary().label(t!("rdp.openAssets")).on_click(cx.listener(|this, _, window, cx| this.close_and_open_assets(window, cx)))),
+                        .child(
+                            div()
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(t!("rdp.emptyTitle")),
+                        )
+                        .child(
+                            div()
+                                .text_size(px(12.))
+                                .text_color(theme.muted_foreground)
+                                .child(t!("rdp.emptySubtitle")),
+                        )
+                        .child(
+                            Button::new("rdp-open-assets")
+                                .primary()
+                                .label(t!("rdp.openAssets"))
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.close_and_open_assets(window, cx)
+                                })),
+                        ),
                 )
                 .into_any_element();
         };
 
         let has_frame = self.surface.has_frame();
-        let showing_connect = self.state == RdpState::Connecting || (self.state == RdpState::Connected && !has_frame);
+        let showing_connect =
+            self.state == RdpState::Connecting || (self.state == RdpState::Connected && !has_frame);
         let showing_error = matches!(self.state, RdpState::Error | RdpState::Terminated);
         let meta = {
             let mut s = host.ip.clone();
             if self.session_id.is_some() {
-                s += &format!(" · {}x{} · {}", self.desktop.0, self.desktop.1, if self.transport == RdpTransportMode::H264Direct { "H.264" } else { "bitmap" });
+                s += &format!(
+                    " · {}x{} · {}",
+                    self.desktop.0,
+                    self.desktop.1,
+                    if self.transport == RdpTransportMode::H264Direct {
+                        "H.264"
+                    } else {
+                        "bitmap"
+                    }
+                );
             }
             if let Some(fps) = self.fps.shown {
                 s += &format!(" · {fps} FPS");
             }
             if let Some(m) = &self.metrics {
-                s += &format!(" · srv {}/s · tx {}/s · {:.1} MB/s", m.server_updates_per_second, m.sent_frames_per_second, m.sent_mbytes_per_second);
+                s += &format!(
+                    " · srv {}/s · tx {}/s · {:.1} MB/s",
+                    m.server_updates_per_second, m.sent_frames_per_second, m.sent_mbytes_per_second
+                );
             }
             s
         };
@@ -855,13 +1169,30 @@ impl Render for RdpWindow {
         let ui = crate::theme::ui(cx);
         // `.rdp-page` / `.rdp-stage` / `.rdp-overlay` (dark and light variants)
         let (page_bg, stage_bg, grid_color, overlay_bg): (Hsla, Hsla, Hsla, Hsla) = if ui.is_dark {
-            (rgb(0x181b1d).into(), rgb(0x111416).into(), rgba(0xb4cdc40d).into(), rgba(0x111416d6).into())
+            (
+                rgb(0x181b1d).into(),
+                rgb(0x111416).into(),
+                rgba(0xb4cdc40d).into(),
+                rgba(0x111416d6).into(),
+            )
         } else {
-            (rgb(0xf5f7f6).into(), rgb(0xeef3f0).into(), rgba(0x19302a0a).into(), rgba(0xf5f7f6d1).into())
+            (
+                rgb(0xf5f7f6).into(),
+                rgb(0xeef3f0).into(),
+                rgba(0x19302a0a).into(),
+                rgba(0xf5f7f6d1).into(),
+            )
         };
         // the picture: natural size (never stretched), centred, on its own dark panel with a soft shadow
         let stage_rect = self.stage_bounds.get();
-        let picture = fit_rect(stage_rect, self.desktop, false).map(|(x, y, scale)| (x - stage_rect.0, y - stage_rect.1, f32::from(self.desktop.0) * scale, f32::from(self.desktop.1) * scale));
+        let picture = fit_rect(stage_rect, self.desktop, false).map(|(x, y, scale)| {
+            (
+                x - stage_rect.0,
+                y - stage_rect.1,
+                f32::from(self.desktop.0) * scale,
+                f32::from(self.desktop.1) * scale,
+            )
+        });
         let bounds_cell = self.stage_bounds.clone();
         let (ime_focus, ime_view) = (self.focus.clone(), cx.entity());
 
@@ -877,36 +1208,139 @@ impl Render for RdpWindow {
             .bg(stage_bg)
             .track_focus(&self.focus)
             .key_context("RdpStage")
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, ev: &MouseDownEvent, window, cx| this.mouse_button(MouseButton::Left, ev.position, true, window, cx)))
-            .on_mouse_down(MouseButton::Middle, cx.listener(|this, ev: &MouseDownEvent, window, cx| this.mouse_button(MouseButton::Middle, ev.position, true, window, cx)))
-            .on_mouse_down(MouseButton::Right, cx.listener(|this, ev: &MouseDownEvent, window, cx| this.mouse_button(MouseButton::Right, ev.position, true, window, cx)))
-            .on_mouse_up(MouseButton::Left, cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Left, ev.position, false, window, cx)))
-            .on_mouse_up(MouseButton::Middle, cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Middle, ev.position, false, window, cx)))
-            .on_mouse_up(MouseButton::Right, cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Right, ev.position, false, window, cx)))
-            .on_mouse_down(MouseButton::Navigate(NavigationDirection::Back), cx.listener(|this, ev: &MouseDownEvent, window, cx| this.mouse_button(MouseButton::Navigate(NavigationDirection::Back), ev.position, true, window, cx)))
-            .on_mouse_down(MouseButton::Navigate(NavigationDirection::Forward), cx.listener(|this, ev: &MouseDownEvent, window, cx| this.mouse_button(MouseButton::Navigate(NavigationDirection::Forward), ev.position, true, window, cx)))
-            .on_mouse_up(MouseButton::Navigate(NavigationDirection::Back), cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Navigate(NavigationDirection::Back), ev.position, false, window, cx)))
-            .on_mouse_up(MouseButton::Navigate(NavigationDirection::Forward), cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Navigate(NavigationDirection::Forward), ev.position, false, window, cx)))
-            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, cx| this.mouse_moved(ev.position, cx)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, ev: &MouseDownEvent, window, cx| {
+                    this.mouse_button(MouseButton::Left, ev.position, true, window, cx)
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Middle,
+                cx.listener(|this, ev: &MouseDownEvent, window, cx| {
+                    this.mouse_button(MouseButton::Middle, ev.position, true, window, cx)
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, ev: &MouseDownEvent, window, cx| {
+                    this.mouse_button(MouseButton::Right, ev.position, true, window, cx)
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, ev: &MouseUpEvent, window, cx| {
+                    this.mouse_button(MouseButton::Left, ev.position, false, window, cx)
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Middle,
+                cx.listener(|this, ev: &MouseUpEvent, window, cx| {
+                    this.mouse_button(MouseButton::Middle, ev.position, false, window, cx)
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Right,
+                cx.listener(|this, ev: &MouseUpEvent, window, cx| {
+                    this.mouse_button(MouseButton::Right, ev.position, false, window, cx)
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Navigate(NavigationDirection::Back),
+                cx.listener(|this, ev: &MouseDownEvent, window, cx| {
+                    this.mouse_button(
+                        MouseButton::Navigate(NavigationDirection::Back),
+                        ev.position,
+                        true,
+                        window,
+                        cx,
+                    )
+                }),
+            )
+            .on_mouse_down(
+                MouseButton::Navigate(NavigationDirection::Forward),
+                cx.listener(|this, ev: &MouseDownEvent, window, cx| {
+                    this.mouse_button(
+                        MouseButton::Navigate(NavigationDirection::Forward),
+                        ev.position,
+                        true,
+                        window,
+                        cx,
+                    )
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Navigate(NavigationDirection::Back),
+                cx.listener(|this, ev: &MouseUpEvent, window, cx| {
+                    this.mouse_button(
+                        MouseButton::Navigate(NavigationDirection::Back),
+                        ev.position,
+                        false,
+                        window,
+                        cx,
+                    )
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Navigate(NavigationDirection::Forward),
+                cx.listener(|this, ev: &MouseUpEvent, window, cx| {
+                    this.mouse_button(
+                        MouseButton::Navigate(NavigationDirection::Forward),
+                        ev.position,
+                        false,
+                        window,
+                        cx,
+                    )
+                }),
+            )
+            .on_mouse_move(
+                cx.listener(|this, ev: &MouseMoveEvent, _, cx| this.mouse_moved(ev.position, cx)),
+            )
             .on_scroll_wheel(cx.listener(|this, ev: &ScrollWheelEvent, _, cx| this.wheel(ev, cx)))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| this.key(ev, true, cx)))
             .on_key_up(cx.listener(|this, ev: &KeyUpEvent, _, cx| {
                 let m = ev.keystroke.modifiers;
-                let mods = KeyModifiers { control: m.control, alt: m.alt, platform: m.platform };
-                let events = keyboard_input_events(&ev.keystroke.key, ev.keystroke.key_char.as_deref(), mods, false, false);
+                let mods = KeyModifiers {
+                    control: m.control,
+                    alt: m.alt,
+                    platform: m.platform,
+                };
+                let events = keyboard_input_events(
+                    &ev.keystroke.key,
+                    ev.keystroke.key_char.as_deref(),
+                    mods,
+                    false,
+                    false,
+                );
                 for e in events {
                     this.send_input(e, cx);
                 }
             }))
-            .on_modifiers_changed(cx.listener(|this, ev: &ModifiersChangedEvent, _, cx| this.modifiers_changed(ev.modifiers, cx)))
+            .on_modifiers_changed(cx.listener(|this, ev: &ModifiersChangedEvent, _, cx| {
+                this.modifiers_changed(ev.modifiers, cx)
+            }))
             .drag_over::<ExternalPaths>(|s, _, _, cx| s.border_2().border_color(cx.theme().primary))
-            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| this.drop_files(paths, window, cx)))
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                this.drop_files(paths, window, cx)
+            }))
             // Records where the stage is, for mouse mapping.
             .child(
                 canvas(
-                    move |bounds, _, _| bounds_cell.set((f32::from(bounds.origin.x), f32::from(bounds.origin.y), f32::from(bounds.size.width), f32::from(bounds.size.height))),
+                    move |bounds, _, _| {
+                        bounds_cell.set((
+                            f32::from(bounds.origin.x),
+                            f32::from(bounds.origin.y),
+                            f32::from(bounds.size.width),
+                            f32::from(bounds.size.height),
+                        ))
+                    },
                     // the local input method composes text for the remote desktop through this handler
-                    move |bounds, _, window, cx| window.handle_input(&ime_focus, ElementInputHandler::new(bounds, ime_view.clone()), cx),
+                    move |bounds, _, window, cx| {
+                        window.handle_input(
+                            &ime_focus,
+                            ElementInputHandler::new(bounds, ime_view.clone()),
+                            cx,
+                        )
+                    },
                 )
                 .absolute()
                 .size_full(),
@@ -914,35 +1348,69 @@ impl Render for RdpWindow {
             .child(stage_grid(grid_color))
             .when_some(self.marked.clone().filter(|m| !m.is_empty()), |d, text| {
                 d.child(
-                    div().absolute().bottom(px(18.)).left_0().right_0().flex().justify_center().child(
-                        div().id("rdp-composition").test_support().px(px(10.)).py(px(4.)).rounded(px(6.)).bg(overlay_bg).border_1().border_color(grid_color).text_size(px(13.)).text_color(theme.foreground).child(text),
-                    ),
-                )
-            })
-            .when_some(picture.filter(|_| self.tiles.count() > 0), |d, (x, y, w, h)| {
-                let (tiles, desktop) = (self.tiles.snapshot(), self.desktop);
-                d.child(
                     div()
                         .absolute()
-                        .left(gpui_kit::px(x))
-                        .top(gpui_kit::px(y))
-                        .w(gpui_kit::px(w))
-                        .h(gpui_kit::px(h))
-                        .bg(rgb(0x101417))
-                        .shadow(vec![BoxShadow { color: rgba(0x1c282429).into(), offset: point(px(0.), px(18.)), blur_radius: px(38.), spread_radius: px(0.), inset: false }])
+                        .bottom(px(18.))
+                        .left_0()
+                        .right_0()
+                        .flex()
+                        .justify_center()
                         .child(
-                            canvas(
-                                |bounds, _, _| bounds,
-                                // the panel is the picture's own size: tiles go into it at the scale it is shown at
-                                move |_, bounds, window, _| {
-                                    let scale = f32::from(bounds.size.width) / f32::from(desktop.0.max(1));
-                                    tiles.paint(window, desktop, f32::from(bounds.origin.x), f32::from(bounds.origin.y), scale);
-                                },
-                            )
-                            .size_full(),
+                            div()
+                                .id("rdp-composition")
+                                .test_support()
+                                .px(px(10.))
+                                .py(px(4.))
+                                .rounded(px(6.))
+                                .bg(overlay_bg)
+                                .border_1()
+                                .border_color(grid_color)
+                                .text_size(px(13.))
+                                .text_color(theme.foreground)
+                                .child(text),
                         ),
                 )
             })
+            .when_some(
+                picture.filter(|_| self.tiles.count() > 0),
+                |d, (x, y, w, h)| {
+                    let (tiles, desktop) = (self.tiles.snapshot(), self.desktop);
+                    d.child(
+                        div()
+                            .absolute()
+                            .left(gpui_kit::px(x))
+                            .top(gpui_kit::px(y))
+                            .w(gpui_kit::px(w))
+                            .h(gpui_kit::px(h))
+                            .bg(rgb(0x101417))
+                            .shadow(vec![BoxShadow {
+                                color: rgba(0x1c282429).into(),
+                                offset: point(px(0.), px(18.)),
+                                blur_radius: px(38.),
+                                spread_radius: px(0.),
+                                inset: false,
+                            }])
+                            .child(
+                                canvas(
+                                    |bounds, _, _| bounds,
+                                    // the panel is the picture's own size: tiles go into it at the scale it is shown at
+                                    move |_, bounds, window, _| {
+                                        let scale = f32::from(bounds.size.width)
+                                            / f32::from(desktop.0.max(1));
+                                        tiles.paint(
+                                            window,
+                                            desktop,
+                                            f32::from(bounds.origin.x),
+                                            f32::from(bounds.origin.y),
+                                            scale,
+                                        );
+                                    },
+                                )
+                                .size_full(),
+                            ),
+                    )
+                },
+            )
             .when(showing_connect, |d| {
                 d.child(
                     // `.rdp-overlay`: 24px padding, 12px gap, strong 15px + 12px text
@@ -958,8 +1426,29 @@ impl Render for RdpWindow {
                         .child(
                             v_flex()
                                 .gap(px(4.))
-                                .child(div().id("rdp-overlay-title").test_support().text_size(px(15.)).font_weight(FontWeight::BOLD).text_color(ui.text).child(if self.state == RdpState::Connected { "正在等待远程画面".to_string() } else { t!("rdp.connectingTitle") }))
-                                .child(div().text_size(px(12.)).text_color(ui.text_secondary).child(self.status_message.clone().unwrap_or_else(|| t!("rdp.connectingSubtitle")))),
+                                .child(
+                                    div()
+                                        .id("rdp-overlay-title")
+                                        .test_support()
+                                        .text_size(px(15.))
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(ui.text)
+                                        .child(if self.state == RdpState::Connected {
+                                            "正在等待远程画面".to_string()
+                                        } else {
+                                            t!("rdp.connectingTitle")
+                                        }),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(12.))
+                                        .text_color(ui.text_secondary)
+                                        .child(
+                                            self.status_message
+                                                .clone()
+                                                .unwrap_or_else(|| t!("rdp.connectingSubtitle")),
+                                        ),
+                                ),
                         ),
                 )
             })
@@ -975,12 +1464,48 @@ impl Render for RdpWindow {
                         .gap(px(12.))
                         .p(px(24.))
                         .bg(overlay_bg)
-                        .child(v_flex().items_center().gap(px(4.)).text_center().child(div().text_size(px(15.)).font_weight(FontWeight::BOLD).text_color(ui.text).child(self.status_message.clone().unwrap_or_else(|| t!("rdp.connectFailed")))).child(div().text_size(px(12.)).text_color(ui.text_secondary).child(t!("rdp.errorFallback"))))
+                        .child(
+                            v_flex()
+                                .items_center()
+                                .gap(px(4.))
+                                .text_center()
+                                .child(
+                                    div()
+                                        .text_size(px(15.))
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(ui.text)
+                                        .child(
+                                            self.status_message
+                                                .clone()
+                                                .unwrap_or_else(|| t!("rdp.connectFailed")),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .text_size(px(12.))
+                                        .text_color(ui.text_secondary)
+                                        .child(t!("rdp.errorFallback")),
+                                ),
+                        )
                         .child(
                             h_flex()
                                 .gap(px(8.))
-                                .child(Button::new("rdp-reconnect-card").primary().icon(Icon::new(IconName::RefreshCw)).label(t!("rdp.reconnect")).on_click(cx.listener(|this, _, window, cx| this.reconnect(window, cx))))
-                                .child(Button::new("rdp-open-assets").label(t!("rdp.openAssets")).on_click(cx.listener(|this, _, window, cx| this.close_and_open_assets(window, cx)))),
+                                .child(
+                                    Button::new("rdp-reconnect-card")
+                                        .primary()
+                                        .icon(Icon::new(IconName::RefreshCw))
+                                        .label(t!("rdp.reconnect"))
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.reconnect(window, cx)
+                                        })),
+                                )
+                                .child(
+                                    Button::new("rdp-open-assets")
+                                        .label(t!("rdp.openAssets"))
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.close_and_open_assets(window, cx)
+                                        })),
+                                ),
                         ),
                 )
             })
@@ -998,11 +1523,35 @@ impl Render for RdpWindow {
                     .border_color(theme.primary)
                     .invisible()
                     .group_drag_over::<ExternalPaths>("rdp-stage", |s| s.visible())
-                    .child(div().font_weight(FontWeight::SEMIBOLD).child("松开以上传文件到远程桌面"))
-                    .child(div().text_size(px(12.)).text_color(theme.muted_foreground).child("文件将通过剪贴板粘贴到远程")),
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("松开以上传文件到远程桌面"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(theme.muted_foreground)
+                            .child("文件将通过剪贴板粘贴到远程"),
+                    ),
             )
             .when_some(self.toast.clone(), |d, text| {
-                d.child(div().id("rdp-toast").test_support().absolute().bottom_4().left_4().px_3().py_1p5().rounded(px(6.)).bg(theme.popover).border_1().border_color(theme.border).text_size(px(12.)).child(text))
+                d.child(
+                    div()
+                        .id("rdp-toast")
+                        .test_support()
+                        .absolute()
+                        .bottom_4()
+                        .left_4()
+                        .px_3()
+                        .py_1p5()
+                        .rounded(px(6.))
+                        .bg(theme.popover)
+                        .border_1()
+                        .border_color(theme.border)
+                        .text_size(px(12.))
+                        .child(text),
+                )
             });
 
         v_flex()
@@ -1013,58 +1562,114 @@ impl Render for RdpWindow {
             .text_color(ui.text)
             .child(
                 // `.rdp-toolbar`: 40px, 70px of window buttons, name + meta, status pill, small actions
-                TitleBar::new().h(px(TOOLBAR_HEIGHT)).pl(px(if cfg!(target_os = "macos") { 82. } else { 12. })).pr(px(12.)).bg(ui.card).child(
-                    h_flex()
-                        .w_full()
-                        .gap(px(10.))
-                        .items_center()
-                        .child(
-                            v_flex()
-                                .flex_1()
-                                .min_w_0()
-                                .gap(px(1.))
-                                .child(div().truncate().text_size(px(12.)).font_weight(FontWeight::BOLD).text_color(ui.text).child(host.name.clone()))
-                                .child(div().id("rdp-meta").test_support().truncate().text_size(px(12.)).text_color(ui.text_muted).child(meta)),
-                        )
-                        .child(
-                            div()
-                                .id("rdp-status")
-                                .test_support()
-                                .flex_none()
-                                .min_w(px(68.))
-                                .h(px(24.))
-                                .px(px(10.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .rounded_full()
-                                .border_1()
-                                .border_color(pill_border)
-                                .bg(pill_bg)
-                                .text_color(pill_fg)
-                                .text_size(px(11.))
-                                .font_weight(FontWeight::BOLD)
-                                .child(self.state.label()),
-                        )
-                        .child(
-                            h_flex()
-                                .gap(px(6.))
-                                .items_center()
-                                .child(Button::new("rdp-ai-toggle").small().icon(Icon::new(IconName::Bot)).label(t!("rdp.aiToggle")).selected(self.ai_open).on_click(cx.listener(|this, _, _, cx| {
-                                    let open = !this.ai_open;
-                                    this.set_ai_open(open, cx);
-                                })))
-                                .child(Button::new("rdp-reconnect").small().icon(Icon::new(IconName::RefreshCw)).label(t!("rdp.reconnect")).on_click(cx.listener(|this, _, window, cx| this.reconnect(window, cx))))
-                                .child(Button::new("rdp-disconnect").small().icon(Icon::new(IconName::X)).label(t!("rdp.disconnect")).on_click(cx.listener(|this, _, window, _| this.close_window(window)))),
-                        ),
-                ),
+                TitleBar::new()
+                    .h(px(TOOLBAR_HEIGHT))
+                    .pl(px(if cfg!(target_os = "macos") { 82. } else { 12. }))
+                    .pr(px(12.))
+                    .bg(ui.card)
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .gap(px(10.))
+                            .items_center()
+                            .child(
+                                v_flex()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .gap(px(1.))
+                                    .child(
+                                        div()
+                                            .truncate()
+                                            .text_size(px(12.))
+                                            .font_weight(FontWeight::BOLD)
+                                            .text_color(ui.text)
+                                            .child(host.name.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("rdp-meta")
+                                            .test_support()
+                                            .truncate()
+                                            .text_size(px(12.))
+                                            .text_color(ui.text_muted)
+                                            .child(meta),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .id("rdp-status")
+                                    .test_support()
+                                    .flex_none()
+                                    .min_w(px(68.))
+                                    .h(px(24.))
+                                    .px(px(10.))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded_full()
+                                    .border_1()
+                                    .border_color(pill_border)
+                                    .bg(pill_bg)
+                                    .text_color(pill_fg)
+                                    .text_size(px(11.))
+                                    .font_weight(FontWeight::BOLD)
+                                    .child(self.state.label()),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap(px(6.))
+                                    .items_center()
+                                    .child(
+                                        Button::new("rdp-ai-toggle")
+                                            .small()
+                                            .icon(Icon::new(IconName::Bot))
+                                            .label(t!("rdp.aiToggle"))
+                                            .selected(self.ai_open)
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                let open = !this.ai_open;
+                                                this.set_ai_open(open, cx);
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("rdp-reconnect")
+                                            .small()
+                                            .icon(Icon::new(IconName::RefreshCw))
+                                            .label(t!("rdp.reconnect"))
+                                            .on_click(cx.listener(|this, _, window, cx| {
+                                                this.reconnect(window, cx)
+                                            })),
+                                    )
+                                    .child(
+                                        Button::new("rdp-disconnect")
+                                            .small()
+                                            .icon(Icon::new(IconName::X))
+                                            .label(t!("rdp.disconnect"))
+                                            .on_click(cx.listener(|this, _, window, _| {
+                                                this.close_window(window)
+                                            })),
+                                    ),
+                            ),
+                    ),
             )
             .child(
                 h_flex()
                     .flex_1()
                     .min_h_0()
                     .child(stage)
-                    .when(self.ai_open, |d| d.child(div().id("rdp-ai-aside").test_support().w(px(AI_ASIDE_WIDTH)).h_full().flex_none().border_l_1().border_color(ui.border).bg(ui.card).child(self.ai.clone()))),
+                    .when(self.ai_open, |d| {
+                        d.child(
+                            div()
+                                .id("rdp-ai-aside")
+                                .test_support()
+                                .w(px(AI_ASIDE_WIDTH))
+                                .h_full()
+                                .flex_none()
+                                .border_l_1()
+                                .border_color(ui.border)
+                                .bg(ui.card)
+                                .child(self.ai.clone()),
+                        )
+                    }),
             )
             .into_any_element()
     }
@@ -1072,13 +1677,23 @@ impl Render for RdpWindow {
 
 #[cfg(test)]
 mod tests {
-    use super::{create_session_id, desktop_request_size, fallback_message, is_h264_failure, RdpState};
+    use super::{
+        create_session_id, desktop_request_size, fallback_message, is_h264_failure, RdpState,
+    };
 
     #[test]
     fn requested_desktop_follows_the_stage_within_limits() {
         assert_eq!(desktop_request_size(1280.0, 720.0), (1280, 720));
-        assert_eq!(desktop_request_size(3840.0, 2160.0), (1920, 1080), "scaled down to the maximum");
-        assert_eq!(desktop_request_size(300.0, 200.0), (640, 480), "raised to the minimum");
+        assert_eq!(
+            desktop_request_size(3840.0, 2160.0),
+            (1920, 1080),
+            "scaled down to the maximum"
+        );
+        assert_eq!(
+            desktop_request_size(300.0, 200.0),
+            (640, 480),
+            "raised to the minimum"
+        );
         assert_eq!(desktop_request_size(2560.0, 1080.0), (1920, 810));
     }
 
@@ -1093,8 +1708,14 @@ mod tests {
     fn h264_failures_are_recognised_and_explained() {
         assert!(is_h264_failure("H.264 解码失败: x"));
         assert!(is_h264_failure("初始化 H.264 解码器失败: y"));
-        assert!(!is_h264_failure("RDP 密码不能为空"), "authentication problems must not trigger a second login");
-        assert_eq!(fallback_message("服务器不支持。"), "服务器不支持。 正在切换到 legacy bitmap。");
+        assert!(
+            !is_h264_failure("RDP 密码不能为空"),
+            "authentication problems must not trigger a second login"
+        );
+        assert_eq!(
+            fallback_message("服务器不支持。"),
+            "服务器不支持。 正在切换到 legacy bitmap。"
+        );
     }
 
     #[test]

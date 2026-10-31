@@ -20,7 +20,9 @@ fn base_data_dir() -> PathBuf {
 
 #[cfg(target_os = "windows")]
 fn base_data_dir() -> PathBuf {
-    std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| home().join("AppData").join("Roaming"))
+    std::env::var_os("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home().join("AppData").join("Roaming"))
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -36,7 +38,9 @@ fn home() -> PathBuf {
     let var = "USERPROFILE";
     #[cfg(not(windows))]
     let var = "HOME";
-    std::env::var_os(var).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
+    std::env::var_os(var)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 /// Directory the *running application* uses.
@@ -50,7 +54,10 @@ pub fn run_data_dir() -> PathBuf {
     if std::env::var_os("OPSBATCH_DATA_DIR").is_some() || cfg!(feature = "real-vault") {
         return dir;
     }
-    let mut name = dir.file_name().map(|n| n.to_os_string()).unwrap_or_default();
+    let mut name = dir
+        .file_name()
+        .map(|n| n.to_os_string())
+        .unwrap_or_default();
     name.push("-dev");
     dir.with_file_name(name)
 }
@@ -84,7 +91,10 @@ mod tests {
                 assert_eq!(run, app_data_dir());
             } else {
                 assert_ne!(run, app_data_dir());
-                assert!(run.to_string_lossy().ends_with("com.mio.OpsBatch-dev"), "{run:?}");
+                assert!(
+                    run.to_string_lossy().ends_with("com.mio.OpsBatch-dev"),
+                    "{run:?}"
+                );
             }
         }
     }
@@ -94,7 +104,10 @@ mod tests {
     fn macos_layout_matches_tauri() {
         if std::env::var_os("OPSBATCH_DATA_DIR").is_none() {
             let s = app_data_dir().to_string_lossy().into_owned();
-            assert!(s.contains("Library/Application Support/com.mio.OpsBatch"), "{s}");
+            assert!(
+                s.contains("Library/Application Support/com.mio.OpsBatch"),
+                "{s}"
+            );
         }
     }
 }

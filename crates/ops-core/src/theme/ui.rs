@@ -35,9 +35,17 @@ pub struct UiTextPalette {
 
 pub fn ui_text_palette(is_dark: bool) -> UiTextPalette {
     if is_dark {
-        UiTextPalette { primary: "#eef1f8", secondary: "#bec4d3", muted: "#9aa1b5" }
+        UiTextPalette {
+            primary: "#eef1f8",
+            secondary: "#bec4d3",
+            muted: "#9aa1b5",
+        }
     } else {
-        UiTextPalette { primary: "#303446", secondary: "#4d5366", muted: "#535a6d" }
+        UiTextPalette {
+            primary: "#303446",
+            secondary: "#4d5366",
+            muted: "#535a6d",
+        }
     }
 }
 
@@ -47,7 +55,10 @@ mod tests {
 
     #[test]
     fn windows_defaults_to_115_percent() {
-        assert_eq!(default_ui_scale_for_platform("Windows NT 10.0"), WINDOWS_DEFAULT_UI_SCALE);
+        assert_eq!(
+            default_ui_scale_for_platform("Windows NT 10.0"),
+            WINDOWS_DEFAULT_UI_SCALE
+        );
         assert_eq!(default_ui_scale_for_platform("windows"), 115);
         assert_eq!(default_ui_scale_for_platform("MacIntel"), 100);
         assert_eq!(default_ui_scale_for_platform("macos"), 100);

@@ -4,13 +4,13 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext, Entity, TestAppContext, WindowHandle};
+use ops_core::theme::ThemeSettings;
+use ops_ssh::hosts::NewHost;
 use opsbatch_app::app::init_globals;
 use opsbatch_app::asset_tree::DEFAULT_GROUP_ID;
 use opsbatch_app::stores::assets::AssetsStore;
 use opsbatch_app::ui_state::UiState;
 use opsbatch_app::workbench::{Mode, Workbench};
-use ops_core::theme::ThemeSettings;
-use ops_ssh::hosts::NewHost;
 
 /// The UI language is process-wide, so tests in this binary must not interleave.
 static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -46,10 +46,18 @@ fn setup(cx: &mut TestAppContext, language: ops_i18n::LanguageMode) -> Fixture {
     let core = ops_core::Core::open_temp("ui").unwrap();
     // Seed through the real services (async -> run on the shared runtime before the UI exists).
     ops_core::rt::block_on(async {
-        let g = ops_ssh::groups::add_group(&core.db, "prod".into(), None).await.unwrap();
-        ops_ssh::hosts::add_host(&core.db, host("alpha", "10.0.0.1", "linux", None)).await.unwrap();
-        ops_ssh::hosts::add_host(&core.db, host("beta-web", "10.0.0.2", "linux", Some(&g.id))).await.unwrap();
-        ops_ssh::hosts::add_host(&core.db, host("win-1", "10.0.0.3", "windows", Some(&g.id))).await.unwrap();
+        let g = ops_ssh::groups::add_group(&core.db, "prod".into(), None)
+            .await
+            .unwrap();
+        ops_ssh::hosts::add_host(&core.db, host("alpha", "10.0.0.1", "linux", None))
+            .await
+            .unwrap();
+        ops_ssh::hosts::add_host(&core.db, host("beta-web", "10.0.0.2", "linux", Some(&g.id)))
+            .await
+            .unwrap();
+        ops_ssh::hosts::add_host(&core.db, host("win-1", "10.0.0.3", "windows", Some(&g.id)))
+            .await
+            .unwrap();
     });
     let ctx = ops_ssh::Ctx::new(core);
     let c2 = ctx.clone();
@@ -72,11 +80,19 @@ fn setup(cx: &mut TestAppContext, language: ops_i18n::LanguageMode) -> Fixture {
         .unwrap();
         (window.downcast::<gpui_kit::base::Root>().unwrap(), view)
     });
-    Fixture { handle, workbench, ctx }
+    Fixture {
+        handle,
+        workbench,
+        ctx,
+    }
 }
 
 /// The DB is read on the tokio runtime, so wait for the result to arrive on the UI thread.
-fn wait_until(cx: &mut TestAppContext, what: &str, mut cond: impl FnMut(&mut TestAppContext) -> bool) {
+fn wait_until(
+    cx: &mut TestAppContext,
+    what: &str,
+    mut cond: impl FnMut(&mut TestAppContext) -> bool,
+) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         cx.run_until_parked();
@@ -97,13 +113,24 @@ fn main_window_has_the_three_mode_tabs_and_switching_updates_ui_state(cx: &mut T
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let fx = setup(cx, ops_i18n::LanguageMode::ZhCn);
     cx.update_window(fx.handle.into(), |_, window, cx| {
-        for id in ["mode-terminal", "mode-workflow", "mode-github", "tool-log", "tool-settings", "tool-update"] {
+        for id in [
+            "mode-terminal",
+            "mode-workflow",
+            "mode-github",
+            "tool-log",
+            "tool-settings",
+            "tool-update",
+        ] {
             assert!(window.try_find(id).is_some(), "missing control {id}");
         }
         assert_eq!(fx.workbench.read(cx).mode(), Mode::Terminal);
         window.click("mode-workflow", cx);
         assert_eq!(fx.workbench.read(cx).mode(), Mode::Workflow);
-        assert_eq!(cx.global::<UiState>().mode, Mode::Workflow, "kept for a reopened window");
+        assert_eq!(
+            cx.global::<UiState>().mode,
+            Mode::Workflow,
+            "kept for a reopened window"
+        );
         window.click("mode-github", cx);
         assert_eq!(fx.workbench.read(cx).mode(), Mode::Github);
     })
@@ -131,12 +158,20 @@ fn asset_panel_loads_real_hosts_and_selection_drives_batch_buttons(cx: &mut Test
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let fx = setup(cx, ops_i18n::LanguageMode::ZhCn);
     // Hidden until requested.
-    cx.update_window(fx.handle.into(), |_, window, _| assert!(window.try_find("asset-panel").is_none())).unwrap();
+    cx.update_window(fx.handle.into(), |_, window, _| {
+        assert!(window.try_find("asset-panel").is_none())
+    })
+    .unwrap();
 
-    cx.update_window(fx.handle.into(), |_, window, cx| window.click("open-assets", cx)).unwrap();
+    cx.update_window(fx.handle.into(), |_, window, cx| {
+        window.click("open-assets", cx)
+    })
+    .unwrap();
     cx.update(|cx| assert!(fx.workbench.read(cx).asset_panel_visible()));
     let store = assets(cx);
-    wait_until(cx, "hosts loaded", |cx| cx.update(|cx| store.read(cx).hosts.len() == 3));
+    wait_until(cx, "hosts loaded", |cx| {
+        cx.update(|cx| store.read(cx).hosts.len() == 3)
+    });
     cx.update(|cx| {
         let s = store.read(cx);
         assert_eq!(s.groups.len(), 1);
@@ -155,15 +190,25 @@ fn asset_panel_loads_real_hosts_and_selection_drives_batch_buttons(cx: &mut Test
     .unwrap();
 
     // Select the default group via its checkbox: only "alpha" lives there.
-    cx.update_window(fx.handle.into(), |_, window, cx| window.click(("group-check", 0usize), cx)).unwrap();
+    cx.update_window(fx.handle.into(), |_, window, cx| {
+        window.click(("group-check", 0usize), cx)
+    })
+    .unwrap();
     cx.update(|cx| {
         let s = store.read(cx);
         assert_eq!(s.selected.len(), 1);
-        assert_eq!(s.host(s.selected.iter().next().unwrap()).unwrap().name, "alpha");
+        assert_eq!(
+            s.host(s.selected.iter().next().unwrap()).unwrap().name,
+            "alpha"
+        );
     });
     cx.update_window(fx.handle.into(), |_, window, cx| {
         window.render_frame(cx);
-        assert_ne!(window.find("assets-broadcast").disabled(), Some(true), "enabled once something is selected");
+        assert_ne!(
+            window.find("assets-broadcast").disabled(),
+            Some(true),
+            "enabled once something is selected"
+        );
         assert_ne!(window.find("assets-upload").disabled(), Some(true));
     })
     .unwrap();
@@ -183,9 +228,14 @@ fn asset_panel_loads_real_hosts_and_selection_drives_batch_buttons(cx: &mut Test
 fn asset_panel_lists_recent_connections_above_the_tree_and_persists_them(cx: &mut TestAppContext) {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let fx = setup(cx, ops_i18n::LanguageMode::ZhCn);
-    cx.update_window(fx.handle.into(), |_, window, cx| window.click("open-assets", cx)).unwrap();
+    cx.update_window(fx.handle.into(), |_, window, cx| {
+        window.click("open-assets", cx)
+    })
+    .unwrap();
     let store = assets(cx);
-    wait_until(cx, "hosts loaded", |cx| cx.update(|cx| store.read(cx).hosts.len() == 3));
+    wait_until(cx, "hosts loaded", |cx| {
+        cx.update(|cx| store.read(cx).hosts.len() == 3)
+    });
 
     // Open by default, empty hint while nothing was connected; the eyebrow label is gone.
     cx.update_window(fx.handle.into(), |_, window, cx| {
@@ -198,25 +248,46 @@ fn asset_panel_lists_recent_connections_above_the_tree_and_persists_them(cx: &mu
 
     let (alpha, beta) = cx.update(|cx| {
         let s = store.read(cx);
-        (s.hosts.iter().find(|h| h.name == "alpha").unwrap().id.clone(), s.hosts.iter().find(|h| h.name == "beta-web").unwrap().id.clone())
+        (
+            s.hosts
+                .iter()
+                .find(|h| h.name == "alpha")
+                .unwrap()
+                .id
+                .clone(),
+            s.hosts
+                .iter()
+                .find(|h| h.name == "beta-web")
+                .unwrap()
+                .id
+                .clone(),
+        )
     });
-    cx.update(|cx| store.update(cx, |s, cx| {
-        s.record_recent(&alpha, cx);
-        s.record_recent(&beta, cx);
-        s.record_recent(&alpha, cx);
-    }));
+    cx.update(|cx| {
+        store.update(cx, |s, cx| {
+            s.record_recent(&alpha, cx);
+            s.record_recent(&beta, cx);
+            s.record_recent(&alpha, cx);
+        })
+    });
     cx.update_window(fx.handle.into(), |_, window, cx| {
         window.render_frame(cx);
         assert!(window.try_find("asset-recent-empty").is_none());
         assert!(window.try_find(("recent-host", 0usize)).is_some());
         assert!(window.try_find(("recent-host", 1usize)).is_some());
-        assert!(window.try_find(("recent-host", 2usize)).is_none(), "no duplicates");
+        assert!(
+            window.try_find(("recent-host", 2usize)).is_none(),
+            "no duplicates"
+        );
     })
     .unwrap();
     cx.update(|cx| assert_eq!(store.read(cx).recent, [alpha.clone(), beta.clone()]));
 
     // Collapsing hides the rows but keeps the header.
-    cx.update_window(fx.handle.into(), |_, window, cx| window.click("asset-recent-toggle", cx)).unwrap();
+    cx.update_window(fx.handle.into(), |_, window, cx| {
+        window.click("asset-recent-toggle", cx)
+    })
+    .unwrap();
     cx.update_window(fx.handle.into(), |_, window, cx| {
         window.render_frame(cx);
         assert!(window.try_find("asset-recent-toggle").is_some());
@@ -228,27 +299,42 @@ fn asset_panel_lists_recent_connections_above_the_tree_and_persists_them(cx: &mu
     let ctx = fx.ctx.clone();
     wait_until(cx, "persisted", |_| {
         let ctx = ctx.clone();
-        ops_core::rt::block_on(async move { ops_core::settings::get_general_settings(&ctx.db).await.unwrap().contains_key("recentHosts") })
+        ops_core::rt::block_on(async move {
+            ops_core::settings::get_general_settings(&ctx.db)
+                .await
+                .unwrap()
+                .contains_key("recentHosts")
+        })
     });
-    cx.update(|cx| store.update(cx, |s, cx| {
-        s.recent.clear();
-        s.reload(cx);
-    }));
-    wait_until(cx, "reloaded", |cx| cx.update(|cx| store.read(cx).recent == [alpha.clone(), beta.clone()]));
+    cx.update(|cx| {
+        store.update(cx, |s, cx| {
+            s.recent.clear();
+            s.reload(cx);
+        })
+    });
+    wait_until(cx, "reloaded", |cx| {
+        cx.update(|cx| store.read(cx).recent == [alpha.clone(), beta.clone()])
+    });
 }
 
 #[gpui_kit::test]
 fn closing_and_reopening_keeps_selection_and_sidebar(cx: &mut TestAppContext) {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     let fx = setup(cx, ops_i18n::LanguageMode::ZhCn);
-    cx.update_window(fx.handle.into(), |_, window, cx| window.click("open-assets", cx)).unwrap();
+    cx.update_window(fx.handle.into(), |_, window, cx| {
+        window.click("open-assets", cx)
+    })
+    .unwrap();
     let store = assets(cx);
-    wait_until(cx, "hosts loaded", |cx| cx.update(|cx| store.read(cx).hosts.len() == 3));
+    wait_until(cx, "hosts loaded", |cx| {
+        cx.update(|cx| store.read(cx).hosts.len() == 3)
+    });
     cx.update(|cx| {
         let first = store.read(cx).hosts[0].id.clone();
         store.update(cx, |s, cx| s.toggle_host(&first, cx));
     });
-    cx.update_window(fx.handle.into(), |_, window, _| window.remove_window()).unwrap();
+    cx.update_window(fx.handle.into(), |_, window, _| window.remove_window())
+        .unwrap();
     cx.run_until_parked();
 
     // "Show main window" from the tray: a brand new window built from the same global state.
@@ -261,7 +347,10 @@ fn closing_and_reopening_keeps_selection_and_sidebar(cx: &mut TestAppContext) {
         (window, view)
     });
     cx.update(|cx| {
-        assert!(second.1.read(cx).asset_panel_visible(), "sidebar state restored");
+        assert!(
+            second.1.read(cx).asset_panel_visible(),
+            "sidebar state restored"
+        );
         assert_eq!(store.read(cx).selected.len(), 1, "selection restored");
     });
 }

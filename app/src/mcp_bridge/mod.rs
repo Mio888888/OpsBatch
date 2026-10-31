@@ -69,9 +69,21 @@ pub fn init(cx: &mut App) {
             this.apply(&settings, cx);
         })
         .detach();
-        McpBridge { status: BridgeStatus::Disabled, handle: None, desired: None, last_call: Instant::now(), calls: tx, prefs: prefs.clone(), dir: crate::services::ctx(cx).core.data_dir.join("mcp"), launcher: None }
+        McpBridge {
+            status: BridgeStatus::Disabled,
+            handle: None,
+            desired: None,
+            last_call: Instant::now(),
+            calls: tx,
+            prefs: prefs.clone(),
+            dir: crate::services::ctx(cx).core.data_dir.join("mcp"),
+            launcher: None,
+        }
     });
-    cx.set_global(BridgeGlobal { bridge: bridge.clone(), activity });
+    cx.set_global(BridgeGlobal {
+        bridge: bridge.clone(),
+        activity,
+    });
     cx.spawn(async move |cx| {
         while let Ok(call) = rx.recv_async().await {
             let _ = cx.update(|cx| dispatch(call, cx));
@@ -81,7 +93,9 @@ pub fn init(cx: &mut App) {
     // temporary mode switches itself off after the idle timeout
     let watched = bridge.clone();
     cx.spawn(async move |cx| loop {
-        cx.background_executor().timer(Duration::from_secs(30)).await;
+        cx.background_executor()
+            .timer(Duration::from_secs(30))
+            .await;
         let _ = watched.update(cx, |b, cx| b.check_idle(cx));
     })
     .detach();
@@ -99,7 +113,11 @@ impl McpBridge {
 
     /// The file the launcher reads the port and token from, while the bridge is running.
     pub fn discovery_path(&self) -> Option<String> {
-        matches!(self.status, BridgeStatus::Running(_)).then(|| ops_ai::mcp_bridge::default_discovery_path(self.dir.parent().unwrap_or(&self.dir)).display().to_string())
+        matches!(self.status, BridgeStatus::Running(_)).then(|| {
+            ops_ai::mcp_bridge::default_discovery_path(self.dir.parent().unwrap_or(&self.dir))
+                .display()
+                .to_string()
+        })
     }
 
     /// Brings the server in line with the settings: running exactly while "external MCP" is on. The HTTP switch only
@@ -115,10 +133,18 @@ impl McpBridge {
         }
         if s.http.token.is_empty() {
             // the token protects the bridge whichever transport is used
-            self.prefs.update(cx, |p, cx| p.update(cx, |prefs| prefs.external_mcp.http.token = external_mcp::generate_token()));
+            self.prefs.update(cx, |p, cx| {
+                p.update(cx, |prefs| {
+                    prefs.external_mcp.http.token = external_mcp::generate_token()
+                })
+            });
             return;
         }
-        let (address, port) = if s.http.enabled { (s.http.listen_address.clone(), s.http.port) } else { (external_mcp::DEFAULT_HTTP_HOST.to_string(), 0) };
+        let (address, port) = if s.http.enabled {
+            (s.http.listen_address.clone(), s.http.port)
+        } else {
+            (external_mcp::DEFAULT_HTTP_HOST.to_string(), 0)
+        };
         let wanted = (address.clone(), port, s.http.token.clone());
         if self.desired.as_ref() == Some(&wanted) {
             return;
@@ -129,10 +155,18 @@ impl McpBridge {
         cx.notify();
         let calls = self.calls.clone();
         let token = s.http.token.clone();
-        let url_host = if external_mcp::is_wildcard_address(&address) { s.http.client_host.clone() } else { address.clone() };
+        let url_host = if external_mcp::is_wildcard_address(&address) {
+            s.http.client_host.clone()
+        } else {
+            address.clone()
+        };
         let dir = self.dir.clone();
         cx.spawn(async move |this, cx| {
-            let result = ops_core::rt::run(async move { ops_ai::mcp_bridge::start(&address, port, token, calls).await }).await.and_then(|r| r);
+            let result = ops_core::rt::run(async move {
+                ops_ai::mcp_bridge::start(&address, port, token, calls).await
+            })
+            .await
+            .and_then(|r| r);
             let _ = this.update(cx, |this, cx| {
                 // the settings changed again while the listener was starting
                 if this.desired.as_ref() != Some(&wanted) {
@@ -141,10 +175,16 @@ impl McpBridge {
                 match result {
                     Ok(handle) => {
                         let url = external_mcp::http_url(&url_host, handle.addr.port(), "");
-                        let url = if url.is_empty() { format!("http://{}{}", handle.addr, external_mcp::HTTP_PATH) } else { url };
+                        let url = if url.is_empty() {
+                            format!("http://{}{}", handle.addr, external_mcp::HTTP_PATH)
+                        } else {
+                            url
+                        };
                         let data_dir = dir.parent().unwrap_or(&dir).to_path_buf();
                         let discovery = ops_ai::mcp_bridge::default_discovery_path(&data_dir);
-                        if let Err(e) = ops_ai::mcp_bridge::write_discovery(&discovery, handle.addr, &wanted.2) {
+                        if let Err(e) =
+                            ops_ai::mcp_bridge::write_discovery(&discovery, handle.addr, &wanted.2)
+                        {
                             log::warn!("could not write the MCP discovery file: {e}");
                         }
                         this.launcher = write_launcher(&dir);
@@ -164,7 +204,9 @@ impl McpBridge {
 
     fn stop(&mut self, status: BridgeStatus, cx: &mut Context<Self>) {
         let changed = self.handle.is_some() || self.desired.is_some() || self.status != status;
-        ops_ai::mcp_bridge::remove_discovery(&ops_ai::mcp_bridge::default_discovery_path(self.dir.parent().unwrap_or(&self.dir)));
+        ops_ai::mcp_bridge::remove_discovery(&ops_ai::mcp_bridge::default_discovery_path(
+            self.dir.parent().unwrap_or(&self.dir),
+        ));
         self.handle = None;
         self.desired = None;
         self.status = status;
@@ -178,8 +220,12 @@ impl McpBridge {
             return;
         }
         let s = self.prefs.read(cx).prefs().external_mcp.clone();
-        if s.mode == Mode::Temporary && self.last_call.elapsed() >= Duration::from_secs(s.idle_timeout_minutes as u64 * 60) {
-            self.prefs.update(cx, |p, cx| p.update(cx, |prefs| prefs.external_mcp.enabled = false));
+        if s.mode == Mode::Temporary
+            && self.last_call.elapsed() >= Duration::from_secs(s.idle_timeout_minutes as u64 * 60)
+        {
+            self.prefs.update(cx, |p, cx| {
+                p.update(cx, |prefs| prefs.external_mcp.enabled = false)
+            });
         }
     }
 }
@@ -190,9 +236,18 @@ fn write_launcher(dir: &std::path::Path) -> Option<std::path::PathBuf> {
     let exe = std::env::current_exe().ok()?;
     std::fs::create_dir_all(dir).ok()?;
     #[cfg(windows)]
-    let (name, body) = ("opsbatch-mcp.cmd", format!("@echo off\r\n\"{}\" --mcp-stdio %*\r\n", exe.display()));
+    let (name, body) = (
+        "opsbatch-mcp.cmd",
+        format!("@echo off\r\n\"{}\" --mcp-stdio %*\r\n", exe.display()),
+    );
     #[cfg(not(windows))]
-    let (name, body) = ("opsbatch-mcp", format!("#!/bin/sh\nexec '{}' --mcp-stdio \"$@\"\n", exe.display().to_string().replace('\'', "'\\''")));
+    let (name, body) = (
+        "opsbatch-mcp",
+        format!(
+            "#!/bin/sh\nexec '{}' --mcp-stdio \"$@\"\n",
+            exe.display().to_string().replace('\'', "'\\''")
+        ),
+    );
     let path = dir.join(name);
     std::fs::write(&path, body).ok()?;
     #[cfg(unix)]
@@ -205,7 +260,11 @@ fn write_launcher(dir: &std::path::Path) -> Option<std::path::PathBuf> {
 
 /// `opsbatch --mcp-stdio`: the stdio launcher. Returns the process exit code.
 pub fn run_stdio_launcher() -> i32 {
-    let discovery = std::env::var_os(ops_ai::mcp_bridge::DISCOVERY_ENV).map(std::path::PathBuf::from).unwrap_or_else(|| ops_ai::mcp_bridge::default_discovery_path(&ops_core::paths::run_data_dir()));
+    let discovery = std::env::var_os(ops_ai::mcp_bridge::DISCOVERY_ENV)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            ops_ai::mcp_bridge::default_discovery_path(&ops_core::paths::run_data_dir())
+        });
     let stdin = std::io::stdin();
     let mut stdout = std::io::stdout().lock();
     match ops_ai::mcp_bridge::run_stdio_proxy(&discovery, stdin.lock(), &mut stdout) {
@@ -236,7 +295,12 @@ struct Session {
 
 impl Session {
     fn target(&self) -> Target {
-        Target { session_id: self.id.clone(), name: self.name.clone(), ip: self.ip.clone(), local: self.local }
+        Target {
+            session_id: self.id.clone(),
+            name: self.name.clone(),
+            ip: self.ip.clone(),
+            local: self.local,
+        }
     }
 
     fn json(&self) -> serde_json::Value {
@@ -257,13 +321,35 @@ fn sessions(cx: &App) -> Vec<Session> {
     let mut out = Vec::new();
     for tab in ws.tabs() {
         let is_active = active.as_deref() == Some(tab.key.as_str());
-        let name = if tab.kind == TabKind::Local && tab.host_name.is_empty() { t!("mcpwin.target.local") } else { tab.host_name.clone() };
+        let name = if tab.kind == TabKind::Local && tab.host_name.is_empty() {
+            t!("mcpwin.target.local")
+        } else {
+            tab.host_name.clone()
+        };
         if let Some(pane) = &tab.pane {
-            out.push(Session { id: pane.read(cx).session_id.clone(), name: name.clone(), ip: tab.host_ip.clone(), local: tab.kind == TabKind::Local, host_id: tab.host_id.clone(), state: tab.state, active: is_active, pane: pane.clone() });
+            out.push(Session {
+                id: pane.read(cx).session_id.clone(),
+                name: name.clone(),
+                ip: tab.host_ip.clone(),
+                local: tab.kind == TabKind::Local,
+                host_id: tab.host_id.clone(),
+                state: tab.state,
+                active: is_active,
+                pane: pane.clone(),
+            });
         }
         if let Some(split) = &tab.split {
             if let Some(pane) = &split.pane {
-                out.push(Session { id: pane.read(cx).session_id.clone(), name: format!("{name} ({})", t!("mcpwin.target.split")), ip: tab.host_ip.clone(), local: tab.kind == TabKind::Local, host_id: tab.host_id.clone(), state: split.state, active: false, pane: pane.clone() });
+                out.push(Session {
+                    id: pane.read(cx).session_id.clone(),
+                    name: format!("{name} ({})", t!("mcpwin.target.split")),
+                    ip: tab.host_ip.clone(),
+                    local: tab.kind == TabKind::Local,
+                    host_id: tab.host_id.clone(),
+                    state: split.state,
+                    active: false,
+                    pane: pane.clone(),
+                });
             }
         }
     }
@@ -274,8 +360,15 @@ fn sessions(cx: &App) -> Vec<Session> {
 fn resolve(session_id: Option<&str>, cx: &App) -> Result<Session, String> {
     let all = sessions(cx);
     match session_id.filter(|s| !s.is_empty()) {
-        Some(id) => all.into_iter().find(|s| s.id == id).ok_or_else(|| format!("Unknown session_id: {id}. Use list_sessions to see the open sessions.")),
-        None => all.iter().find(|s| s.active && s.state == ConnState::Connected).or_else(|| all.iter().find(|s| s.state == ConnState::Connected)).cloned().ok_or_else(|| "No connected terminal session is open in OpsBatch.".to_string()),
+        Some(id) => all.into_iter().find(|s| s.id == id).ok_or_else(|| {
+            format!("Unknown session_id: {id}. Use list_sessions to see the open sessions.")
+        }),
+        None => all
+            .iter()
+            .find(|s| s.active && s.state == ConnState::Connected)
+            .or_else(|| all.iter().find(|s| s.state == ConnState::Connected))
+            .cloned()
+            .ok_or_else(|| "No connected terminal session is open in OpsBatch.".to_string()),
     }
 }
 
@@ -293,7 +386,10 @@ fn tail(text: &str, max_chars: usize) -> String {
     if count <= max_chars {
         return text.to_string();
     }
-    format!("…{}", text.chars().skip(count - max_chars).collect::<String>())
+    format!(
+        "…{}",
+        text.chars().skip(count - max_chars).collect::<String>()
+    )
 }
 
 /// Removes terminal control sequences (colours, reverse video from the shell's paste highlight, OSC titles, ...) and
@@ -361,15 +457,34 @@ fn drop_prompt_artifacts(text: &str) -> String {
 /// The line of an answer worth showing in the record: the first output line, else the status note.
 fn detail_of(text: &str, command: &str) -> String {
     let clean = strip_ansi(text);
-    let lines: Vec<&str> = clean.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let lines: Vec<&str> = clean
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
     // the terminal echoes the command first, and the record already shows it; status notes come last
-    let line = lines.iter().find(|l| !l.starts_with('[') && !command.trim().is_empty() && !l.ends_with(command.trim()) && **l != command.trim()).or_else(|| lines.iter().find(|l| !l.starts_with('['))).or_else(|| lines.first()).copied().unwrap_or("");
+    let line = lines
+        .iter()
+        .find(|l| {
+            !l.starts_with('[')
+                && !command.trim().is_empty()
+                && !l.ends_with(command.trim())
+                && **l != command.trim()
+        })
+        .or_else(|| lines.iter().find(|l| !l.starts_with('[')))
+        .or_else(|| lines.first())
+        .copied()
+        .unwrap_or("");
     line.chars().take(300).collect()
 }
 
 pub(crate) fn last_lines(text: &str, n: usize) -> String {
     let lines: Vec<&str> = text.lines().collect();
-    let end = lines.iter().rposition(|l| !l.trim().is_empty()).map(|i| i + 1).unwrap_or(0);
+    let end = lines
+        .iter()
+        .rposition(|l| !l.trim().is_empty())
+        .map(|i| i + 1)
+        .unwrap_or(0);
     lines[end.saturating_sub(n)..end].join("\n")
 }
 
@@ -381,12 +496,33 @@ fn dispatch(call: BridgeCall, cx: &mut App) {
     bridge(cx).update(cx, |b, _| b.last_call = Instant::now());
     let activity = activity(cx);
     window::show(false, cx);
-    let BridgeCall { tool, arguments, reply } = call;
+    let BridgeCall {
+        tool,
+        arguments,
+        reply,
+    } = call;
     /// Records and answers a call that needs no waiting.
-    fn finish_now(cx: &mut App, activity: &Entity<McpActivity>, reply: tokio::sync::oneshot::Sender<ToolOutcome>, tool: &str, summary: String, target: Option<Target>, outcome: ToolOutcome, detail: String) {
+    fn finish_now(
+        cx: &mut App,
+        activity: &Entity<McpActivity>,
+        reply: tokio::sync::oneshot::Sender<ToolOutcome>,
+        tool: &str,
+        summary: String,
+        target: Option<Target>,
+        outcome: ToolOutcome,
+        detail: String,
+    ) {
         let id = activity.update(cx, |a, cx| a.begin(tool, summary, target, cx));
-        let status = if outcome.is_error { Status::Failed } else { Status::Done };
-        let detail = if outcome.is_error && detail.is_empty() { tail(&outcome.text, 300) } else { detail };
+        let status = if outcome.is_error {
+            Status::Failed
+        } else {
+            Status::Done
+        };
+        let detail = if outcome.is_error && detail.is_empty() {
+            tail(&outcome.text, 300)
+        } else {
+            detail
+        };
         activity.update(cx, |a, cx| a.finish(&id, status, detail, cx));
         let _ = reply.send(outcome);
     }
@@ -402,43 +538,152 @@ fn dispatch(call: BridgeCall, cx: &mut App) {
                 "sessions": all.iter().map(Session::json).collect::<Vec<_>>(),
             }))
             .unwrap_or_default();
-            finish_now(cx, &activity, reply, "get_environment", String::new(), None, ToolOutcome::ok(text), t!("mcpwin.detail.environment", count = all.len(), mode = permission_label(limits.permission_mode)));
+            finish_now(
+                cx,
+                &activity,
+                reply,
+                "get_environment",
+                String::new(),
+                None,
+                ToolOutcome::ok(text),
+                t!(
+                    "mcpwin.detail.environment",
+                    count = all.len(),
+                    mode = permission_label(limits.permission_mode)
+                ),
+            );
         }
         "list_sessions" => {
             let all = sessions(cx);
-            let text = serde_json::to_string_pretty(&all.iter().map(Session::json).collect::<Vec<_>>()).unwrap_or_default();
-            finish_now(cx, &activity, reply, "list_sessions", String::new(), None, ToolOutcome::ok(text), t!("mcpwin.detail.sessions", count = all.len()));
+            let text =
+                serde_json::to_string_pretty(&all.iter().map(Session::json).collect::<Vec<_>>())
+                    .unwrap_or_default();
+            finish_now(
+                cx,
+                &activity,
+                reply,
+                "list_sessions",
+                String::new(),
+                None,
+                ToolOutcome::ok(text),
+                t!("mcpwin.detail.sessions", count = all.len()),
+            );
         }
         "terminal_read" => {
             let wanted = arguments.get("session_id").and_then(|v| v.as_str());
-            let lines = arguments.get("lines").and_then(|v| v.as_u64()).unwrap_or(50).clamp(1, 500) as usize;
+            let lines = arguments
+                .get("lines")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(50)
+                .clamp(1, 500) as usize;
             match resolve(wanted, cx) {
                 Ok(s) => {
                     let text = strip_ansi(&last_lines(&s.pane.read(cx).buffer_text(), lines));
                     let detail = text.lines().last().unwrap_or("").to_string();
-                    finish_now(cx, &activity, reply, "terminal_read", t!("mcpwin.detail.readLines", count = lines), Some(s.target()), ToolOutcome::ok(text), detail);
+                    finish_now(
+                        cx,
+                        &activity,
+                        reply,
+                        "terminal_read",
+                        t!("mcpwin.detail.readLines", count = lines),
+                        Some(s.target()),
+                        ToolOutcome::ok(text),
+                        detail,
+                    );
                 }
-                Err(e) => finish_now(cx, &activity, reply, "terminal_read", String::new(), None, ToolOutcome::error(e), String::new()),
+                Err(e) => finish_now(
+                    cx,
+                    &activity,
+                    reply,
+                    "terminal_read",
+                    String::new(),
+                    None,
+                    ToolOutcome::error(e),
+                    String::new(),
+                ),
             }
         }
         "terminal_execute" => {
-            let command = arguments.get("command").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            let command = arguments
+                .get("command")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
             if command.is_empty() {
-                return finish_now(cx, &activity, reply, "terminal_execute", String::new(), None, ToolOutcome::error("`command` is required."), String::new());
+                return finish_now(
+                    cx,
+                    &activity,
+                    reply,
+                    "terminal_execute",
+                    String::new(),
+                    None,
+                    ToolOutcome::error("`command` is required."),
+                    String::new(),
+                );
             }
-            let wanted = arguments.get("session_id").and_then(|v| v.as_str()).map(str::to_string);
+            let wanted = arguments
+                .get("session_id")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
             let timeout = arguments.get("timeout_seconds").and_then(|v| v.as_u64());
             let session = match resolve(wanted.as_deref(), cx) {
                 Ok(s) if s.state == ConnState::Connected => s,
-                Ok(_) => return finish_now(cx, &activity, reply, "terminal_execute", command, None, ToolOutcome::error("The session is not connected."), String::new()),
-                Err(e) => return finish_now(cx, &activity, reply, "terminal_execute", command, None, ToolOutcome::error(e), String::new()),
+                Ok(_) => {
+                    return finish_now(
+                        cx,
+                        &activity,
+                        reply,
+                        "terminal_execute",
+                        command,
+                        None,
+                        ToolOutcome::error("The session is not connected."),
+                        String::new(),
+                    )
+                }
+                Err(e) => {
+                    return finish_now(
+                        cx,
+                        &activity,
+                        reply,
+                        "terminal_execute",
+                        command,
+                        None,
+                        ToolOutcome::error(e),
+                        String::new(),
+                    )
+                }
             };
-            let id = activity.update(cx, |a, cx| a.begin("terminal_execute", command.clone(), Some(session.target()), cx));
+            let id = activity.update(cx, |a, cx| {
+                a.begin(
+                    "terminal_execute",
+                    command.clone(),
+                    Some(session.target()),
+                    cx,
+                )
+            });
             cx.spawn(async move |cx| {
                 let summary_for_detail = command.clone();
                 let outcome = execute(&id, session, command, timeout, cx).await;
-                let status = if outcome.is_error { if outcome.text.starts_with("Refused") || outcome.text.starts_with("Rejected") { Status::Denied } else { Status::Failed } } else { Status::Done };
-                cx.update(|cx| activity.update(cx, |a, cx| a.finish(&id, status, detail_of(&outcome.text, &summary_for_detail), cx)));
+                let status = if outcome.is_error {
+                    if outcome.text.starts_with("Refused") || outcome.text.starts_with("Rejected") {
+                        Status::Denied
+                    } else {
+                        Status::Failed
+                    }
+                } else {
+                    Status::Done
+                };
+                cx.update(|cx| {
+                    activity.update(cx, |a, cx| {
+                        a.finish(
+                            &id,
+                            status,
+                            detail_of(&outcome.text, &summary_for_detail),
+                            cx,
+                        )
+                    })
+                });
                 let _ = reply.send(outcome);
             })
             .detach();
@@ -451,25 +696,52 @@ fn dispatch(call: BridgeCall, cx: &mut App) {
 }
 
 /// Policy check, approval and the run of one `terminal_execute`.
-async fn execute(id: &str, session: Session, command: String, timeout: Option<u64>, cx: &mut AsyncApp) -> ToolOutcome {
-    let (ctx, limits, activity) = cx.update(|cx| (crate::services::ctx(cx), crate::ai::runtime::limits(cx), activity(cx)));
+async fn execute(
+    id: &str,
+    session: Session,
+    command: String,
+    timeout: Option<u64>,
+    cx: &mut AsyncApp,
+) -> ToolOutcome {
+    let (ctx, limits, activity) = cx.update(|cx| {
+        (
+            crate::services::ctx(cx),
+            crate::ai::runtime::limits(cx),
+            activity(cx),
+        )
+    });
     let assess = command.clone();
-    let assessment = ops_core::rt::run(async move { ops_ai::client::ai_assess_action(&ctx.db, assess) }).await.and_then(|r| r);
+    let assessment =
+        ops_core::rt::run(async move { ops_ai::client::ai_assess_action(&ctx.db, assess) })
+            .await
+            .and_then(|r| r);
     let assessment = match assessment {
         Ok(a) => a,
-        Err(e) => return ToolOutcome::error(format!("Refused: the safety policy could not be evaluated ({e}).")),
+        Err(e) => {
+            return ToolOutcome::error(format!(
+                "Refused: the safety policy could not be evaluated ({e})."
+            ))
+        }
     };
     if assessment.decision == ops_ai::client::AiActionDecision::Block {
         return ToolOutcome::error(format!("Refused by OpsBatch: {}", assessment.reason));
     }
-    let needs_approval = assessment.decision != ops_ai::client::AiActionDecision::Safe && limits.permission_mode != PermissionMode::Auto;
+    let needs_approval = assessment.decision != ops_ai::client::AiActionDecision::Safe
+        && limits.permission_mode != PermissionMode::Auto;
     if needs_approval {
         let id_for_request = id.to_string();
         let rx = cx.update(|cx| {
             let rx = activity.update(cx, |a, cx| a.request_approval(&id_for_request, cx));
-            let alert = prefs_store::shared(cx).read(cx).prefs().external_mcp.approval_alert;
+            let alert = prefs_store::shared(cx)
+                .read(cx)
+                .prefs()
+                .external_mcp
+                .approval_alert;
             let focused = cx.active_window().is_some();
-            window::show(alert == ApprovalAlert::Always || (alert == ApprovalAlert::Unfocused && !focused), cx);
+            window::show(
+                alert == ApprovalAlert::Always || (alert == ApprovalAlert::Unfocused && !focused),
+                cx,
+            );
             rx
         });
         match rx.await {
@@ -491,17 +763,37 @@ async fn execute(id: &str, session: Session, command: String, timeout: Option<u6
                     });
                 });
             }
-            Ok(Decision::Reject) | Err(_) => return ToolOutcome::error("Rejected: the user did not approve this command in OpsBatch."),
+            Ok(Decision::Reject) | Err(_) => {
+                return ToolOutcome::error(
+                    "Rejected: the user did not approve this command in OpsBatch.",
+                )
+            }
         }
     }
-    let seconds = timeout.map(|t| t.clamp(1, 3600) as u32).unwrap_or(limits.command_timeout);
+    let seconds = timeout
+        .map(|t| t.clamp(1, 3600) as u32)
+        .unwrap_or(limits.command_timeout);
     let pane = session.pane.clone();
-    let rx = cx.update(|cx| pane.update(cx, |p, cx| p.execute_command(&command, Some(Duration::from_secs(seconds as u64)), cx)));
+    let rx = cx.update(|cx| {
+        pane.update(cx, |p, cx| {
+            p.execute_command(&command, Some(Duration::from_secs(seconds as u64)), cx)
+        })
+    });
     match rx.await {
         Ok(result) => {
-            let formatted = ops_ai::follow_up::format_terminal_command_result(&ops_ai::follow_up::TerminalCommandResult { status: exec_status(result.status).into(), output: result.output, exit_code: result.exit_code });
-            let failed = result.exit_code.is_some_and(|c| c != 0) || result.status != ExecStatus::Completed;
-            ToolOutcome { text: tail(&drop_prompt_artifacts(&strip_ansi(&formatted)), 20_000), is_error: failed }
+            let formatted = ops_ai::follow_up::format_terminal_command_result(
+                &ops_ai::follow_up::TerminalCommandResult {
+                    status: exec_status(result.status).into(),
+                    output: result.output,
+                    exit_code: result.exit_code,
+                },
+            );
+            let failed =
+                result.exit_code.is_some_and(|c| c != 0) || result.status != ExecStatus::Completed;
+            ToolOutcome {
+                text: tail(&drop_prompt_artifacts(&strip_ansi(&formatted)), 20_000),
+                is_error: failed,
+            }
         }
         Err(_) => ToolOutcome::error("The terminal session closed before the command finished."),
     }
@@ -514,11 +806,19 @@ mod tests {
     #[test]
     fn the_zsh_end_of_line_marker_and_prompt_are_dropped() {
         let pad = " ".repeat(40);
-        let out = format!("[当前命令：completed，退出码 0]\necho hi\nhi\n%{pad}macuser@Mac ~ % \n\n[OpsBatch] ok");
-        assert_eq!(drop_prompt_artifacts(&out), "[当前命令：completed，退出码 0]\necho hi\nhi\n\n[OpsBatch] ok");
+        let out = format!(
+            "[当前命令：completed，退出码 0]\necho hi\nhi\n%{pad}macuser@Mac ~ % \n\n[OpsBatch] ok"
+        );
+        assert_eq!(
+            drop_prompt_artifacts(&out),
+            "[当前命令：completed，退出码 0]\necho hi\nhi\n\n[OpsBatch] ok"
+        );
         // output without a newline keeps what came before the marker; a lone "%" in real output stays
         assert_eq!(drop_prompt_artifacts(&format!("50%{pad}$ ")), "50");
-        assert_eq!(drop_prompt_artifacts("progress 50% done\n# comment"), "progress 50% done\n# comment");
+        assert_eq!(
+            drop_prompt_artifacts("progress 50% done\n# comment"),
+            "progress 50% done\n# comment"
+        );
     }
 
     #[test]
@@ -536,9 +836,15 @@ mod tests {
     #[test]
     fn the_record_detail_skips_the_echo_and_status_notes() {
         let out = "\x1b[7muname -a && df -h /\x1b[27m\nDarwin Mac-mini.local 25.6.0\n\n[当前命令：completed，退出码 0]";
-        assert_eq!(detail_of(out, "uname -a && df -h /"), "Darwin Mac-mini.local 25.6.0");
+        assert_eq!(
+            detail_of(out, "uname -a && df -h /"),
+            "Darwin Mac-mini.local 25.6.0"
+        );
         assert_eq!(detail_of("macuser@Mac ~ % echo hi\nhi", "echo hi"), "hi");
-        assert_eq!(detail_of("[当前命令：completed，退出码 0]", "true"), "[当前命令：completed，退出码 0]");
+        assert_eq!(
+            detail_of("[当前命令：completed，退出码 0]", "true"),
+            "[当前命令：completed，退出码 0]"
+        );
         assert_eq!(detail_of("", "true"), "");
     }
 }

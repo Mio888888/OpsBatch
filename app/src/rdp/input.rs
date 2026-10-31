@@ -37,8 +37,16 @@ impl WheelAccumulator {
     /// Returns `(vertical, delta)` events, vertical ones first.
     pub fn push(&mut self, dx: f32, dy: f32) -> Vec<(bool, i16)> {
         let mut out = Vec::new();
-        out.extend(Self::take(&mut self.y, dy, 1).into_iter().map(|d| (true, d)));
-        out.extend(Self::take(&mut self.x, dx, -1).into_iter().map(|d| (false, d)));
+        out.extend(
+            Self::take(&mut self.y, dy, 1)
+                .into_iter()
+                .map(|d| (true, d)),
+        );
+        out.extend(
+            Self::take(&mut self.x, dx, -1)
+                .into_iter()
+                .map(|d| (false, d)),
+        );
         out
     }
 
@@ -69,14 +77,27 @@ impl WheelAccumulator {
 /// The key events for text the input method committed: every character is typed as Unicode (the remote keyboard
 /// layout does not matter), Enter and Tab as their keys; other control characters are dropped.
 pub fn text_events(text: &str) -> Vec<RdpInputEvent> {
-    let key = |code: u8, down: bool| RdpInputEvent::KeyScancode { code, extended: false, down };
+    let key = |code: u8, down: bool| RdpInputEvent::KeyScancode {
+        code,
+        extended: false,
+        down,
+    };
     let mut out = Vec::new();
     for c in text.chars() {
         match c {
             '\n' | '\r' => out.extend([key(0x1c, true), key(0x1c, false)]),
             '\t' => out.extend([key(0x0f, true), key(0x0f, false)]),
             c if c.is_control() => {}
-            c => out.extend([RdpInputEvent::Unicode { character: c.to_string(), down: true }, RdpInputEvent::Unicode { character: c.to_string(), down: false }]),
+            c => out.extend([
+                RdpInputEvent::Unicode {
+                    character: c.to_string(),
+                    down: true,
+                },
+                RdpInputEvent::Unicode {
+                    character: c.to_string(),
+                    down: false,
+                },
+            ]),
         }
     }
     out
@@ -98,8 +119,14 @@ mod tests {
         assert_eq!(button_code(MouseButton::Left), Some(0));
         assert_eq!(button_code(MouseButton::Middle), Some(1));
         assert_eq!(button_code(MouseButton::Right), Some(2));
-        assert_eq!(button_code(MouseButton::Navigate(NavigationDirection::Back)), Some(3));
-        assert_eq!(button_code(MouseButton::Navigate(NavigationDirection::Forward)), Some(4));
+        assert_eq!(
+            button_code(MouseButton::Navigate(NavigationDirection::Back)),
+            Some(3)
+        );
+        assert_eq!(
+            button_code(MouseButton::Navigate(NavigationDirection::Forward)),
+            Some(4)
+        );
     }
 
     #[test]
@@ -122,7 +149,10 @@ mod tests {
         assert_eq!(w.push(-20.0, 0.0), vec![(false, NOTCH)]);
         let mut w = WheelAccumulator::default();
         assert!(w.push(0.0, 15.0).is_empty());
-        assert!(w.push(0.0, -10.0).is_empty(), "a reversal starts over instead of cancelling out");
+        assert!(
+            w.push(0.0, -10.0).is_empty(),
+            "a reversal starts over instead of cancelling out"
+        );
         assert!(w.push(0.0, -9.0).is_empty());
         assert_eq!(w.push(0.0, -2.0), vec![(true, -NOTCH)]);
         w.reset();
@@ -141,20 +171,76 @@ mod tests {
     fn composed_text_is_typed_as_unicode() {
         let ev = text_events("你好");
         assert_eq!(ev.len(), 4);
-        assert_eq!(ev[0], RdpInputEvent::Unicode { character: "你".into(), down: true });
-        assert_eq!(ev[1], RdpInputEvent::Unicode { character: "你".into(), down: false });
-        assert_eq!(ev[2], RdpInputEvent::Unicode { character: "好".into(), down: true });
+        assert_eq!(
+            ev[0],
+            RdpInputEvent::Unicode {
+                character: "你".into(),
+                down: true
+            }
+        );
+        assert_eq!(
+            ev[1],
+            RdpInputEvent::Unicode {
+                character: "你".into(),
+                down: false
+            }
+        );
+        assert_eq!(
+            ev[2],
+            RdpInputEvent::Unicode {
+                character: "好".into(),
+                down: true
+            }
+        );
         // characters beyond the BMP stay one event pair (the backend splits them into surrogates)
-        assert_eq!(text_events("😀")[0], RdpInputEvent::Unicode { character: "😀".into(), down: true });
+        assert_eq!(
+            text_events("😀")[0],
+            RdpInputEvent::Unicode {
+                character: "😀".into(),
+                down: true
+            }
+        );
         // Enter and Tab are keys, other control characters are dropped
-        assert_eq!(text_events("a\n"), vec![RdpInputEvent::Unicode { character: "a".into(), down: true }, RdpInputEvent::Unicode { character: "a".into(), down: false }, RdpInputEvent::KeyScancode { code: 0x1c, extended: false, down: true }, RdpInputEvent::KeyScancode { code: 0x1c, extended: false, down: false }]);
-        assert_eq!(text_events("\t")[0], RdpInputEvent::KeyScancode { code: 0x0f, extended: false, down: true });
+        assert_eq!(
+            text_events("a\n"),
+            vec![
+                RdpInputEvent::Unicode {
+                    character: "a".into(),
+                    down: true
+                },
+                RdpInputEvent::Unicode {
+                    character: "a".into(),
+                    down: false
+                },
+                RdpInputEvent::KeyScancode {
+                    code: 0x1c,
+                    extended: false,
+                    down: true
+                },
+                RdpInputEvent::KeyScancode {
+                    code: 0x1c,
+                    extended: false,
+                    down: false
+                }
+            ]
+        );
+        assert_eq!(
+            text_events("\t")[0],
+            RdpInputEvent::KeyScancode {
+                code: 0x0f,
+                extended: false,
+                down: true
+            }
+        );
         assert!(text_events("\u{1b}\u{7f}").is_empty());
         assert!(text_events("").is_empty());
     }
 
     #[test]
     fn the_input_method_counts_in_utf16_units() {
-        assert_eq!((utf16_len("ni"), utf16_len("你好"), utf16_len("😀")), (2, 2, 2));
+        assert_eq!(
+            (utf16_len("ni"), utf16_len("你好"), utf16_len("😀")),
+            (2, 2, 2)
+        );
     }
 }

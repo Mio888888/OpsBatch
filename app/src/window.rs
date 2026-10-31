@@ -5,7 +5,8 @@ use std::collections::HashMap;
 
 use gpui_kit::component::{Root, TitleBar};
 use gpui_kit::{
-    px, size, AnyWindowHandle, App, Bounds, Entity, Global, Render, TitlebarOptions, Window, WindowBounds, WindowOptions,
+    px, size, AnyWindowHandle, App, Bounds, Entity, Global, Render, TitlebarOptions, Window,
+    WindowBounds, WindowOptions,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,7 +48,11 @@ impl WindowKind {
 pub fn window_options(kind: WindowKind, title: &str, cx: &App) -> WindowOptions {
     let (w, h, min_w, min_h) = kind.size();
     WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(w), px(h)), cx))),
+        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+            None,
+            size(px(w), px(h)),
+            cx,
+        ))),
         window_min_size: Some(size(px(min_w), px(min_h))),
         titlebar: Some(TitlebarOptions {
             title: Some(title.to_string().into()),
@@ -91,7 +96,12 @@ pub fn is_open(label: &str, cx: &mut App) -> bool {
 }
 
 pub fn open_labels(cx: &mut App) -> Vec<String> {
-    let labels: Vec<String> = cx.global::<WindowRegistry>().windows.keys().cloned().collect();
+    let labels: Vec<String> = cx
+        .global::<WindowRegistry>()
+        .windows
+        .keys()
+        .cloned()
+        .collect();
     labels.into_iter().filter(|l| is_open(l, cx)).collect()
 }
 
@@ -104,7 +114,10 @@ pub fn open_or_focus<V: 'static + Render>(
 ) -> Option<AnyWindowHandle> {
     let existing = cx.global::<WindowRegistry>().windows.get(label).copied();
     if let Some(handle) = existing {
-        if handle.update(cx, |_, window, _| window.activate_window()).is_ok() {
+        if handle
+            .update(cx, |_, window, _| window.activate_window())
+            .is_ok()
+        {
             cx.activate(true);
             return Some(handle);
         }
@@ -112,7 +125,9 @@ pub fn open_or_focus<V: 'static + Render>(
     }
     match gpui_kit::open_window(options, cx, build) {
         Ok((handle, _view)) => {
-            cx.global_mut::<WindowRegistry>().windows.insert(label.to_string(), handle);
+            cx.global_mut::<WindowRegistry>()
+                .windows
+                .insert(label.to_string(), handle);
             cx.activate(true);
             Some(handle)
         }
@@ -134,14 +149,23 @@ pub fn open_background<V: 'static + Render>(
 ) -> Option<AnyWindowHandle> {
     let existing = cx.global::<WindowRegistry>().windows.get(label).copied();
     if let Some(handle) = existing {
-        if handle.update(cx, |_, window, _| if activate { window.activate_window() }).is_ok() {
+        if handle
+            .update(cx, |_, window, _| {
+                if activate {
+                    window.activate_window()
+                }
+            })
+            .is_ok()
+        {
             return Some(handle);
         }
         cx.global_mut::<WindowRegistry>().windows.remove(label);
     }
     match gpui_kit::open_window(options, cx, build) {
         Ok((handle, _view)) => {
-            cx.global_mut::<WindowRegistry>().windows.insert(label.to_string(), handle);
+            cx.global_mut::<WindowRegistry>()
+                .windows
+                .insert(label.to_string(), handle);
             Some(handle)
         }
         Err(error) => {
@@ -171,9 +195,11 @@ fn _assert_root_is_used(_: Option<Root>) {}
 
 /// Ask the main window to show the asset sidebar (what the original did with the `open-asset-manager` event).
 pub fn request_open_assets(cx: &mut App) {
-    cx.global_mut::<crate::ui_state::UiState>().asset_panel_visible = true;
+    cx.global_mut::<crate::ui_state::UiState>()
+        .asset_panel_visible = true;
     let ctx = crate::services::ctx(cx);
-    ctx.core.emit(OPEN_ASSET_MANAGER_TOPIC, serde_json::json!({}));
+    ctx.core
+        .emit(OPEN_ASSET_MANAGER_TOPIC, serde_json::json!({}));
     crate::app::open_main_window(cx);
 }
 

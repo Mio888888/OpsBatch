@@ -25,7 +25,11 @@ pub fn find_terminal_search_matches(lines: &[SearchLine<'_>], query: &str) -> Ve
         let mut col = 0usize;
         while col + needle.len() <= hay.len() {
             if hay[col..col + needle.len()] == needle[..] {
-                matches.push(SearchMatch { row: line.row, column: col, length: needle.len() });
+                matches.push(SearchMatch {
+                    row: line.row,
+                    column: col,
+                    length: needle.len(),
+                });
                 col += needle.len();
             } else {
                 col += 1;
@@ -36,13 +40,21 @@ pub fn find_terminal_search_matches(lines: &[SearchLine<'_>], query: &str) -> Ve
 }
 
 /// Next/previous index with wraparound (`from_index` is the current match, if any).
-pub fn next_search_index(match_count: usize, backwards: bool, from_index: Option<usize>) -> Option<usize> {
+pub fn next_search_index(
+    match_count: usize,
+    backwards: bool,
+    from_index: Option<usize>,
+) -> Option<usize> {
     if match_count == 0 {
         return None;
     }
     match from_index.filter(|i| *i < match_count) {
         None => Some(if backwards { match_count - 1 } else { 0 }),
-        Some(i) => Some(if backwards { (i + match_count - 1) % match_count } else { (i + 1) % match_count }),
+        Some(i) => Some(if backwards {
+            (i + match_count - 1) % match_count
+        } else {
+            (i + 1) % match_count
+        }),
     }
 }
 
@@ -56,14 +68,49 @@ mod tests {
 
     #[test]
     fn finds_matches_case_insensitively_across_rows() {
-        let m = find_terminal_search_matches(&[l(3, "Deploy OK"), l(4, "error: service failed"), l(5, "next ERROR marker")], "error");
-        assert_eq!(m, vec![SearchMatch { row: 4, column: 0, length: 5 }, SearchMatch { row: 5, column: 5, length: 5 }]);
+        let m = find_terminal_search_matches(
+            &[
+                l(3, "Deploy OK"),
+                l(4, "error: service failed"),
+                l(5, "next ERROR marker"),
+            ],
+            "error",
+        );
+        assert_eq!(
+            m,
+            vec![
+                SearchMatch {
+                    row: 4,
+                    column: 0,
+                    length: 5
+                },
+                SearchMatch {
+                    row: 5,
+                    column: 5,
+                    length: 5
+                }
+            ]
+        );
     }
 
     #[test]
     fn returns_every_occurrence_on_same_row() {
         let m = find_terminal_search_matches(&[l(8, "foo bar foo")], "foo");
-        assert_eq!(m, vec![SearchMatch { row: 8, column: 0, length: 3 }, SearchMatch { row: 8, column: 8, length: 3 }]);
+        assert_eq!(
+            m,
+            vec![
+                SearchMatch {
+                    row: 8,
+                    column: 0,
+                    length: 3
+                },
+                SearchMatch {
+                    row: 8,
+                    column: 8,
+                    length: 3
+                }
+            ]
+        );
     }
 
     #[test]
@@ -85,6 +132,10 @@ mod tests {
         assert_eq!(next_search_index(3, true, None), Some(2));
         assert_eq!(next_search_index(3, false, Some(2)), Some(0));
         assert_eq!(next_search_index(3, true, Some(0)), Some(2));
-        assert_eq!(next_search_index(3, false, Some(99)), Some(0), "stale index restarts");
+        assert_eq!(
+            next_search_index(3, false, Some(99)),
+            Some(0),
+            "stale index restarts"
+        );
     }
 }

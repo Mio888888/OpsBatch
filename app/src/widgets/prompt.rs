@@ -2,12 +2,12 @@
 
 use std::rc::Rc;
 
+use crate::scale::px;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::{h_flex, v_flex, Disableable as _, WindowExt as _};
 use gpui_kit::*;
-use crate::scale::px;
 use ops_i18n::t;
 
 use super::toast;
@@ -23,24 +23,48 @@ pub struct TextPrompt {
 
 impl TextPrompt {
     /// Open the dialog; `on_submit` receives the trimmed, non-empty text and reports success or an error toast.
-    pub fn open(title: impl Into<SharedString>, placeholder: impl Into<SharedString>, initial: &str, on_submit: SubmitFn, window: &mut Window, cx: &mut App) -> Entity<Self> {
+    pub fn open(
+        title: impl Into<SharedString>,
+        placeholder: impl Into<SharedString>,
+        initial: &str,
+        on_submit: SubmitFn,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<Self> {
         let title: SharedString = title.into();
         let placeholder: SharedString = placeholder.into();
         let initial = initial.to_string();
         let view = cx.new(|cx| {
-            let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder).default_value(initial));
-            let sub = cx.subscribe_in(&input, window, |this: &mut Self, _, ev: &InputEvent, window, cx| {
-                if matches!(ev, InputEvent::PressEnter { .. }) {
-                    this.submit(window, cx);
-                }
+            let input = cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder(placeholder)
+                    .default_value(initial)
             });
-            Self { input, busy: false, on_submit, _sub: sub }
+            let sub = cx.subscribe_in(
+                &input,
+                window,
+                |this: &mut Self, _, ev: &InputEvent, window, cx| {
+                    if matches!(ev, InputEvent::PressEnter { .. }) {
+                        this.submit(window, cx);
+                    }
+                },
+            );
+            Self {
+                input,
+                busy: false,
+                on_submit,
+                _sub: sub,
+            }
         });
         let shown = view.clone();
-        window.open_dialog(cx, move |dialog, _, _| dialog.title(title.clone()).w(px(420.)).child(shown.clone()));
+        window.open_dialog(cx, move |dialog, _, _| {
+            dialog.title(title.clone()).w(px(420.)).child(shown.clone())
+        });
         // The dialog takes focus when it opens; focus the field once that has happened.
         let input = view.read(cx).input.clone();
-        window.defer(cx, move |window, cx| input.update(cx, |s, cx| s.focus(window, cx)));
+        window.defer(cx, move |window, cx| {
+            input.update(cx, |s, cx| s.focus(window, cx))
+        });
         view
     }
 
@@ -83,7 +107,12 @@ impl Render for TextPrompt {
                 h_flex()
                     .gap_2()
                     .justify_end()
-                    .child(Button::new("prompt-cancel").label(t!("common.cancel")).disabled(self.busy).on_click(|_, window, cx| window.close_dialog(cx)))
+                    .child(
+                        Button::new("prompt-cancel")
+                            .label(t!("common.cancel"))
+                            .disabled(self.busy)
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    )
                     .child(
                         Button::new("prompt-ok")
                             .primary()

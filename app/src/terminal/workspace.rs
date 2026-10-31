@@ -105,14 +105,33 @@ impl TerminalWorkspace {
         let events = ctx.events.subscribe("connection_status_changed");
         let task = cx.spawn(async move |this, cx| {
             while let Ok(event) = events.recv_async().await {
-                let host = event.payload.get("hostId").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                let status = event.payload.get("status").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-                if this.update(cx, |this, cx| this.on_connection_status(&host, &status, cx)).is_err() {
+                let host = event
+                    .payload
+                    .get("hostId")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                let status = event
+                    .payload
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or_default()
+                    .to_string();
+                if this
+                    .update(cx, |this, cx| this.on_connection_status(&host, &status, cx))
+                    .is_err()
+                {
                     break;
                 }
             }
         });
-        Self { ctx, tabs: Vec::new(), active: None, auto_local_pending: auto_local, _tasks: vec![task] }
+        Self {
+            ctx,
+            tabs: Vec::new(),
+            active: None,
+            auto_local_pending: auto_local,
+            _tasks: vec![task],
+        }
     }
 
     pub fn set_auto_local(&mut self, enabled: bool) {
@@ -166,19 +185,28 @@ impl TerminalWorkspace {
     }
 
     /// Open (or focus) a terminal for a host. Returns false when it was already open.
-    pub fn open_host(&mut self, host_id: &str, name: &str, ip: &str, cx: &mut Context<Self>) -> bool {
+    pub fn open_host(
+        &mut self,
+        host_id: &str,
+        name: &str,
+        ip: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
         self.auto_local_pending = false;
-        if let Some(existing) = self
-            .tabs
-            .iter()
-            .find(|t| t.host_id.as_deref() == Some(host_id) && matches!(t.state, ConnState::Connecting | ConnState::Connected))
-        {
+        if let Some(existing) = self.tabs.iter().find(|t| {
+            t.host_id.as_deref() == Some(host_id)
+                && matches!(t.state, ConnState::Connecting | ConnState::Connected)
+        }) {
             let key = existing.key.clone();
             self.set_active(&key, cx);
             return false;
         }
         let key = new_key(&format!("remote-{host_id}"));
-        let name = if name.is_empty() { t!("terminal.defaultName") } else { name.to_string() };
+        let name = if name.is_empty() {
+            t!("terminal.defaultName")
+        } else {
+            name.to_string()
+        };
         self.tabs.push(TerminalTab {
             key: key.clone(),
             kind: TabKind::Remote,
@@ -225,19 +253,25 @@ impl TerminalWorkspace {
     fn disconnect_session(&self, session_id: String, host_id: Option<String>) {
         let ctx = self.ctx.clone();
         ops_core::rt::spawn(async move {
-            let _ = ops_ssh::terminal::terminal_disconnect(&ctx.terminals_mgr, session_id, host_id).await;
+            let _ = ops_ssh::terminal::terminal_disconnect(&ctx.terminals_mgr, session_id, host_id)
+                .await;
         });
     }
 
     async fn connect_session(ctx: Arc<Ctx>, host_id: Option<String>) -> Result<String, String> {
         ops_core::rt::run(async move {
             match host_id {
-                Some(host_id) => ops_ssh::terminal::terminal_connect(ctx, host_id, Some(80), Some(24), None).await,
+                Some(host_id) => {
+                    ops_ssh::terminal::terminal_connect(ctx, host_id, Some(80), Some(24), None)
+                        .await
+                }
                 None => {
                     let mgr = ctx.terminals_mgr.clone();
-                    tokio::task::spawn_blocking(move || ops_ssh::terminal::terminal_connect_local(ctx, &mgr, Some(80), Some(24)))
-                        .await
-                        .map_err(|e| e.to_string())?
+                    tokio::task::spawn_blocking(move || {
+                        ops_ssh::terminal::terminal_connect_local(ctx, &mgr, Some(80), Some(24))
+                    })
+                    .await
+                    .map_err(|e| e.to_string())?
                 }
             }
         })
@@ -264,20 +298,34 @@ impl TerminalWorkspace {
         let key = key.to_string();
         cx.spawn(async move |this, cx| {
             let result = Self::connect_session(ctx, host_id).await;
-            let _ = this.update(cx, |this, cx| this.finish_connect(&key, &attempt, result, cx));
+            let _ = this.update(cx, |this, cx| {
+                this.finish_connect(&key, &attempt, result, cx)
+            });
         })
         .detach();
     }
 
-    fn make_pane(&mut self, session_id: String, cx: &mut Context<Self>) -> (Entity<TerminalPane>, Subscription) {
+    fn make_pane(
+        &mut self,
+        session_id: String,
+        cx: &mut Context<Self>,
+    ) -> (Entity<TerminalPane>, Subscription) {
         let ctx = self.ctx.clone();
         let pane = cx.new(|cx| TerminalPane::new(ctx, session_id, cx));
         let sub = cx.subscribe(&pane, |_, _, _: &PaneEvent, cx| cx.notify());
         (pane, sub)
     }
 
-    fn finish_connect(&mut self, key: &str, attempt: &str, result: Result<String, String>, cx: &mut Context<Self>) {
-        let current = self.tab(key).is_some_and(|t| t.attempt.as_deref() == Some(attempt));
+    fn finish_connect(
+        &mut self,
+        key: &str,
+        attempt: &str,
+        result: Result<String, String>,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self
+            .tab(key)
+            .is_some_and(|t| t.attempt.as_deref() == Some(attempt));
         if !current {
             // The tab was closed or retried meanwhile: do not leak the session that just came up.
             if let Ok(sid) = result {
@@ -325,7 +373,13 @@ impl TerminalWorkspace {
             if tab.state != ConnState::Connected || tab.split.is_some() {
                 return;
             }
-            tab.split = Some(SplitPane { state: ConnState::Connecting, pane: None, error: None, attempt: Some(attempt.clone()), _sub: None });
+            tab.split = Some(SplitPane {
+                state: ConnState::Connecting,
+                pane: None,
+                error: None,
+                attempt: Some(attempt.clone()),
+                _sub: None,
+            });
             tab.host_id.clone()
         };
         self.changed(cx);
@@ -338,8 +392,17 @@ impl TerminalWorkspace {
         .detach();
     }
 
-    fn finish_split(&mut self, key: &str, attempt: &str, result: Result<String, String>, cx: &mut Context<Self>) {
-        let current = self.tab(key).and_then(|t| t.split.as_ref()).is_some_and(|s| s.attempt.as_deref() == Some(attempt));
+    fn finish_split(
+        &mut self,
+        key: &str,
+        attempt: &str,
+        result: Result<String, String>,
+        cx: &mut Context<Self>,
+    ) {
+        let current = self
+            .tab(key)
+            .and_then(|t| t.split.as_ref())
+            .is_some_and(|s| s.attempt.as_deref() == Some(attempt));
         if !current {
             if let Ok(sid) = result {
                 self.disconnect_session(sid, None);
@@ -370,8 +433,13 @@ impl TerminalWorkspace {
     pub fn close_split(&mut self, key: &str, cx: &mut Context<Self>) {
         let (sid, host) = {
             let Some(tab) = self.tab_mut(key) else { return };
-            let Some(split) = tab.split.take() else { return };
-            (split.pane.as_ref().map(|p| p.read(cx).session_id.clone()), tab.host_id.clone())
+            let Some(split) = tab.split.take() else {
+                return;
+            };
+            (
+                split.pane.as_ref().map(|p| p.read(cx).session_id.clone()),
+                tab.host_id.clone(),
+            )
         };
         if let Some(sid) = sid {
             self.disconnect_session(sid, host);
@@ -381,16 +449,26 @@ impl TerminalWorkspace {
 
     // ---- closing ----
 
-    pub fn close_tabs(&mut self, targets: &[String], preferred_active: Option<&str>, cx: &mut Context<Self>) {
+    pub fn close_tabs(
+        &mut self,
+        targets: &[String],
+        preferred_active: Option<&str>,
+        cx: &mut Context<Self>,
+    ) {
         if targets.is_empty() {
             return;
         }
         let keys: Vec<String> = self.tabs.iter().map(|t| t.key.clone()).collect();
-        let next_active = active_key_after_close(&keys, targets, self.active.as_deref(), preferred_active);
+        let next_active =
+            active_key_after_close(&keys, targets, self.active.as_deref(), preferred_active);
         let mut closing = Vec::new();
         self.tabs.retain_mut(|t| {
             if targets.contains(&t.key) {
-                closing.push((t.pane.take(), t.split.take().and_then(|s| s.pane), t.host_id.clone()));
+                closing.push((
+                    t.pane.take(),
+                    t.split.take().and_then(|s| s.pane),
+                    t.host_id.clone(),
+                ));
                 false
             } else {
                 true
@@ -435,9 +513,17 @@ impl TerminalWorkspace {
         if !matches!(status, "idle_disconnected" | "link_down") {
             return;
         }
-        let message = if status == "idle_disconnected" { t!("terminal.idleDisconnected") } else { t!("terminal.linkDown") };
+        let message = if status == "idle_disconnected" {
+            t!("terminal.idleDisconnected")
+        } else {
+            t!("terminal.linkDown")
+        };
         let mut changed = false;
-        for tab in self.tabs.iter_mut().filter(|t| t.host_id.as_deref() == Some(host_id) && t.state == ConnState::Connected) {
+        for tab in self
+            .tabs
+            .iter_mut()
+            .filter(|t| t.host_id.as_deref() == Some(host_id) && t.state == ConnState::Connected)
+        {
             tab.state = ConnState::Error;
             tab.error = Some(message.clone());
             changed = true;
@@ -450,22 +536,37 @@ impl TerminalWorkspace {
     // ---- auth retry ----
 
     /// The stored host behind a tab, for the "edit authentication" dialog.
-    pub fn find_host(&self, host_id: String, cx: &mut Context<Self>) -> Task<Result<Option<Host>, String>> {
+    pub fn find_host(
+        &self,
+        host_id: String,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<Option<Host>, String>> {
         let ctx = self.ctx.clone();
         cx.spawn(async move |_, _| {
-            ops_core::rt::run(async move { ops_ssh::hosts::list_hosts(&ctx.db).await.map(|h| h.into_iter().find(|h| h.id == host_id)) })
-                .await
-                .and_then(|r| r)
+            ops_core::rt::run(async move {
+                ops_ssh::hosts::list_hosts(&ctx.db)
+                    .await
+                    .map(|h| h.into_iter().find(|h| h.id == host_id))
+            })
+            .await
+            .and_then(|r| r)
         })
     }
 
     /// Save new SSH credentials for the tab's host (blank secret = keep stored) and reconnect the tab.
-    pub fn save_auth_and_retry(&mut self, key: &str, values: AuthRetryValues, cx: &mut Context<Self>) -> Task<Result<(), String>> {
+    pub fn save_auth_and_retry(
+        &mut self,
+        key: &str,
+        values: AuthRetryValues,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<(), String>> {
         let ctx = self.ctx.clone();
         let key = key.to_string();
         let host_id = self.tab(&key).and_then(|t| t.host_id.clone());
         cx.spawn(async move |this, cx| {
-            let Some(host_id) = host_id else { return Err(t!("terminal.authRetryHostMissing")) };
+            let Some(host_id) = host_id else {
+                return Err(t!("terminal.authRetryHostMissing"));
+            };
             let c2 = ctx.clone();
             let updated = ops_core::rt::run(async move {
                 let host = ops_ssh::hosts::list_hosts(&c2.db)
@@ -476,11 +577,24 @@ impl TerminalWorkspace {
                 if host.os != "linux" {
                     return Err(t!("terminal.authRetryUnsupportedHost"));
                 }
-                let mut update = crate::stores::assets::update_from_host(&host, host.group_id.clone());
-                update.auth_type = if values.key_auth { "key".into() } else { "password".into() };
+                let mut update =
+                    crate::stores::assets::update_from_host(&host, host.group_id.clone());
+                update.auth_type = if values.key_auth {
+                    "key".into()
+                } else {
+                    "password".into()
+                };
                 update.username = values.username.trim().to_string();
-                update.password = if values.key_auth { None } else { submitted_secret(&values.password) };
-                update.private_key = if values.key_auth { submitted_secret(&values.private_key) } else { None };
+                update.password = if values.key_auth {
+                    None
+                } else {
+                    submitted_secret(&values.password)
+                };
+                update.private_key = if values.key_auth {
+                    submitted_secret(&values.private_key)
+                } else {
+                    None
+                };
                 ops_ssh::hosts::update_host(c2.core.clone(), c2.registry.clone(), update).await
             })
             .await

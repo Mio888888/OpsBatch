@@ -42,7 +42,10 @@ pub fn parse_vnc_settings(value: &str) -> VncSettings {
 }
 
 pub fn vnc_port_from_settings(value: &str) -> u16 {
-    parse_vnc_settings(value).vnc_port.filter(|port| *port > 0).unwrap_or(DEFAULT_VNC_PORT)
+    parse_vnc_settings(value)
+        .vnc_port
+        .filter(|port| *port > 0)
+        .unwrap_or(DEFAULT_VNC_PORT)
 }
 
 fn non_empty_trimmed(value: String) -> Option<String> {
@@ -100,8 +103,13 @@ mod tests {
     #[test]
     fn settings_defaults_and_legacy_auth_method() {
         // Hosts saved with the old authentication selector still load; the stored method is ignored.
-        let s = parse_vnc_settings(r#"{"protocol":"vnc","vncPort":5901,"vncAuthMethod":"ard","vncUsername":"me","vncViewOnly":true}"#);
-        assert_eq!((s.vnc_port, s.vnc_username.as_deref(), s.vnc_view_only), (Some(5901), Some("me"), Some(true)));
+        let s = parse_vnc_settings(
+            r#"{"protocol":"vnc","vncPort":5901,"vncAuthMethod":"ard","vncUsername":"me","vncViewOnly":true}"#,
+        );
+        assert_eq!(
+            (s.vnc_port, s.vnc_username.as_deref(), s.vnc_view_only),
+            (Some(5901), Some("me"), Some(true))
+        );
         assert_eq!(parse_vnc_settings("not json").vnc_port, None);
         assert_eq!(vnc_port_from_settings(r#"{"vncPort":0}"#), 5900);
         assert_eq!(vnc_port_from_settings("{}"), DEFAULT_VNC_PORT);

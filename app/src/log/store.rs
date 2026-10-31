@@ -35,13 +35,20 @@ impl LogStore {
         let events = crate::services::ctx(cx).events.subscribe(GLOBAL_LOG_TOPIC);
         let task = cx.spawn(async move |this, cx| {
             while let Ok(ev) = events.recv_async().await {
-                let Some(entry) = ev.parse::<AppLogEntry>() else { continue };
+                let Some(entry) = ev.parse::<AppLogEntry>() else {
+                    continue;
+                };
                 if this.update(cx, |this, cx| this.push(entry, cx)).is_err() {
                     break;
                 }
             }
         });
-        Self { logs: Vec::new(), loading: true, started: false, _tasks: vec![task] }
+        Self {
+            logs: Vec::new(),
+            loading: true,
+            started: false,
+            _tasks: vec![task],
+        }
     }
 
     fn push(&mut self, entry: AppLogEntry, cx: &mut Context<Self>) {
@@ -63,11 +70,21 @@ impl LogStore {
             let _ = this.update(cx, |this, cx| {
                 // History is chronological; live entries that arrived meanwhile stay on top.
                 let live = std::mem::take(&mut this.logs);
-                this.logs = live.into_iter().chain(history.unwrap_or_default().into_iter().rev()).take(MAX_LOG_ENTRIES).collect();
+                this.logs = live
+                    .into_iter()
+                    .chain(history.unwrap_or_default().into_iter().rev())
+                    .take(MAX_LOG_ENTRIES)
+                    .collect();
                 this.loading = false;
                 cx.notify();
             });
-            ops_core::log::emit_log(&ctx.core, "info", "system", &t!("log.connectedMessage"), "frontend");
+            ops_core::log::emit_log(
+                &ctx.core,
+                "info",
+                "system",
+                &t!("log.connectedMessage"),
+                "frontend",
+            );
         })
         .detach();
     }

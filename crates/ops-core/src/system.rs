@@ -205,7 +205,9 @@ pub fn calculate_process_cpu_percent(
     if elapsed_ms <= 0.0 || cpu_delta_ms < 0.0 {
         return None;
     }
-    Some(clamp_metric_percent(Some(cpu_delta_ms / elapsed_ms / cores as f64 * 100.0)))
+    Some(clamp_metric_percent(Some(
+        cpu_delta_ms / elapsed_ms / cores as f64 * 100.0,
+    )))
 }
 
 pub fn format_process_memory(memory_rss_mb: Option<f64>) -> String {
@@ -223,7 +225,9 @@ pub fn format_process_memory(memory_rss_mb: Option<f64>) -> String {
 
 pub fn process_memory_bar_percent(memory_rss_mb: Option<f64>) -> f64 {
     match memory_rss_mb {
-        Some(mb) if mb.is_finite() && mb >= 0.0 => clamp_metric_percent(Some(mb / PROCESS_MEMORY_BAR_MAX_MB * 100.0)),
+        Some(mb) if mb.is_finite() && mb >= 0.0 => {
+            clamp_metric_percent(Some(mb / PROCESS_MEMORY_BAR_MAX_MB * 100.0))
+        }
         _ => 0.0,
     }
 }
@@ -233,7 +237,12 @@ mod metric_tests {
     use super::*;
 
     fn snap(cpu: Option<f64>, ts: u64, cores: Option<usize>) -> LocalPerformanceSnapshot {
-        LocalPerformanceSnapshot { cpu_time_ms: cpu, memory_rss_mb: None, logical_cpu_count: cores, timestamp: ts }
+        LocalPerformanceSnapshot {
+            cpu_time_ms: cpu,
+            memory_rss_mb: None,
+            logical_cpu_count: cores,
+            timestamp: ts,
+        }
     }
 
     #[test]
@@ -250,10 +259,20 @@ mod metric_tests {
         let a = snap(Some(1200.0), 1000, Some(4));
         let b = snap(Some(2200.0), 2000, Some(4));
         assert_eq!(calculate_process_cpu_percent(Some(&a), &b), Some(25.0));
-        assert_eq!(calculate_process_cpu_percent(Some(&a), &snap(None, 2000, Some(4))), None);
+        assert_eq!(
+            calculate_process_cpu_percent(Some(&a), &snap(None, 2000, Some(4))),
+            None
+        );
         assert_eq!(calculate_process_cpu_percent(None, &b), None);
-        assert_eq!(calculate_process_cpu_percent(Some(&b), &a), None, "time went backwards");
-        assert_eq!(calculate_process_cpu_percent(Some(&a), &snap(Some(2200.0), 2000, Some(0))), None);
+        assert_eq!(
+            calculate_process_cpu_percent(Some(&b), &a),
+            None,
+            "time went backwards"
+        );
+        assert_eq!(
+            calculate_process_cpu_percent(Some(&a), &snap(Some(2200.0), 2000, Some(0))),
+            None
+        );
     }
 
     #[test]

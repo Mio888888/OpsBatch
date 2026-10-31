@@ -20,7 +20,8 @@ impl Core {
     /// Open (creating if necessary) the data directory, initialise the vault location and the database.
     pub fn open(data_dir: impl Into<PathBuf>) -> Result<Self, String> {
         let data_dir = data_dir.into();
-        std::fs::create_dir_all(&data_dir).map_err(|e| format!("create {}: {e}", data_dir.display()))?;
+        std::fs::create_dir_all(&data_dir)
+            .map_err(|e| format!("create {}: {e}", data_dir.display()))?;
         crate::keychain::init_local_vault_dir(data_dir.clone())?;
         let db = Database::new(&data_dir.join("opsbatch.db"))?;
         db.init_tables()?;

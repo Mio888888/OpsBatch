@@ -30,7 +30,10 @@ impl HostKind {
 fn rdp_protocol_is_vnc(rdp_settings: &str) -> bool {
     serde_json::from_str::<serde_json::Value>(rdp_settings)
         .ok()
-        .and_then(|v| v.get("protocol").and_then(|p| p.as_str().map(str::to_owned)))
+        .and_then(|v| {
+            v.get("protocol")
+                .and_then(|p| p.as_str().map(str::to_owned))
+        })
         .as_deref()
         == Some("vnc")
 }
@@ -41,10 +44,15 @@ pub fn host_matches(host: &Host, query: &str) -> bool {
     if q.is_empty() {
         return true;
     }
-    [host.name.as_str(), host.ip.as_str(), host.username.as_str(), host.remark.as_str()]
-        .join(" ")
-        .to_lowercase()
-        .contains(&q)
+    [
+        host.name.as_str(),
+        host.ip.as_str(),
+        host.username.as_str(),
+        host.remark.as_str(),
+    ]
+    .join(" ")
+    .to_lowercase()
+    .contains(&q)
 }
 
 /// Expansion state: groups holding hosts open automatically; the user can still collapse/expand any group.
@@ -72,7 +80,10 @@ impl ExpandState {
 
 /// Groups that contain at least one host (over ALL hosts, not only filtered ones) plus their ancestors.
 pub fn auto_expanded_groups(hosts: &[Host], groups: &[HostGroup]) -> HashSet<String> {
-    let parent: HashMap<&str, Option<&str>> = groups.iter().map(|g| (g.id.as_str(), g.parent_id.as_deref())).collect();
+    let parent: HashMap<&str, Option<&str>> = groups
+        .iter()
+        .map(|g| (g.id.as_str(), g.parent_id.as_deref()))
+        .collect();
     let mut out = HashSet::new();
     for host in hosts {
         let gid = host.group_id.as_deref().unwrap_or(DEFAULT_GROUP_ID);
@@ -92,8 +103,19 @@ pub fn auto_expanded_groups(hosts: &[Host], groups: &[HostGroup]) -> HashSet<Str
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TreeRow {
-    Group { id: String, name: String, depth: usize, host_count: usize, expanded: bool, check: CheckState },
-    Host { id: String, depth: usize, checked: bool },
+    Group {
+        id: String,
+        name: String,
+        depth: usize,
+        host_count: usize,
+        expanded: bool,
+        check: CheckState,
+    },
+    Host {
+        id: String,
+        depth: usize,
+        checked: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,11 +139,17 @@ pub fn build_rows(
 
     let mut hosts_by_group: HashMap<&str, Vec<&Host>> = HashMap::new();
     for h in &filtered {
-        hosts_by_group.entry(h.group_id.as_deref().unwrap_or(DEFAULT_GROUP_ID)).or_default().push(h);
+        hosts_by_group
+            .entry(h.group_id.as_deref().unwrap_or(DEFAULT_GROUP_ID))
+            .or_default()
+            .push(h);
     }
     let mut groups_by_parent: HashMap<&str, Vec<&HostGroup>> = HashMap::new();
     for g in groups {
-        groups_by_parent.entry(g.parent_id.as_deref().unwrap_or("")).or_default().push(g);
+        groups_by_parent
+            .entry(g.parent_id.as_deref().unwrap_or(""))
+            .or_default()
+            .push(g);
     }
 
     fn descendant_hosts<'a>(
@@ -166,32 +194,78 @@ pub fn build_rows(
             _ => CheckState::Some,
         };
         let expanded = expand.is_expanded(id, auto);
-        rows.push(TreeRow::Group { id: id.to_string(), name: name.to_string(), depth, host_count: direct, expanded, check });
+        rows.push(TreeRow::Group {
+            id: id.to_string(),
+            name: name.to_string(),
+            depth,
+            host_count: direct,
+            expanded,
+            check,
+        });
         if !expanded || depth > 64 {
             return;
         }
         if let Some(children) = groups_by_parent.get(id) {
             for c in children {
-                emit(&c.id, &c.name, depth + 1, hosts_by_group, groups_by_parent, auto, expand, selected, rows);
+                emit(
+                    &c.id,
+                    &c.name,
+                    depth + 1,
+                    hosts_by_group,
+                    groups_by_parent,
+                    auto,
+                    expand,
+                    selected,
+                    rows,
+                );
             }
         }
         if let Some(hs) = hosts_by_group.get(id) {
             for h in hs {
-                rows.push(TreeRow::Host { id: h.id.clone(), depth: depth + 1, checked: selected.contains(&h.id) });
+                rows.push(TreeRow::Host {
+                    id: h.id.clone(),
+                    depth: depth + 1,
+                    checked: selected.contains(&h.id),
+                });
             }
         }
     }
 
     let mut rows = Vec::new();
-    emit(DEFAULT_GROUP_ID, default_group_name, 0, &hosts_by_group, &groups_by_parent, &auto, expand, selected, &mut rows);
+    emit(
+        DEFAULT_GROUP_ID,
+        default_group_name,
+        0,
+        &hosts_by_group,
+        &groups_by_parent,
+        &auto,
+        expand,
+        selected,
+        &mut rows,
+    );
     for g in groups_by_parent.get("").into_iter().flatten() {
-        emit(&g.id, &g.name, 0, &hosts_by_group, &groups_by_parent, &auto, expand, selected, &mut rows);
+        emit(
+            &g.id,
+            &g.name,
+            0,
+            &hosts_by_group,
+            &groups_by_parent,
+            &auto,
+            expand,
+            selected,
+            &mut rows,
+        );
     }
     rows
 }
 
 /// Host ids under a group (visible after filtering), used when its checkbox is toggled.
-pub fn group_host_ids(hosts: &[Host], groups: &[HostGroup], group_id: &str, query: &str) -> Vec<String> {
+pub fn group_host_ids(
+    hosts: &[Host],
+    groups: &[HostGroup],
+    group_id: &str,
+    query: &str,
+) -> Vec<String> {
     let filtered: Vec<&Host> = hosts.iter().filter(|h| host_matches(h, query)).collect();
     let mut ids = Vec::new();
     let mut stack = vec![group_id.to_string()];
@@ -205,7 +279,10 @@ pub fn group_host_ids(hosts: &[Host], groups: &[HostGroup], group_id: &str, quer
                 ids.push(h.id.clone());
             }
         }
-        for g in groups.iter().filter(|g| g.parent_id.as_deref() == Some(gid.as_str())) {
+        for g in groups
+            .iter()
+            .filter(|g| g.parent_id.as_deref() == Some(gid.as_str()))
+        {
             stack.push(g.id.clone());
         }
     }
@@ -214,12 +291,24 @@ pub fn group_host_ids(hosts: &[Host], groups: &[HostGroup], group_id: &str, quer
 
 /// Flattened group choices for pickers (depth-first, children after their parent) with the default group first.
 /// Returns `(group id, depth)`; a group can be excluded together with its subtree (used when moving groups).
-pub fn group_choices(groups: &[HostGroup], exclude_subtree_of: Option<&str>) -> Vec<(String, usize)> {
-    fn walk(groups: &[HostGroup], parent: &str, depth: usize, exclude: Option<&str>, out: &mut Vec<(String, usize)>) {
+pub fn group_choices(
+    groups: &[HostGroup],
+    exclude_subtree_of: Option<&str>,
+) -> Vec<(String, usize)> {
+    fn walk(
+        groups: &[HostGroup],
+        parent: &str,
+        depth: usize,
+        exclude: Option<&str>,
+        out: &mut Vec<(String, usize)>,
+    ) {
         if depth > 64 {
             return;
         }
-        for g in groups.iter().filter(|g| g.parent_id.as_deref().unwrap_or("") == parent) {
+        for g in groups
+            .iter()
+            .filter(|g| g.parent_id.as_deref().unwrap_or("") == parent)
+        {
             if Some(g.id.as_str()) == exclude {
                 continue;
             }
@@ -234,7 +323,11 @@ pub fn group_choices(groups: &[HostGroup], exclude_subtree_of: Option<&str>) -> 
 
 /// Selected Linux hosts only (broadcast terminal / batch upload targets).
 pub fn selected_linux_host_ids(selected: &BTreeSet<String>, hosts: &[Host]) -> Vec<String> {
-    hosts.iter().filter(|h| selected.contains(&h.id) && HostKind::of(h) == HostKind::Linux).map(|h| h.id.clone()).collect()
+    hosts
+        .iter()
+        .filter(|h| selected.contains(&h.id) && HostKind::of(h) == HostKind::Linux)
+        .map(|h| h.id.clone())
+        .collect()
 }
 
 #[cfg(test)]
@@ -265,7 +358,12 @@ mod tests {
     }
 
     fn group(id: &str, name: &str, parent: Option<&str>) -> HostGroup {
-        HostGroup { id: id.into(), name: name.into(), parent_id: parent.map(Into::into), sort_order: 0 }
+        HostGroup {
+            id: id.into(),
+            name: name.into(),
+            parent_id: parent.map(Into::into),
+            sort_order: 0,
+        }
     }
 
     fn sample() -> (Vec<Host>, Vec<HostGroup>) {
@@ -277,7 +375,11 @@ mod tests {
                 host("h4444", "win-1", Some("g-prod"), "windows"),
                 host("h55555", "vnc-box", None, "vnc"),
             ],
-            vec![group("g-prod", "prod", None), group("g-web", "web", Some("g-prod")), group("g-empty", "empty", None)],
+            vec![
+                group("g-prod", "prod", None),
+                group("g-web", "web", Some("g-prod")),
+                group("g-empty", "empty", None),
+            ],
         )
     }
 
@@ -293,10 +395,27 @@ mod tests {
     #[test]
     fn default_group_first_then_top_level_groups_children_before_hosts() {
         let (h, g) = sample();
-        let rows = build_rows(&h, &g, "", "未分组", &ExpandState::default(), &BTreeSet::new());
+        let rows = build_rows(
+            &h,
+            &g,
+            "",
+            "未分组",
+            &ExpandState::default(),
+            &BTreeSet::new(),
+        );
         assert_eq!(
             ids(&rows),
-            vec!["G0:__default__", "H1:h1", "H1:h55555", "G0:g-prod", "G1:g-web", "H2:h333", "H1:h22", "H1:h4444", "G0:g-empty"]
+            vec![
+                "G0:__default__",
+                "H1:h1",
+                "H1:h55555",
+                "G0:g-prod",
+                "G1:g-web",
+                "H2:h333",
+                "H1:h22",
+                "H1:h4444",
+                "G0:g-empty"
+            ]
         );
     }
 
@@ -304,7 +423,9 @@ mod tests {
     fn auto_expand_only_groups_with_hosts_and_their_ancestors() {
         let (h, g) = sample();
         let auto = auto_expanded_groups(&h, &g);
-        assert!(auto.contains(DEFAULT_GROUP_ID) && auto.contains("g-prod") && auto.contains("g-web"));
+        assert!(
+            auto.contains(DEFAULT_GROUP_ID) && auto.contains("g-prod") && auto.contains("g-web")
+        );
         assert!(!auto.contains("g-empty"));
         // g-web only has a host; its ancestor g-prod opens too even if prod itself had none
         let only_child = vec![host("x", "x", Some("g-web"), "linux")];
@@ -321,7 +442,9 @@ mod tests {
         let rows = build_rows(&h, &g, "", "d", &ex, &BTreeSet::new());
         assert!(!ids(&rows).iter().any(|r| r.contains("h22")));
         ex.toggle("g-prod", &auto); // expand again
-        assert!(ids(&build_rows(&h, &g, "", "d", &ex, &BTreeSet::new())).iter().any(|r| r.contains("h22")));
+        assert!(ids(&build_rows(&h, &g, "", "d", &ex, &BTreeSet::new()))
+            .iter()
+            .any(|r| r.contains("h22")));
         // an empty group the user opens manually stays expanded
         ex.toggle("g-empty", &auto);
         assert!(ex.is_expanded("g-empty", &auto));
@@ -330,11 +453,21 @@ mod tests {
     #[test]
     fn search_filters_hosts_but_keeps_group_structure() {
         let (h, g) = sample();
-        let rows = build_rows(&h, &g, "GAMMA", "d", &ExpandState::default(), &BTreeSet::new());
+        let rows = build_rows(
+            &h,
+            &g,
+            "GAMMA",
+            "d",
+            &ExpandState::default(),
+            &BTreeSet::new(),
+        );
         let r = ids(&rows);
         assert!(r.contains(&"H2:h333".to_string()));
         assert!(!r.iter().any(|x| x.contains("h22") || x.contains(":h1")));
-        assert!(r.contains(&"G0:g-empty".to_string()), "groups are never hidden by the search");
+        assert!(
+            r.contains(&"G0:g-empty".to_string()),
+            "groups are never hidden by the search"
+        );
         assert!(host_matches(&h[0], "10.0.0.2") || host_matches(&h[0], "alpha"));
         assert!(host_matches(&h[0], "  "));
     }
@@ -360,17 +493,36 @@ mod tests {
         }
         assert_eq!(state_of(&sel, "g-prod"), CheckState::All);
         assert_eq!(state_of(&sel, "g-web"), CheckState::All);
-        assert_eq!(group_host_ids(&h, &g, "g-prod", "").len(), 3, "includes nested group hosts");
-        assert_eq!(group_host_ids(&h, &g, "g-prod", "win").len(), 1, "respects the search filter");
+        assert_eq!(
+            group_host_ids(&h, &g, "g-prod", "").len(),
+            3,
+            "includes nested group hosts"
+        );
+        assert_eq!(
+            group_host_ids(&h, &g, "g-prod", "win").len(),
+            1,
+            "respects the search filter"
+        );
     }
 
     #[test]
     fn group_choices_are_depth_first_with_default_first_and_can_exclude_a_subtree() {
         let (_, g) = sample();
         let all = group_choices(&g, None);
-        assert_eq!(all, vec![(DEFAULT_GROUP_ID.to_string(), 0), ("g-prod".into(), 0), ("g-web".into(), 1), ("g-empty".into(), 0)]);
+        assert_eq!(
+            all,
+            vec![
+                (DEFAULT_GROUP_ID.to_string(), 0),
+                ("g-prod".into(), 0),
+                ("g-web".into(), 1),
+                ("g-empty".into(), 0)
+            ]
+        );
         let without = group_choices(&g, Some("g-prod"));
-        assert_eq!(without.iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), vec![DEFAULT_GROUP_ID, "g-empty"]);
+        assert_eq!(
+            without.iter().map(|x| x.0.as_str()).collect::<Vec<_>>(),
+            vec![DEFAULT_GROUP_ID, "g-empty"]
+        );
     }
 
     #[test]
@@ -380,8 +532,15 @@ mod tests {
         assert_eq!(HostKind::of(&h[3]), HostKind::Windows);
         assert_eq!(HostKind::of(&h[4]), HostKind::Vnc);
         h[1].rdp_settings = r#"{"protocol":"vnc"}"#.into();
-        assert_eq!(HostKind::of(&h[1]), HostKind::Vnc, "rdp_settings.protocol=vnc wins");
+        assert_eq!(
+            HostKind::of(&h[1]),
+            HostKind::Vnc,
+            "rdp_settings.protocol=vnc wins"
+        );
         let sel: BTreeSet<String> = h.iter().map(|x| x.id.clone()).collect();
-        assert_eq!(selected_linux_host_ids(&sel, &h), vec!["h1".to_string(), "h333".to_string()]);
+        assert_eq!(
+            selected_linux_host_ids(&sel, &h),
+            vec!["h1".to_string(), "h333".to_string()]
+        );
     }
 }

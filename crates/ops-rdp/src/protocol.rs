@@ -18,12 +18,11 @@ use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 
 use super::audio::PcmAudioHandler;
-use super::drive::{DriveBackend, DRIVE_DEVICE_ID};
-use super::h264::H264Pipeline;
 use super::clipboard::{
     text_clipboard_formats, ClipboardAction, ClipboardBridge, TextClipboardBackend,
 };
 use super::config::build_ironrdp_config;
+use super::drive::{DriveBackend, DRIVE_DEVICE_ID};
 use super::dynamic_channels::{display_control_client, geometry_sink, input_sink};
 use super::egfx::RdpEgfxBridge;
 use super::file_transfer::{
@@ -31,12 +30,12 @@ use super::file_transfer::{
     FileTransferState,
 };
 use super::frame::{build_frame_message, build_region_frame_message, FramePacer, QueuedFrame};
+use super::h264::H264Pipeline;
 use super::input::input_operations;
 use super::rdpevor::{video_control_channel, video_data_channel};
 use super::types::{
-    RdpBitmapFrame, RdpConnectResponse, RdpConnectionOptions, RdpCredentials,
-    RdpEncodedVideoFrame, RdpMetricsPayload, RdpStatusDetail, RdpStatusPayload, RdpTransportMode,
-    RectRegion,
+    RdpBitmapFrame, RdpConnectResponse, RdpConnectionOptions, RdpCredentials, RdpEncodedVideoFrame,
+    RdpMetricsPayload, RdpStatusDetail, RdpStatusPayload, RdpTransportMode, RectRegion,
 };
 use super::{RdpSessionCommand, RDP_CONNECT_TIMEOUT};
 
@@ -88,7 +87,17 @@ struct SessionDiagnostics {
 
 impl SessionDiagnostics {
     fn new(now: tokio::time::Instant) -> Self {
-        Self { started: now, window_started: now, pdus: 0, rx_bytes: 0, process_total: Duration::ZERO, process_max: Duration::ZERO, gaps_over_200ms: 0, last_pdu_at: None, first_graphics_logged: false }
+        Self {
+            started: now,
+            window_started: now,
+            pdus: 0,
+            rx_bytes: 0,
+            process_total: Duration::ZERO,
+            process_max: Duration::ZERO,
+            gaps_over_200ms: 0,
+            last_pdu_at: None,
+            first_graphics_logged: false,
+        }
     }
 
     fn record_pdu(&mut self, bytes: usize, took: Duration, now: tokio::time::Instant) {
@@ -104,13 +113,23 @@ impl SessionDiagnostics {
         self.last_pdu_at = Some(now);
     }
 
-    fn emit_if_due(&mut self, app: &ops_core::Core, session_id: &str, metrics: &RdpMetrics, now: tokio::time::Instant) {
+    fn emit_if_due(
+        &mut self,
+        app: &ops_core::Core,
+        session_id: &str,
+        metrics: &RdpMetrics,
+        now: tokio::time::Instant,
+    ) {
         let elapsed = now.duration_since(self.window_started);
         if elapsed < Duration::from_secs(5) {
             return;
         }
         let secs = elapsed.as_secs_f64();
-        let avg_ms = if self.pdus == 0 { 0.0 } else { self.process_total.as_secs_f64() * 1000.0 / f64::from(self.pdus) };
+        let avg_ms = if self.pdus == 0 {
+            0.0
+        } else {
+            self.process_total.as_secs_f64() * 1000.0 / f64::from(self.pdus)
+        };
         ops_core::log::emit_log(
             app,
             "info",
@@ -269,7 +288,16 @@ pub(super) async fn run_rdp_session(
         let _ = tx.send(Ok(response));
     }
     emit_status(&app, &session_id, "connected", None);
-    ops_core::log::emit_log(&app, "info", "rdp.stats", &format!("session={session_id} connected {}x{} transport={:?}: {}", session.width, session.height, options.transport_mode, session.connect_timings), "backend");
+    ops_core::log::emit_log(
+        &app,
+        "info",
+        "rdp.stats",
+        &format!(
+            "session={session_id} connected {}x{} transport={:?}: {}",
+            session.width, session.height, options.transport_mode, session.connect_timings
+        ),
+        "backend",
+    );
 
     if let Err(error) =
         run_active_session(&app, &session_id, &mut session, command_rx, frame_channel).await
@@ -302,7 +330,9 @@ async fn connect_rdp_session(
     .map_err(|e| format!("RDP TCP 连接失败 {addr}: {e}"))?;
     // Keepalive probes notice a path that died silently (NAT timeout, Wi-Fi roam) in ~30s instead of never, so the
     // window can reconnect instead of freezing on the last picture.
-    let keepalive = socket2::TcpKeepalive::new().with_time(Duration::from_secs(15)).with_interval(Duration::from_secs(5));
+    let keepalive = socket2::TcpKeepalive::new()
+        .with_time(Duration::from_secs(15))
+        .with_interval(Duration::from_secs(5));
     let _ = socket2::SockRef::from(&std_tcp).set_tcp_keepalive(&keepalive);
     std_tcp
         .set_nonblocking(true)
@@ -437,7 +467,10 @@ fn build_client_connector_with_clipboard(
         // a folder that cannot be shared stops the connection with the reason, instead of a drive that never shows up
         let backend = DriveBackend::new(folder)?;
         let label = backend.label().to_string();
-        connector.attach_static_channel(Rdpdr::new(Box::new(backend), "OpsBatch".to_string()).with_drives(Some(vec![(DRIVE_DEVICE_ID, label)])));
+        connector.attach_static_channel(
+            Rdpdr::new(Box::new(backend), "OpsBatch".to_string())
+                .with_drives(Some(vec![(DRIVE_DEVICE_ID, label)])),
+        );
     }
     if options.transport_mode == RdpTransportMode::H264Direct {
         let (egfx_client, egfx_receiver, egfx_bitmap_rx, egfx_status_rx) =
@@ -626,7 +659,16 @@ async fn forward_status_details(
                 ("h264DirectUnavailable", Some(reason.clone()))
             }
         };
-        ops_core::log::emit_log(app, "info", "rdp.stats", &format!("session={session_id} status detail {state}: {}", message.as_deref().unwrap_or("")), "backend");
+        ops_core::log::emit_log(
+            app,
+            "info",
+            "rdp.stats",
+            &format!(
+                "session={session_id} status detail {state}: {}",
+                message.as_deref().unwrap_or("")
+            ),
+            "backend",
+        );
         emit_status_with_detail(app, session_id, state, message, Some(detail));
     }
 
@@ -657,7 +699,9 @@ fn forward_encoded_video_frames(
             None => Ok(()),
         };
     }
-    let pipeline = session.h264.get_or_insert_with(|| H264Pipeline::spawn(frame_channel.clone()));
+    let pipeline = session
+        .h264
+        .get_or_insert_with(|| H264Pipeline::spawn(frame_channel.clone()));
     for frame in frames {
         pipeline.submit(frame)?;
     }
@@ -672,7 +716,10 @@ fn sync_h264_metrics(pipeline: &H264Pipeline, metrics: &mut RdpMetrics) -> Resul
     for _ in 0..pipeline.counters.submitted.swap(0, Ordering::Relaxed) {
         metrics.record_server_update();
     }
-    let (sent, bytes) = (pipeline.counters.sent.swap(0, Ordering::Relaxed), pipeline.counters.sent_bytes.swap(0, Ordering::Relaxed));
+    let (sent, bytes) = (
+        pipeline.counters.sent.swap(0, Ordering::Relaxed),
+        pipeline.counters.sent_bytes.swap(0, Ordering::Relaxed),
+    );
     if sent > 0 {
         metrics.record_sent_frames(sent as u32, bytes);
     }
@@ -977,7 +1024,9 @@ pub(super) fn input_trace_enabled() -> bool {
 /// Most input events that can queue up at once are mouse moves, and only the last one of a run matters: the remote
 /// pointer ends up there either way, while every skipped one saves encoding and a trip over a link that may be slow.
 /// Everything else (buttons, wheel, keys) keeps its order.
-pub(super) fn collapse_mouse_moves(events: Vec<super::types::RdpInputEvent>) -> Vec<super::types::RdpInputEvent> {
+pub(super) fn collapse_mouse_moves(
+    events: Vec<super::types::RdpInputEvent>,
+) -> Vec<super::types::RdpInputEvent> {
     use super::types::RdpInputEvent::MouseMove;
     let mut out: Vec<super::types::RdpInputEvent> = Vec::with_capacity(events.len());
     for event in events {
@@ -1001,7 +1050,11 @@ async fn process_input_events(
     let trace = input_trace_enabled();
     let mut events = Vec::new();
     for event in input_events {
-        let event_summary = if trace { super::input::input_event_summary(&event) } else { String::new() };
+        let event_summary = if trace {
+            super::input::input_event_summary(&event)
+        } else {
+            String::new()
+        };
         if trace {
             ops_core::log::emit_log(
                 app,
@@ -1022,7 +1075,11 @@ async fn process_input_events(
             error
         })?;
         let operation_count = operations.len();
-        let operation_preview = if trace { format!("{operations:?}") } else { String::new() };
+        let operation_preview = if trace {
+            format!("{operations:?}")
+        } else {
+            String::new()
+        };
         let encoded = session.input.apply(operations);
         if trace {
             ops_core::log::emit_log(
@@ -1047,14 +1104,37 @@ async fn process_input_events(
         .process_fastpath_input(&mut session.image, events.as_slice())
         .map_err(|e| {
             let error = format!("编码 RDP 输入失败: {e}");
-            ops_core::log::emit_log(app, "warn", "rdp.input", &format!("stage=fastpath_encode_failed sessionId={session_id} error={error}"), "backend");
+            ops_core::log::emit_log(
+                app,
+                "warn",
+                "rdp.input",
+                &format!("stage=fastpath_encode_failed sessionId={session_id} error={error}"),
+                "backend",
+            );
             error
         })?;
     if trace {
         let output_count = outputs.len();
-        ops_core::log::emit_log(app, "info", "rdp.input", &format!("stage=fastpath_encode_done sessionId={session_id} outputCount={output_count}"), "backend");
+        ops_core::log::emit_log(
+            app,
+            "info",
+            "rdp.input",
+            &format!(
+                "stage=fastpath_encode_done sessionId={session_id} outputCount={output_count}"
+            ),
+            "backend",
+        );
     }
-    handle_stage_outputs(app, session_id, session, frame_channel, frame_pacer, metrics, outputs).await
+    handle_stage_outputs(
+        app,
+        session_id,
+        session,
+        frame_channel,
+        frame_pacer,
+        metrics,
+        outputs,
+    )
+    .await
 }
 
 async fn handle_stage_outputs(

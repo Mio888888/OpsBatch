@@ -12,28 +12,46 @@ pub fn process_terminal_input(buffer: &str, data: &str) -> InputResult {
     if let Some(idx) = data.find(['\r', '\n']) {
         let command = format!("{buffer}{}", &data[..idx]);
         let command = command.trim();
-        return InputResult { buffer: String::new(), command: (!command.is_empty()).then(|| command.to_string()) };
+        return InputResult {
+            buffer: String::new(),
+            command: (!command.is_empty()).then(|| command.to_string()),
+        };
     }
     // Backspace / DEL
     if data == "\x7f" || data == "\x08" {
         let mut b = buffer.to_string();
         b.pop();
-        return InputResult { buffer: b, command: None };
+        return InputResult {
+            buffer: b,
+            command: None,
+        };
     }
     // Ctrl+C cancels, Ctrl+U clears the line
     if data == "\x03" || data == "\x15" {
-        return InputResult { buffer: String::new(), command: None };
+        return InputResult {
+            buffer: String::new(),
+            command: None,
+        };
     }
     let first = data.chars().next();
     // Escape sequences (arrows, function keys, ...) are ignored.
     if first == Some('\x1b') {
-        return InputResult { buffer: buffer.to_string(), command: None };
+        return InputResult {
+            buffer: buffer.to_string(),
+            command: None,
+        };
     }
     // Printable characters
     if first.is_some_and(|c| c as u32 >= 32) {
-        return InputResult { buffer: format!("{buffer}{data}"), command: None };
+        return InputResult {
+            buffer: format!("{buffer}{data}"),
+            command: None,
+        };
     }
-    InputResult { buffer: buffer.to_string(), command: None }
+    InputResult {
+        buffer: buffer.to_string(),
+        command: None,
+    }
 }
 
 #[cfg(test)]
@@ -64,7 +82,10 @@ mod tests {
 
     #[test]
     fn pasted_multi_character_chunks_and_inline_newlines() {
-        assert_eq!(process_terminal_input("echo ", "hello 世界").buffer, "echo hello 世界");
+        assert_eq!(
+            process_terminal_input("echo ", "hello 世界").buffer,
+            "echo hello 世界"
+        );
         let r = process_terminal_input("rm -rf ", "/\nmore");
         assert_eq!(r.command.as_deref(), Some("rm -rf /"));
     }

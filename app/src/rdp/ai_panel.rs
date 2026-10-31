@@ -4,17 +4,19 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
+use crate::scale::px;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _};
+use gpui_kit::component::{
+    h_flex, v_flex, ActiveTheme as _, Disableable as _, Icon, Selectable as _, Sizable as _,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use crate::scale::px;
-use ops_ai::parser::{ActionKind, ParsedPendingAction, RdpOperation};
 use ops_ai::client::{ai_chat, ChatMessage, ChatMessageImage, ChatRequest};
+use ops_ai::parser::{ActionKind, ParsedPendingAction, RdpOperation};
 use ops_ai::rdp_parser::strip_rdp_plan_block;
 use ops_ai::rdp_verify::{build_verification_prompt, parse_verdict, verification_system_prompt};
 use ops_i18n::t;
@@ -80,7 +82,12 @@ pub fn build_rdp_agent_context(width: u32, height: u32) -> String {
 /// One-line description of an operation for the action card.
 pub fn describe_operation(op: &RdpOperation) -> String {
     match op {
-        RdpOperation::Click { x, y, button, double_click } => {
+        RdpOperation::Click {
+            x,
+            y,
+            button,
+            double_click,
+        } => {
             let name = match button {
                 2 => "右键",
                 1 => "中键",
@@ -93,12 +100,32 @@ pub fn describe_operation(op: &RdpOperation) -> String {
             }
         }
         RdpOperation::Move { x, y } => format!("移动到 ({x}, {y})"),
-        RdpOperation::Drag { from_x, from_y, to_x, to_y, .. } => format!("拖拽 ({from_x}, {from_y}) → ({to_x}, {to_y})"),
-        RdpOperation::Scroll { x, y, delta, vertical } => {
-            format!("{}滚动 {} {} ({x}, {y})", if *vertical { "垂直" } else { "水平" }, if *delta > 0 { "↑" } else { "↓" }, delta.abs())
+        RdpOperation::Drag {
+            from_x,
+            from_y,
+            to_x,
+            to_y,
+            ..
+        } => format!("拖拽 ({from_x}, {from_y}) → ({to_x}, {to_y})"),
+        RdpOperation::Scroll {
+            x,
+            y,
+            delta,
+            vertical,
+        } => {
+            format!(
+                "{}滚动 {} {} ({x}, {y})",
+                if *vertical { "垂直" } else { "水平" },
+                if *delta > 0 { "↑" } else { "↓" },
+                delta.abs()
+            )
         }
         RdpOperation::Type { text } => {
-            let shown = if text.chars().count() > 40 { format!("{}...", text.chars().take(37).collect::<String>()) } else { text.clone() };
+            let shown = if text.chars().count() > 40 {
+                format!("{}...", text.chars().take(37).collect::<String>())
+            } else {
+                text.clone()
+            };
             format!("输入文本: {shown}")
         }
         RdpOperation::Key { keys } => format!("按键: {}", keys.join(" + ")),
@@ -108,8 +135,14 @@ pub fn describe_operation(op: &RdpOperation) -> String {
 
 /// "Continue" / "next" replies keep the request that is already being worked on.
 fn is_continuation(text: &str) -> bool {
-    let t = text.trim().trim_end_matches(['。', '.', '!', '！']).to_lowercase();
-    matches!(t.as_str(), "继续" | "继续吧" | "接着" | "接着来" | "下一步" | "go on" | "continue" | "next")
+    let t = text
+        .trim()
+        .trim_end_matches(['。', '.', '!', '！'])
+        .to_lowercase();
+    matches!(
+        t.as_str(),
+        "继续" | "继续吧" | "接着" | "接着来" | "下一步" | "go on" | "continue" | "next"
+    )
 }
 
 /// What the model is asked after a step ran: look at the new screen, say whether the request is done, otherwise give
@@ -137,7 +170,10 @@ fn goal_prompt(target: &str, round: u32, check: bool, width: u32, height: u32) -
 pub enum Verdict {
     Checking,
     Passed(String),
-    Failed { observation: String, reason: String },
+    Failed {
+        observation: String,
+        reason: String,
+    },
     /// The check itself could not be done (no model, network error, unreadable reply); the step stays unverified.
     Skipped(String),
 }
@@ -188,15 +224,26 @@ pub struct RdpAiPanel {
 }
 
 impl RdpAiPanel {
-    pub fn new(win: WeakEntity<RdpWindow>, host_id: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        win: WeakEntity<RdpWindow>,
+        host_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let store = ai_store(cx);
         let sid = format!("rdp-{host_id}");
         store.update(cx, |s, cx| {
             s.activate_session(&sid, AiScope::new("rdp_host", &host_id), cx);
             s.load_conversations(&sid, cx);
         });
-        let input = cx.new(|cx| TextareaState::new(window, cx).placeholder(t!("rdp.aiInputPlaceholder")).auto_grow(1, 4).submit_on_enter(true));
-        let goal_input = cx.new(|cx| InputState::new(window, cx).placeholder(t!("rdp.aiGoalPlaceholder")));
+        let input = cx.new(|cx| {
+            TextareaState::new(window, cx)
+                .placeholder(t!("rdp.aiInputPlaceholder"))
+                .auto_grow(1, 4)
+                .submit_on_enter(true)
+        });
+        let goal_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("rdp.aiGoalPlaceholder")));
         let subs = vec![
             cx.observe(&store, |this, _, cx| {
                 this.scroll.scroll_to_bottom();
@@ -204,20 +251,29 @@ impl RdpAiPanel {
                 cx.notify();
             }),
             cx.observe(&input, |_, _, cx| cx.notify()),
-            cx.subscribe_in(&input, window, |this, input, ev: &InputEvent, window, cx| match ev {
-                InputEvent::Change => {
-                    let text = input.read(cx).value().to_string();
-                    let sid = this.sid.clone();
-                    this.store.update(cx, |s, cx| s.set_input_text(&sid, text, cx));
-                }
-                InputEvent::PressEnter { shift: false, .. } => this.send(window, cx),
-                _ => {}
-            }),
-            cx.subscribe_in(&goal_input, window, |this, _, ev: &InputEvent, window, cx| {
-                if let InputEvent::PressEnter { .. } = ev {
-                    this.start_goal(window, cx);
-                }
-            }),
+            cx.subscribe_in(
+                &input,
+                window,
+                |this, input, ev: &InputEvent, window, cx| match ev {
+                    InputEvent::Change => {
+                        let text = input.read(cx).value().to_string();
+                        let sid = this.sid.clone();
+                        this.store
+                            .update(cx, |s, cx| s.set_input_text(&sid, text, cx));
+                    }
+                    InputEvent::PressEnter { shift: false, .. } => this.send(window, cx),
+                    _ => {}
+                },
+            ),
+            cx.subscribe_in(
+                &goal_input,
+                window,
+                |this, _, ev: &InputEvent, window, cx| {
+                    if let InputEvent::PressEnter { .. } = ev {
+                        this.start_goal(window, cx);
+                    }
+                },
+            ),
         ];
         Self {
             win,
@@ -262,22 +318,40 @@ impl RdpAiPanel {
     }
 
     fn desktop(&self, cx: &App) -> (u32, u32) {
-        self.win.upgrade().map(|w| w.read(cx).desktop()).map(|(w, h)| (u32::from(w), u32::from(h))).unwrap_or((1280, 720))
+        self.win
+            .upgrade()
+            .map(|w| w.read(cx).desktop())
+            .map(|(w, h)| (u32::from(w), u32::from(h)))
+            .unwrap_or((1280, 720))
     }
 
     fn screenshot_images(&self, cx: &App) -> Vec<String> {
-        self.win.upgrade().and_then(|w| w.read(cx).screenshot()).into_iter().collect()
+        self.win
+            .upgrade()
+            .and_then(|w| w.read(cx).screenshot())
+            .into_iter()
+            .collect()
     }
 
     fn streaming(&self, cx: &App) -> bool {
-        self.store.read(cx).session(&self.sid).is_some_and(|s| s.streaming())
+        self.store
+            .read(cx)
+            .session(&self.sid)
+            .is_some_and(|s| s.streaming())
     }
 
     fn rdp_actions(&self, cx: &App) -> Vec<ParsedPendingAction> {
         self.store
             .read(cx)
             .session(&self.sid)
-            .map(|s| s.messages.iter().flat_map(|m| m.pending_actions.iter()).filter(|a| a.kind == ActionKind::RdpAction && !a.rejected).cloned().collect())
+            .map(|s| {
+                s.messages
+                    .iter()
+                    .flat_map(|m| m.pending_actions.iter())
+                    .filter(|a| a.kind == ActionKind::RdpAction && !a.rejected)
+                    .cloned()
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -308,15 +382,28 @@ impl RdpAiPanel {
     /// the result has been checked against the screen.
     fn run_action(&mut self, action_id: String, cx: &mut Context<Self>) -> Task<StepOutcome> {
         let sid = self.sid.clone();
-        let Some(action) = self.store.update(cx, |s, cx| s.begin_rdp_approval(&sid, &action_id, cx)) else { return Task::ready(StepOutcome::Failed) };
-        let Some(ops) = action.rdp_operations.clone().filter(|o| !o.is_empty()) else { return Task::ready(StepOutcome::Failed) };
-        let Some(win) = self.win.upgrade() else { return Task::ready(StepOutcome::Failed) };
+        let Some(action) = self
+            .store
+            .update(cx, |s, cx| s.begin_rdp_approval(&sid, &action_id, cx))
+        else {
+            return Task::ready(StepOutcome::Failed);
+        };
+        let Some(ops) = action.rdp_operations.clone().filter(|o| !o.is_empty()) else {
+            return Task::ready(StepOutcome::Failed);
+        };
+        let Some(win) = self.win.upgrade() else {
+            return Task::ready(StepOutcome::Failed);
+        };
         self.running.insert(action_id.clone());
         self.verdicts.remove(&action_id);
         self.batch_stopped = false;
         // the goal mode already looks at the screen after every round
         let verify = self.verify_steps && !self.goal.active;
-        let before = if verify { win.read(cx).screenshot() } else { None };
+        let before = if verify {
+            win.read(cx).screenshot()
+        } else {
+            None
+        };
         let (description, expected) = (action.description.clone(), action.expected_outcome.clone());
         let op_lines: Vec<String> = ops.iter().map(describe_operation).collect();
         cx.notify();
@@ -330,7 +417,8 @@ impl RdpAiPanel {
                     this.running.remove(&action_id);
                     if ok {
                         let sid = this.sid.clone();
-                        this.store.update(cx, |s, cx| s.mark_executed(&sid, &action_id, cx));
+                        this.store
+                            .update(cx, |s, cx| s.mark_executed(&sid, &action_id, cx));
                         if verify {
                             this.verdicts.insert(action_id.clone(), Verdict::Checking);
                         }
@@ -351,20 +439,41 @@ impl RdpAiPanel {
             let verdict = match after {
                 None => Verdict::Skipped("没有可用的截图".to_string()),
                 Some(after) => {
-                    let images: Vec<ChatMessageImage> = before.into_iter().chain(std::iter::once(after)).map(|data_url| ChatMessageImage { data_url }).collect();
+                    let images: Vec<ChatMessageImage> = before
+                        .into_iter()
+                        .chain(std::iter::once(after))
+                        .map(|data_url| ChatMessageImage { data_url })
+                        .collect();
                     let request = ChatRequest {
                         messages: vec![
-                            ChatMessage { role: "system".into(), content: verification_system_prompt(), images: None },
-                            ChatMessage { role: "user".into(), content: build_verification_prompt(&description, &op_lines, expected.as_deref()), images: Some(images) },
+                            ChatMessage {
+                                role: "system".into(),
+                                content: verification_system_prompt(),
+                                images: None,
+                            },
+                            ChatMessage {
+                                role: "user".into(),
+                                content: build_verification_prompt(
+                                    &description,
+                                    &op_lines,
+                                    expected.as_deref(),
+                                ),
+                                images: Some(images),
+                            },
                         ],
                         model: None,
                         temperature: Some(0.0),
                         max_tokens: Some(400),
                     };
-                    let reply = ops_core::rt::run(async move { ai_chat(&ctx.db, request).await }).await.and_then(|r| r);
+                    let reply = ops_core::rt::run(async move { ai_chat(&ctx.db, request).await })
+                        .await
+                        .and_then(|r| r);
                     match reply.and_then(|r| parse_verdict(&r.content)) {
                         Ok(v) if v.ok => Verdict::Passed(v.observation),
-                        Ok(v) => Verdict::Failed { observation: v.observation, reason: v.reason },
+                        Ok(v) => Verdict::Failed {
+                            observation: v.observation,
+                            reason: v.reason,
+                        },
                         Err(e) => Verdict::Skipped(e),
                     }
                 }
@@ -387,8 +496,16 @@ impl RdpAiPanel {
         if self.streaming(cx) {
             return;
         }
-        let Some(action) = self.rdp_actions(cx).into_iter().find(|a| a.id == action_id) else { return };
-        let Some(Verdict::Failed { observation, reason }) = self.verdicts.get(action_id).cloned() else { return };
+        let Some(action) = self.rdp_actions(cx).into_iter().find(|a| a.id == action_id) else {
+            return;
+        };
+        let Some(Verdict::Failed {
+            observation,
+            reason,
+        }) = self.verdicts.get(action_id).cloned()
+        else {
+            return;
+        };
         let (w, h) = self.desktop(cx);
         let images = self.screenshot_images(cx);
         let sid = self.sid.clone();
@@ -417,7 +534,10 @@ impl RdpAiPanel {
     }
 
     pub fn approve(&mut self, action_id: &str, cx: &mut Context<Self>) {
-        if self.running.contains(action_id) || self.batch_id.as_deref() == Some(action_id) || self.streaming(cx) {
+        if self.running.contains(action_id)
+            || self.batch_id.as_deref() == Some(action_id)
+            || self.streaming(cx)
+        {
             return;
         }
         let task = self.run_action(action_id.to_string(), cx);
@@ -431,10 +551,18 @@ impl RdpAiPanel {
     /// After the pending steps have all run (and passed the check): show the model the new screen and ask for the
     /// next step, so a request that needs several steps keeps going until the model says it is done.
     fn continue_after_steps(&mut self, cx: &mut Context<Self>) {
-        if !self.auto_continue || self.goal.active || self.batch_id.is_some() || !self.running.is_empty() || self.streaming(cx) || self.follow_ups >= FOLLOW_UP_MAX_ROUNDS {
+        if !self.auto_continue
+            || self.goal.active
+            || self.batch_id.is_some()
+            || !self.running.is_empty()
+            || self.streaming(cx)
+            || self.follow_ups >= FOLLOW_UP_MAX_ROUNDS
+        {
             return;
         }
-        let Some(request) = self.request.clone() else { return };
+        let Some(request) = self.request.clone() else {
+            return;
+        };
         let actions = self.rdp_actions(cx);
         if actions.iter().any(|a| !a.executed) {
             return; // steps are still waiting for approval
@@ -444,13 +572,32 @@ impl RdpAiPanel {
             .store
             .read(cx)
             .session(&self.sid)
-            .and_then(|s| s.messages.iter().rev().find(|m| m.pending_actions.iter().any(|a| a.kind == ActionKind::RdpAction)).map(|m| m.pending_actions.iter().filter(|a| a.kind == ActionKind::RdpAction && a.executed).cloned().collect()))
+            .and_then(|s| {
+                s.messages
+                    .iter()
+                    .rev()
+                    .find(|m| {
+                        m.pending_actions
+                            .iter()
+                            .any(|a| a.kind == ActionKind::RdpAction)
+                    })
+                    .map(|m| {
+                        m.pending_actions
+                            .iter()
+                            .filter(|a| a.kind == ActionKind::RdpAction && a.executed)
+                            .cloned()
+                            .collect()
+                    })
+            })
             .unwrap_or_default();
         let done: Vec<String> = latest.iter().map(|a| a.description.clone()).collect();
-        let note = latest.iter().rev().find_map(|a| match self.verdicts.get(&a.id) {
-            Some(Verdict::Passed(obs)) if !obs.is_empty() => Some(obs.clone()),
-            _ => None,
-        });
+        let note = latest
+            .iter()
+            .rev()
+            .find_map(|a| match self.verdicts.get(&a.id) {
+                Some(Verdict::Passed(obs)) if !obs.is_empty() => Some(obs.clone()),
+                _ => None,
+            });
         if done.is_empty() {
             return;
         }
@@ -461,7 +608,13 @@ impl RdpAiPanel {
         let sid = self.sid.clone();
         self.store.update(cx, |s, cx| {
             s.set_rdp_desktop(&sid, Some((w, h)));
-            s.send_direct_message(&sid, prompt, Some(build_rdp_agent_context(w, h)), images, cx);
+            s.send_direct_message(
+                &sid,
+                prompt,
+                Some(build_rdp_agent_context(w, h)),
+                images,
+                cx,
+            );
         });
     }
 
@@ -480,12 +633,18 @@ impl RdpAiPanel {
 
     pub fn reject(&mut self, action_id: &str, cx: &mut Context<Self>) {
         let sid = self.sid.clone();
-        self.store.update(cx, |s, cx| s.reject_action(&sid, action_id, cx));
+        self.store
+            .update(cx, |s, cx| s.reject_action(&sid, action_id, cx));
     }
 
     /// "Run all": the pending steps one after another; a failing step does not stop the queue.
     pub fn approve_all(&mut self, cx: &mut Context<Self>) {
-        let queue: Vec<String> = self.rdp_actions(cx).into_iter().filter(|a| !a.executed).map(|a| a.id).collect();
+        let queue: Vec<String> = self
+            .rdp_actions(cx)
+            .into_iter()
+            .filter(|a| !a.executed)
+            .map(|a| a.id)
+            .collect();
         if queue.is_empty() || self.batch_id.is_some() {
             return;
         }
@@ -532,7 +691,12 @@ impl RdpAiPanel {
         if target.is_empty() || self.streaming(cx) || self.goal.active {
             return;
         }
-        self.goal = Goal { active: true, target: target.clone(), round: 0, busy: false };
+        self.goal = Goal {
+            active: true,
+            target: target.clone(),
+            round: 0,
+            busy: false,
+        };
         self.send_goal_message(&target, 0, false, cx);
         cx.notify();
     }
@@ -550,7 +714,13 @@ impl RdpAiPanel {
         let sid = self.sid.clone();
         self.store.update(cx, |s, cx| {
             s.set_rdp_desktop(&sid, Some((w, h)));
-            s.send_direct_message(&sid, prompt, Some(build_rdp_agent_context(w, h)), images, cx);
+            s.send_direct_message(
+                &sid,
+                prompt,
+                Some(build_rdp_agent_context(w, h)),
+                images,
+                cx,
+            );
         });
     }
 
@@ -559,7 +729,12 @@ impl RdpAiPanel {
         if !self.goal.active || self.goal.busy || self.streaming(cx) {
             return;
         }
-        let pending: Vec<String> = self.rdp_actions(cx).into_iter().filter(|a| !a.executed).map(|a| a.id).collect();
+        let pending: Vec<String> = self
+            .rdp_actions(cx)
+            .into_iter()
+            .filter(|a| !a.executed)
+            .map(|a| a.id)
+            .collect();
         if !pending.is_empty() {
             self.goal.busy = true;
             self.tasks.push(cx.spawn(async move |this, cx| {
@@ -605,12 +780,16 @@ impl RdpAiPanel {
             .read(cx)
             .session(&self.sid)
             .and_then(|s| s.messages.last())
-            .is_some_and(|m| m.role == Role::Assistant && !m.streaming && m.pending_actions.is_empty());
+            .is_some_and(|m| {
+                m.role == Role::Assistant && !m.streaming && m.pending_actions.is_empty()
+            });
         if finished_without_plan {
             self.tasks.push(cx.spawn(async move |this, cx| {
                 cx.background_executor().timer(GOAL_FINISH_DELAY).await;
                 let _ = this.update(cx, |this, cx| {
-                    let still_idle = !this.streaming(cx) && !this.goal.busy && this.rdp_actions(cx).iter().all(|a| a.executed);
+                    let still_idle = !this.streaming(cx)
+                        && !this.goal.busy
+                        && this.rdp_actions(cx).iter().all(|a| a.executed);
                     if this.goal.active && still_idle {
                         this.goal.active = false;
                         cx.notify();
@@ -628,11 +807,18 @@ impl RdpAiPanel {
         }
         let theme = cx.theme();
         let user = msg.role == Role::User;
-        let shown = if user { msg.content.clone() } else { strip_rdp_plan_block(&msg.content) };
+        let shown = if user {
+            msg.content.clone()
+        } else {
+            strip_rdp_plan_block(&msg.content)
+        };
         let empty = shown.is_empty();
         let has_actions = !msg.pending_actions.is_empty();
         let had_plan_block = !user && msg.content.to_lowercase().contains("<rdp_plan");
-        let parse_failed = !user && !msg.streaming && !has_actions && (msg.rdp_parse_error.is_some() || (had_plan_block && empty));
+        let parse_failed = !user
+            && !msg.streaming
+            && !has_actions
+            && (msg.rdp_parse_error.is_some() || (had_plan_block && empty));
         Some(
             v_flex()
                 .id(ElementId::Name(format!("rdp-ai-msg-{ix}").into()))
@@ -641,10 +827,29 @@ impl RdpAiPanel {
                 .p_2()
                 .rounded(px(6.))
                 .when(user, |d| d.bg(theme.secondary))
-                .child(div().text_size(px(10.)).text_color(theme.muted_foreground).child(if user { "我" } else { "AI" }))
+                .child(
+                    div()
+                        .text_size(px(10.))
+                        .text_color(theme.muted_foreground)
+                        .child(if user { "我" } else { "AI" }),
+                )
                 .when(!empty, |d| d.child(div().text_size(px(12.)).child(shown)))
-                .when(empty && msg.streaming, |d| d.child(div().text_size(px(12.)).text_color(theme.muted_foreground).child(format!("{}…", t!("rdp.aiThinking")))))
-                .when(empty && !msg.streaming && has_actions, |d| d.child(div().text_size(px(12.)).text_color(theme.muted_foreground).child(t!("rdp.aiPlanReady"))))
+                .when(empty && msg.streaming, |d| {
+                    d.child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(theme.muted_foreground)
+                            .child(format!("{}…", t!("rdp.aiThinking"))),
+                    )
+                })
+                .when(empty && !msg.streaming && has_actions, |d| {
+                    d.child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(theme.muted_foreground)
+                            .child(t!("rdp.aiPlanReady")),
+                    )
+                })
                 .when(parse_failed, |d| {
                     d.child(
                         v_flex()
@@ -653,16 +858,25 @@ impl RdpAiPanel {
                             .text_size(px(11.))
                             .text_color(theme.warning)
                             .child(format!("⚠ {}", t!("rdp.aiParseFailed")))
-                            .when_some(msg.rdp_parse_error.clone(), |d, e| d.child(div().text_color(theme.muted_foreground).child(e))),
+                            .when_some(msg.rdp_parse_error.clone(), |d, e| {
+                                d.child(div().text_color(theme.muted_foreground).child(e))
+                            }),
                     )
                 })
                 .into_any_element(),
         )
     }
 
-    fn action_card(&self, ix: usize, a: &ParsedPendingAction, streaming: bool, cx: &mut Context<Self>) -> AnyElement {
+    fn action_card(
+        &self,
+        ix: usize,
+        a: &ParsedPendingAction,
+        streaming: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let theme = cx.theme().clone();
-        let running = self.running.contains(&a.id) || self.batch_id.as_deref() == Some(a.id.as_str());
+        let running =
+            self.running.contains(&a.id) || self.batch_id.as_deref() == Some(a.id.as_str());
         let (approve_id, reject_id) = (a.id.clone(), a.id.clone());
         v_flex()
             .id(ElementId::Name(format!("rdp-ai-action-{ix}").into()))
@@ -677,40 +891,153 @@ impl RdpAiPanel {
                 h_flex()
                     .gap_2()
                     .items_center()
-                    .child(div().px_1().rounded(px(3.)).bg(theme.primary).text_color(theme.primary_foreground).text_size(px(9.)).child("RDP"))
-                    .child(div().min_w_0().text_size(px(12.)).child(a.description.clone())),
+                    .child(
+                        div()
+                            .px_1()
+                            .rounded(px(3.))
+                            .bg(theme.primary)
+                            .text_color(theme.primary_foreground)
+                            .text_size(px(9.))
+                            .child("RDP"),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .text_size(px(12.))
+                            .child(a.description.clone()),
+                    ),
             )
-            .children(a.rdp_operations.iter().flatten().map(|op| div().pl_2().text_size(px(11.)).text_color(theme.muted_foreground).child(format!("• {}", describe_operation(op)))))
+            .children(a.rdp_operations.iter().flatten().map(|op| {
+                div()
+                    .pl_2()
+                    .text_size(px(11.))
+                    .text_color(theme.muted_foreground)
+                    .child(format!("• {}", describe_operation(op)))
+            }))
             .when_some(a.intent.clone(), |d, intent| {
-                d.child(h_flex().gap_2().text_size(px(10.)).text_color(theme.muted_foreground).child(div().px_1().rounded(px(3.)).bg(theme.muted).child(intent)).when_some(a.expected_outcome.clone().filter(|e| !e.is_empty()), |d, e| d.child(e)))
+                d.child(
+                    h_flex()
+                        .gap_2()
+                        .text_size(px(10.))
+                        .text_color(theme.muted_foreground)
+                        .child(div().px_1().rounded(px(3.)).bg(theme.muted).child(intent))
+                        .when_some(
+                            a.expected_outcome.clone().filter(|e| !e.is_empty()),
+                            |d, e| d.child(e),
+                        ),
+                )
             })
             .when_some(self.verdicts.get(&a.id).cloned(), |d, verdict| {
                 let fix_id = a.id.clone();
                 d.child(match verdict {
-                    Verdict::Checking => div().id(ElementId::Name(format!("rdp-ai-verdict-{ix}").into())).test_support().text_size(px(11.)).text_color(theme.primary).child(format!("● {}", t!("rdp.aiVerifying"))).into_any_element(),
-                    Verdict::Passed(obs) => div().id(ElementId::Name(format!("rdp-ai-verdict-{ix}").into())).test_support().text_size(px(11.)).text_color(theme.success).child(format!("✓ {}{}", t!("rdp.aiVerified"), if obs.is_empty() { String::new() } else { format!("：{obs}") })).into_any_element(),
-                    Verdict::Skipped(why) => div().id(ElementId::Name(format!("rdp-ai-verdict-{ix}").into())).test_support().text_size(px(11.)).text_color(theme.muted_foreground).child(format!("{}：{why}", t!("rdp.aiVerifySkipped"))).into_any_element(),
-                    Verdict::Failed { observation, reason } => v_flex()
+                    Verdict::Checking => div()
                         .id(ElementId::Name(format!("rdp-ai-verdict-{ix}").into()))
                         .test_support()
-                        .gap_1()
-                        .child(div().text_size(px(11.)).text_color(theme.danger).child(format!("✗ {}：{}", t!("rdp.aiVerifyFailed"), if reason.is_empty() { observation.clone() } else { reason })))
-                        .when(!observation.is_empty(), |d| d.child(div().text_size(px(10.)).text_color(theme.muted_foreground).child(observation)))
-                        .child(Button::new(ElementId::Name(format!("rdp-ai-fix-{ix}").into())).small().disabled(streaming).label(t!("rdp.aiFix")).on_click(cx.listener(move |this, _, _, cx| this.fix_step(&fix_id, cx))))
+                        .text_size(px(11.))
+                        .text_color(theme.primary)
+                        .child(format!("● {}", t!("rdp.aiVerifying")))
                         .into_any_element(),
+                    Verdict::Passed(obs) => div()
+                        .id(ElementId::Name(format!("rdp-ai-verdict-{ix}").into()))
+                        .test_support()
+                        .text_size(px(11.))
+                        .text_color(theme.success)
+                        .child(format!(
+                            "✓ {}{}",
+                            t!("rdp.aiVerified"),
+                            if obs.is_empty() {
+                                String::new()
+                            } else {
+                                format!("：{obs}")
+                            }
+                        ))
+                        .into_any_element(),
+                    Verdict::Skipped(why) => div()
+                        .id(ElementId::Name(format!("rdp-ai-verdict-{ix}").into()))
+                        .test_support()
+                        .text_size(px(11.))
+                        .text_color(theme.muted_foreground)
+                        .child(format!("{}：{why}", t!("rdp.aiVerifySkipped")))
+                        .into_any_element(),
+                    Verdict::Failed {
+                        observation,
+                        reason,
+                    } => {
+                        v_flex()
+                            .id(ElementId::Name(format!("rdp-ai-verdict-{ix}").into()))
+                            .test_support()
+                            .gap_1()
+                            .child(div().text_size(px(11.)).text_color(theme.danger).child(
+                                format!(
+                                    "✗ {}：{}",
+                                    t!("rdp.aiVerifyFailed"),
+                                    if reason.is_empty() {
+                                        observation.clone()
+                                    } else {
+                                        reason
+                                    }
+                                ),
+                            ))
+                            .when(!observation.is_empty(), |d| {
+                                d.child(
+                                    div()
+                                        .text_size(px(10.))
+                                        .text_color(theme.muted_foreground)
+                                        .child(observation),
+                                )
+                            })
+                            .child(
+                                Button::new(ElementId::Name(format!("rdp-ai-fix-{ix}").into()))
+                                    .small()
+                                    .disabled(streaming)
+                                    .label(t!("rdp.aiFix"))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.fix_step(&fix_id, cx)
+                                    })),
+                            )
+                            .into_any_element()
+                    }
                 })
             })
             .child(if a.executed {
-                div().text_size(px(11.)).text_color(theme.success).child(format!("✓ {}", t!("ai.executed"))).into_any_element()
+                div()
+                    .text_size(px(11.))
+                    .text_color(theme.success)
+                    .child(format!("✓ {}", t!("ai.executed")))
+                    .into_any_element()
             } else if a.rejected {
-                div().text_size(px(11.)).text_color(theme.muted_foreground).child(format!("✗ {}", t!("ai.rejectTitle"))).into_any_element()
+                div()
+                    .text_size(px(11.))
+                    .text_color(theme.muted_foreground)
+                    .child(format!("✗ {}", t!("ai.rejectTitle")))
+                    .into_any_element()
             } else if running {
-                div().text_size(px(11.)).text_color(theme.primary).child(format!("● {}", t!("ai.executing"))).into_any_element()
+                div()
+                    .text_size(px(11.))
+                    .text_color(theme.primary)
+                    .child(format!("● {}", t!("ai.executing")))
+                    .into_any_element()
             } else {
                 h_flex()
                     .gap_2()
-                    .child(Button::new(ElementId::Name(format!("rdp-ai-approve-{ix}").into())).primary().small().label(format!("✓ {}", t!("ai.approve"))).disabled(streaming).on_click(cx.listener(move |this, _, _, cx| this.approve(&approve_id, cx))))
-                    .child(Button::new(ElementId::Name(format!("rdp-ai-reject-{ix}").into())).small().label(format!("✗ {}", t!("ai.reject"))).on_click(cx.listener(move |this, _, _, cx| this.reject(&reject_id, cx))))
+                    .child(
+                        Button::new(ElementId::Name(format!("rdp-ai-approve-{ix}").into()))
+                            .primary()
+                            .small()
+                            .label(format!("✓ {}", t!("ai.approve")))
+                            .disabled(streaming)
+                            .on_click(
+                                cx.listener(move |this, _, _, cx| this.approve(&approve_id, cx)),
+                            ),
+                    )
+                    .child(
+                        Button::new(ElementId::Name(format!("rdp-ai-reject-{ix}").into()))
+                            .small()
+                            .label(format!("✗ {}", t!("ai.reject")))
+                            .on_click(
+                                cx.listener(move |this, _, _, cx| this.reject(&reject_id, cx)),
+                            ),
+                    )
                     .into_any_element()
             })
             .into_any_element()
@@ -720,21 +1047,41 @@ impl RdpAiPanel {
 impl Render for RdpAiPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        let (messages, active_conv) = self.store.read(cx).session(&self.sid).map(|s| (s.messages.clone(), s.active_conversation_id.clone())).unwrap_or_default();
+        let (messages, active_conv) = self
+            .store
+            .read(cx)
+            .session(&self.sid)
+            .map(|s| (s.messages.clone(), s.active_conversation_id.clone()))
+            .unwrap_or_default();
         let conversations = self.store.read(cx).conversations_of(&self.sid).to_vec();
         let streaming = self.streaming(cx);
         let actions = self.rdp_actions(cx);
         let pending = actions.iter().filter(|a| !a.executed).count();
         let (w, h) = self.desktop(cx);
-        let has_session = self.win.upgrade().is_some_and(|win| win.read(cx).session_id().is_some());
+        let has_session = self
+            .win
+            .upgrade()
+            .is_some_and(|win| win.read(cx).session_id().is_some());
         let has_text = !self.input.read(cx).value().trim().is_empty();
         let batch_running = self.batch_id.is_some();
         let sid = self.sid.clone();
 
         let examples: [(&'static str, String, &'static str); 3] = [
-            ("rdp-ai-example-notepad", t!("rdp.aiExampleNotepad"), "打开记事本并输入\"你好世界\""),
-            ("rdp-ai-example-cmd", t!("rdp.aiExampleCmd"), "打开开始菜单，搜索 cmd 并启动命令提示符"),
-            ("rdp-ai-example-screenshot", t!("rdp.aiExampleScreenshot"), "截图当前桌面（Win+Shift+S）"),
+            (
+                "rdp-ai-example-notepad",
+                t!("rdp.aiExampleNotepad"),
+                "打开记事本并输入\"你好世界\"",
+            ),
+            (
+                "rdp-ai-example-cmd",
+                t!("rdp.aiExampleCmd"),
+                "打开开始菜单，搜索 cmd 并启动命令提示符",
+            ),
+            (
+                "rdp-ai-example-screenshot",
+                t!("rdp.aiExampleScreenshot"),
+                "截图当前桌面（Win+Shift+S）",
+            ),
         ];
 
         v_flex()
@@ -750,25 +1097,68 @@ impl Render for RdpAiPanel {
                     .items_center()
                     .border_b_1()
                     .border_color(theme.border)
-                    .child(div().flex_1().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).child(t!("rdp.aiTitle")))
-                    .when(has_session, |d| d.child(div().text_size(px(10.)).text_color(theme.muted_foreground).child(format!("{w}×{h}"))))
-                    .child(Button::new("rdp-ai-goal-toggle").ghost().xsmall().label("🎯").tooltip(t!("rdp.aiGoalMode")).selected(self.goal_mode).on_click(cx.listener(|this, _, _, cx| {
-                        let on = !this.goal_mode;
-                        this.set_goal_mode(on, cx);
-                    })))
-                    .child(Button::new("rdp-ai-new").ghost().xsmall().icon(Icon::new(IconName::Plus)).tooltip(t!("ai.newChat")).on_click(cx.listener(|this, _, _, cx| {
-                        let sid = this.sid.clone();
-                        this.store.update(cx, |s, cx| s.new_conversation(&sid, cx));
-                    })))
-                    .child(Button::new("rdp-ai-history-toggle").ghost().xsmall().icon(Icon::new(IconName::Menu)).tooltip(t!("ai.chatHistory")).selected(self.show_history).on_click(cx.listener(|this, _, _, cx| {
-                        this.show_history = !this.show_history;
-                        cx.notify();
-                    })))
-                    .child(Button::new("rdp-ai-close").ghost().xsmall().icon(Icon::new(IconName::X)).tooltip(t!("rdp.aiClose")).on_click(cx.listener(|this, _, _, cx| {
-                        if let Some(win) = this.win.upgrade() {
-                            win.update(cx, |w, cx| w.set_ai_open(false, cx));
-                        }
-                    }))),
+                    .child(
+                        div()
+                            .flex_1()
+                            .text_size(px(12.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(t!("rdp.aiTitle")),
+                    )
+                    .when(has_session, |d| {
+                        d.child(
+                            div()
+                                .text_size(px(10.))
+                                .text_color(theme.muted_foreground)
+                                .child(format!("{w}×{h}")),
+                        )
+                    })
+                    .child(
+                        Button::new("rdp-ai-goal-toggle")
+                            .ghost()
+                            .xsmall()
+                            .label("🎯")
+                            .tooltip(t!("rdp.aiGoalMode"))
+                            .selected(self.goal_mode)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                let on = !this.goal_mode;
+                                this.set_goal_mode(on, cx);
+                            })),
+                    )
+                    .child(
+                        Button::new("rdp-ai-new")
+                            .ghost()
+                            .xsmall()
+                            .icon(Icon::new(IconName::Plus))
+                            .tooltip(t!("ai.newChat"))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                let sid = this.sid.clone();
+                                this.store.update(cx, |s, cx| s.new_conversation(&sid, cx));
+                            })),
+                    )
+                    .child(
+                        Button::new("rdp-ai-history-toggle")
+                            .ghost()
+                            .xsmall()
+                            .icon(Icon::new(IconName::Menu))
+                            .tooltip(t!("ai.chatHistory"))
+                            .selected(self.show_history)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.show_history = !this.show_history;
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        Button::new("rdp-ai-close")
+                            .ghost()
+                            .xsmall()
+                            .icon(Icon::new(IconName::X))
+                            .tooltip(t!("rdp.aiClose"))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                if let Some(win) = this.win.upgrade() {
+                                    win.update(cx, |w, cx| w.set_ai_open(false, cx));
+                                }
+                            })),
+                    ),
             )
             .when(self.show_history, |d| {
                 d.child(
@@ -779,9 +1169,18 @@ impl Render for RdpAiPanel {
                         .overflow_y_scroll()
                         .border_b_1()
                         .border_color(theme.border)
-                        .when(conversations.is_empty(), |d| d.child(div().p_2().text_size(px(12.)).text_color(theme.muted_foreground).child(t!("ai.noHistory"))))
+                        .when(conversations.is_empty(), |d| {
+                            d.child(
+                                div()
+                                    .p_2()
+                                    .text_size(px(12.))
+                                    .text_color(theme.muted_foreground)
+                                    .child(t!("ai.noHistory")),
+                            )
+                        })
                         .children(conversations.iter().enumerate().map(|(i, c)| {
-                            let (open_id, del_id, open_sid, del_sid) = (c.id.clone(), c.id.clone(), sid.clone(), sid.clone());
+                            let (open_id, del_id, open_sid, del_sid) =
+                                (c.id.clone(), c.id.clone(), sid.clone(), sid.clone());
                             h_flex()
                                 .id(ElementId::Name(format!("rdp-ai-history-item-{i}").into()))
                                 .test_support()
@@ -790,17 +1189,43 @@ impl Render for RdpAiPanel {
                                 .gap_2()
                                 .items_center()
                                 .cursor_pointer()
-                                .when(active_conv.as_deref() == Some(c.id.as_str()), |d| d.bg(theme.accent))
+                                .when(active_conv.as_deref() == Some(c.id.as_str()), |d| {
+                                    d.bg(theme.accent)
+                                })
                                 .hover(|d| d.bg(theme.accent))
-                                .child(div().flex_1().min_w_0().truncate().text_size(px(12.)).child(if c.title.is_empty() { t!("ai.noTitle") } else { c.title.clone() }))
-                                .child(Button::new(ElementId::Name(format!("rdp-ai-history-del-{i}").into())).ghost().xsmall().icon(Icon::new(IconName::X)).on_click(cx.listener(move |this, _, _, cx| {
-                                    cx.stop_propagation();
-                                    let id = del_id.clone();
-                                    this.store.update(cx, |s, cx| s.delete_conversation(&del_sid, id, cx));
-                                })))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_size(px(12.))
+                                        .child(if c.title.is_empty() {
+                                            t!("ai.noTitle")
+                                        } else {
+                                            c.title.clone()
+                                        }),
+                                )
+                                .child(
+                                    Button::new(ElementId::Name(
+                                        format!("rdp-ai-history-del-{i}").into(),
+                                    ))
+                                    .ghost()
+                                    .xsmall()
+                                    .icon(Icon::new(IconName::X))
+                                    .on_click(cx.listener(
+                                        move |this, _, _, cx| {
+                                            cx.stop_propagation();
+                                            let id = del_id.clone();
+                                            this.store.update(cx, |s, cx| {
+                                                s.delete_conversation(&del_sid, id, cx)
+                                            });
+                                        },
+                                    )),
+                                )
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     let id = open_id.clone();
-                                    this.store.update(cx, |s, cx| s.open_conversation(&open_sid, id, cx));
+                                    this.store
+                                        .update(cx, |s, cx| s.open_conversation(&open_sid, id, cx));
                                     this.show_history = false;
                                     cx.notify();
                                 }))
@@ -822,17 +1247,60 @@ impl Render for RdpAiPanel {
                                 .flex_1()
                                 .gap_2()
                                 .items_center()
-                                .child(div().text_size(px(12.)).child(format!("🎯 {}", t!("rdp.aiGoalRunning"))))
-                                .child(div().id("rdp-ai-goal-round").test_support().text_size(px(11.)).text_color(theme.muted_foreground).child(t!("rdp.aiGoalRound", round = self.goal.round, max = GOAL_MAX_ROUNDS)))
+                                .child(
+                                    div()
+                                        .text_size(px(12.))
+                                        .child(format!("🎯 {}", t!("rdp.aiGoalRunning"))),
+                                )
+                                .child(
+                                    div()
+                                        .id("rdp-ai-goal-round")
+                                        .test_support()
+                                        .text_size(px(11.))
+                                        .text_color(theme.muted_foreground)
+                                        .child(t!(
+                                            "rdp.aiGoalRound",
+                                            round = self.goal.round,
+                                            max = GOAL_MAX_ROUNDS
+                                        )),
+                                )
                                 .child(div().flex_1())
-                                .child(Button::new("rdp-ai-goal-stop").small().danger().label(format!("⏹ {}", t!("rdp.aiGoalStop"))).on_click(cx.listener(|this, _, _, cx| this.stop_goal(cx))))
+                                .child(
+                                    Button::new("rdp-ai-goal-stop")
+                                        .small()
+                                        .danger()
+                                        .label(format!("⏹ {}", t!("rdp.aiGoalStop")))
+                                        .on_click(cx.listener(|this, _, _, cx| this.stop_goal(cx))),
+                                )
                                 .into_any_element()
                         } else {
                             h_flex()
                                 .flex_1()
                                 .gap_2()
-                                .child(div().flex_1().min_w_0().child(Input::new(&self.goal_input).small()))
-                                .child(Button::new("rdp-ai-goal-start").primary().small().label(format!("▶ {}", t!("rdp.aiGoalStart"))).disabled(streaming || self.goal_input.read(cx).value().trim().is_empty()).on_click(cx.listener(|this, _, window, cx| this.start_goal(window, cx))))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .child(Input::new(&self.goal_input).small()),
+                                )
+                                .child(
+                                    Button::new("rdp-ai-goal-start")
+                                        .primary()
+                                        .small()
+                                        .label(format!("▶ {}", t!("rdp.aiGoalStart")))
+                                        .disabled(
+                                            streaming
+                                                || self
+                                                    .goal_input
+                                                    .read(cx)
+                                                    .value()
+                                                    .trim()
+                                                    .is_empty(),
+                                        )
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.start_goal(window, cx)
+                                        })),
+                                )
                                 .into_any_element()
                         }),
                 )
@@ -845,14 +1313,28 @@ impl Render for RdpAiPanel {
                     .gap_2()
                     .p_3()
                     .child(div().text_size(px(26.)).child("🖥️"))
-                    .child(div().font_weight(FontWeight::SEMIBOLD).child(t!("rdp.aiEmptyTitle")))
-                    .child(div().text_size(px(11.)).text_color(theme.muted_foreground).child(t!("rdp.aiEmptyHint")))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(t!("rdp.aiEmptyTitle")),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(theme.muted_foreground)
+                            .child(t!("rdp.aiEmptyHint")),
+                    )
                     .children(examples.into_iter().map(|(id, label, text)| {
                         let sid = sid.clone();
-                        Button::new(id).small().label(label).on_click(cx.listener(move |this, _, window, cx| {
-                            this.input.update(cx, |i, cx| i.set_value(text.to_string(), window, cx));
-                            this.store.update(cx, |s, cx| s.set_input_text(&sid, text.to_string(), cx));
-                        }))
+                        Button::new(id).small().label(label).on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.input
+                                    .update(cx, |i, cx| i.set_value(text.to_string(), window, cx));
+                                this.store.update(cx, |s, cx| {
+                                    s.set_input_text(&sid, text.to_string(), cx)
+                                });
+                            },
+                        ))
                     }))
                     .into_any_element()
             } else {
@@ -865,7 +1347,12 @@ impl Render for RdpAiPanel {
                     .p_2()
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
-                    .children(messages.iter().enumerate().filter_map(|(i, m)| self.message(i, m, cx)))
+                    .children(
+                        messages
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(i, m)| self.message(i, m, cx)),
+                    )
                     .into_any_element()
             })
             .when(!actions.is_empty(), |d| {
@@ -883,27 +1370,92 @@ impl Render for RdpAiPanel {
                                 .py_1()
                                 .gap_2()
                                 .items_center()
-                                .child(div().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).child(t!("rdp.aiActions")))
+                                .child(
+                                    div()
+                                        .text_size(px(12.))
+                                        .font_weight(FontWeight::SEMIBOLD)
+                                        .child(t!("rdp.aiActions")),
+                                )
                                 .child(
                                     Checkbox::new("rdp-ai-verify")
                                         .label(t!("rdp.aiVerify"))
                                         .checked(self.verify_steps)
                                         .tooltip(t!("rdp.aiVerifyHint"))
-                                        .on_click(cx.listener(|this, checked: &bool, _, cx| this.set_verify_steps(*checked, cx))),
+                                        .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                            this.set_verify_steps(*checked, cx)
+                                        })),
                                 )
                                 .child(
                                     Checkbox::new("rdp-ai-continue")
                                         .label(t!("rdp.aiAutoContinue"))
                                         .checked(self.auto_continue)
                                         .tooltip(t!("rdp.aiAutoContinueHint"))
-                                        .on_click(cx.listener(|this, checked: &bool, _, cx| this.set_auto_continue(*checked, cx))),
+                                        .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                            this.set_auto_continue(*checked, cx)
+                                        })),
                                 )
-                                .when(self.batch_stopped, |d| d.child(div().id("rdp-ai-batch-stopped").test_support().text_size(px(11.)).text_color(theme.warning).child(format!("⚠ {}", t!("rdp.aiBatchStopped")))))
-                                .when(pending > 0, |d| d.child(div().id("rdp-ai-badge").test_support().px_1p5().rounded_full().bg(theme.primary).text_color(theme.primary_foreground).text_size(px(10.)).child(pending.to_string())))
-                                .when(pending > 1 && !batch_running, |d| d.child(Button::new("rdp-ai-run-all").small().label(format!("▶ {}", t!("rdp.aiRunAll", count = pending))).on_click(cx.listener(|this, _, _, cx| this.approve_all(cx)))))
-                                .when(batch_running, |d| d.child(div().id("rdp-ai-batch-running").test_support().text_size(px(11.)).text_color(theme.primary).child(format!("● {}", t!("rdp.aiBatchRunning"))))),
+                                .when(self.batch_stopped, |d| {
+                                    d.child(
+                                        div()
+                                            .id("rdp-ai-batch-stopped")
+                                            .test_support()
+                                            .text_size(px(11.))
+                                            .text_color(theme.warning)
+                                            .child(format!("⚠ {}", t!("rdp.aiBatchStopped"))),
+                                    )
+                                })
+                                .when(pending > 0, |d| {
+                                    d.child(
+                                        div()
+                                            .id("rdp-ai-badge")
+                                            .test_support()
+                                            .px_1p5()
+                                            .rounded_full()
+                                            .bg(theme.primary)
+                                            .text_color(theme.primary_foreground)
+                                            .text_size(px(10.))
+                                            .child(pending.to_string()),
+                                    )
+                                })
+                                .when(pending > 1 && !batch_running, |d| {
+                                    d.child(
+                                        Button::new("rdp-ai-run-all")
+                                            .small()
+                                            .label(format!(
+                                                "▶ {}",
+                                                t!("rdp.aiRunAll", count = pending)
+                                            ))
+                                            .on_click(
+                                                cx.listener(|this, _, _, cx| this.approve_all(cx)),
+                                            ),
+                                    )
+                                })
+                                .when(batch_running, |d| {
+                                    d.child(
+                                        div()
+                                            .id("rdp-ai-batch-running")
+                                            .test_support()
+                                            .text_size(px(11.))
+                                            .text_color(theme.primary)
+                                            .child(format!("● {}", t!("rdp.aiBatchRunning"))),
+                                    )
+                                }),
                         )
-                        .child(v_flex().id("rdp-ai-actions-list").flex_1().min_h_0().gap_2().p_2().overflow_y_scroll().children(actions.iter().enumerate().map(|(i, a)| self.action_card(i, a, streaming, cx)))),
+                        .child(
+                            v_flex()
+                                .id("rdp-ai-actions-list")
+                                .flex_1()
+                                .min_h_0()
+                                .gap_2()
+                                .p_2()
+                                .overflow_y_scroll()
+                                .children(
+                                    actions
+                                        .iter()
+                                        .enumerate()
+                                        .map(|(i, a)| self.action_card(i, a, streaming, cx)),
+                                ),
+                        ),
                 )
             })
             .child({
@@ -932,7 +1484,13 @@ impl Render for RdpAiPanel {
                             .border_1()
                             .border_color(if focused { green } else { ui.border })
                             .bg(if focused { ui.card } else { ui.main })
-                            .child(Textarea::new(&self.input).xsmall().appearance(false).text_size(px(12.)).line_height(relative(1.4))),
+                            .child(
+                                Textarea::new(&self.input)
+                                    .xsmall()
+                                    .appearance(false)
+                                    .text_size(px(12.))
+                                    .line_height(relative(1.4)),
+                            ),
                     )
                     .child(
                         div()
@@ -967,21 +1525,74 @@ mod tests {
     #[test]
     fn operations_are_described_for_the_action_card() {
         let d = |op: RdpOperation| describe_operation(&op);
-        assert_eq!(d(RdpOperation::Click { x: 1, y: 2, button: 0, double_click: false }), "左键点击 (1, 2)");
-        assert_eq!(d(RdpOperation::Click { x: 1, y: 2, button: 2, double_click: false }), "右键点击 (1, 2)");
-        assert_eq!(d(RdpOperation::Click { x: 1, y: 2, button: 0, double_click: true }), "双击 (1, 2)");
-        assert_eq!(d(RdpOperation::Drag { from_x: 1, from_y: 2, to_x: 3, to_y: 4, button: 0 }), "拖拽 (1, 2) → (3, 4)");
-        assert_eq!(d(RdpOperation::Scroll { x: 5, y: 6, delta: -3, vertical: true }), "垂直滚动 ↓ 3 (5, 6)");
-        assert_eq!(d(RdpOperation::Key { keys: vec!["Control".into(), "c".into()] }), "按键: Control + c");
+        assert_eq!(
+            d(RdpOperation::Click {
+                x: 1,
+                y: 2,
+                button: 0,
+                double_click: false
+            }),
+            "左键点击 (1, 2)"
+        );
+        assert_eq!(
+            d(RdpOperation::Click {
+                x: 1,
+                y: 2,
+                button: 2,
+                double_click: false
+            }),
+            "右键点击 (1, 2)"
+        );
+        assert_eq!(
+            d(RdpOperation::Click {
+                x: 1,
+                y: 2,
+                button: 0,
+                double_click: true
+            }),
+            "双击 (1, 2)"
+        );
+        assert_eq!(
+            d(RdpOperation::Drag {
+                from_x: 1,
+                from_y: 2,
+                to_x: 3,
+                to_y: 4,
+                button: 0
+            }),
+            "拖拽 (1, 2) → (3, 4)"
+        );
+        assert_eq!(
+            d(RdpOperation::Scroll {
+                x: 5,
+                y: 6,
+                delta: -3,
+                vertical: true
+            }),
+            "垂直滚动 ↓ 3 (5, 6)"
+        );
+        assert_eq!(
+            d(RdpOperation::Key {
+                keys: vec!["Control".into(), "c".into()]
+            }),
+            "按键: Control + c"
+        );
         assert_eq!(d(RdpOperation::Wait { ms: 1500 }), "等待 1.5 秒");
-        assert!(d(RdpOperation::Type { text: "x".repeat(60) }).ends_with("..."));
+        assert!(d(RdpOperation::Type {
+            text: "x".repeat(60)
+        })
+        .ends_with("..."));
     }
 
     #[test]
     fn the_agent_prompt_states_resolution_and_the_keyboard_first_rule() {
         let p = build_rdp_agent_context(1280, 720);
         assert!(p.contains("1280x720"));
-        assert!(p.contains("启动或打开应用") && p.contains("Win/Meta") && p.contains("不要优先依赖桌面图标坐标双击"));
+        assert!(
+            p.contains("启动或打开应用")
+                && p.contains("Win/Meta")
+                && p.contains("不要优先依赖桌面图标坐标双击")
+        );
         assert!(p.contains("<RDP_PLAN>") && p.contains("</RDP_PLAN>"));
     }
 

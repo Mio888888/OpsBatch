@@ -152,7 +152,10 @@ pub struct RecordingMeta {
     pub filepath: String,
     pub duration: f64,
 }
-pub fn list_recordings(core: &crate::Core, history_id: String) -> Result<Vec<RecordingMeta>, String> {
+pub fn list_recordings(
+    core: &crate::Core,
+    history_id: String,
+) -> Result<Vec<RecordingMeta>, String> {
     let app_data_dir = core.data_dir().to_path_buf();
     let recordings_dir = app_data_dir.join("recordings");
     if !recordings_dir.exists() {
@@ -197,14 +200,28 @@ mod tests {
     #[test]
     fn a_written_recording_reads_back_with_its_content() {
         let core = crate::Core::open_temp("cast").unwrap();
-        write_asciinema_recording(&core, "h1".into(), "web".into(), "web".into(), "echo \"hi\"".into(), "line one\n中文 line two".into()).unwrap();
-        let rec = read_asciinema_recording(&core, "h1".into(), "web".into()).unwrap().expect("recording");
+        write_asciinema_recording(
+            &core,
+            "h1".into(),
+            "web".into(),
+            "web".into(),
+            "echo \"hi\"".into(),
+            "line one\n中文 line two".into(),
+        )
+        .unwrap();
+        let rec = read_asciinema_recording(&core, "h1".into(), "web".into())
+            .unwrap()
+            .expect("recording");
         let text: String = rec.events.iter().map(|e| e.content.as_str()).collect();
         assert_eq!(text, "echo \"hi\"\r\nline one\r\n中文 line two\r\n");
         assert!(rec.events.windows(2).all(|w| w[0].time <= w[1].time));
         let list = list_recordings(&core, "h1".into()).unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].host_id, "web");
-        assert!(read_asciinema_recording(&core, "h1".into(), "missing".into()).unwrap().is_none());
+        assert!(
+            read_asciinema_recording(&core, "h1".into(), "missing".into())
+                .unwrap()
+                .is_none()
+        );
     }
 }

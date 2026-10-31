@@ -8,8 +8,9 @@ fn ext_of(name: &str) -> String {
 }
 
 const TEXT_EXTS: &[&str] = &[
-    "txt", "md", "json", "js", "ts", "tsx", "jsx", "py", "rs", "go", "java", "c", "h", "cpp", "hpp", "html", "css", "scss",
-    "less", "yaml", "yml", "toml", "ini", "cfg", "conf", "sh", "bash", "zsh", "fish", "sql", "xml", "csv", "log", "env",
+    "txt", "md", "json", "js", "ts", "tsx", "jsx", "py", "rs", "go", "java", "c", "h", "cpp",
+    "hpp", "html", "css", "scss", "less", "yaml", "yml", "toml", "ini", "cfg", "conf", "sh",
+    "bash", "zsh", "fish", "sql", "xml", "csv", "log", "env",
 ];
 const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "gif", "svg", "webp", "ico", "bmp"];
 const AUDIO_EXTS: &[&str] = &["mp3", "wav", "flac", "aac", "ogg"];
@@ -52,7 +53,10 @@ impl PreviewKind {
     /// Kinds the app cannot show itself (no video decoder / PDF renderer / font viewer): offered as "open with the
     /// system app" instead of a hex dump.
     pub fn opens_externally(self) -> bool {
-        matches!(self, PreviewKind::Video | PreviewKind::Pdf | PreviewKind::Font)
+        matches!(
+            self,
+            PreviewKind::Video | PreviewKind::Pdf | PreviewKind::Font
+        )
     }
 
     /// How much of the file the preview reads.
@@ -79,7 +83,11 @@ pub fn is_archive(entry: &FileEntry) -> bool {
         return false;
     }
     let n = entry.name.to_lowercase();
-    [".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tbz2", ".txz", ".tar", ".zip", ".7z", ".rar"].iter().any(|s| n.ends_with(s))
+    [
+        ".tar.gz", ".tar.bz2", ".tar.xz", ".tgz", ".tbz2", ".txz", ".tar", ".zip", ".7z", ".rar",
+    ]
+    .iter()
+    .any(|s| n.ends_with(s))
 }
 
 pub fn file_icon(entry: &FileEntry) -> &'static str {
@@ -149,8 +157,21 @@ pub fn format_duration(ms: Option<u64>) -> String {
 pub fn hex_dump(bytes: &[u8], max_lines: usize) -> String {
     let mut lines = Vec::new();
     for (i, chunk) in bytes.chunks(16).take(max_lines).enumerate() {
-        let hex = chunk.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ");
-        let ascii: String = chunk.iter().map(|b| if (32..=126).contains(b) { *b as char } else { '.' }).collect();
+        let hex = chunk
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let ascii: String = chunk
+            .iter()
+            .map(|b| {
+                if (32..=126).contains(b) {
+                    *b as char
+                } else {
+                    '.'
+                }
+            })
+            .collect();
         lines.push(format!("{:08x}  {:<47}  |{}|", i * 16, hex, ascii));
     }
     lines.join("\n")
@@ -173,7 +194,15 @@ mod tests {
     use super::*;
 
     fn entry(name: &str, dir: bool) -> FileEntry {
-        FileEntry { name: name.into(), path: format!("/x/{name}"), is_dir: dir, is_symlink: false, size: 0, modified: None, permissions: None }
+        FileEntry {
+            name: name.into(),
+            path: format!("/x/{name}"),
+            is_dir: dir,
+            is_symlink: false,
+            size: 0,
+            modified: None,
+            permissions: None,
+        }
     }
 
     #[test]
@@ -185,7 +214,11 @@ mod tests {
         assert_eq!(preview_kind("a.woff2"), PreviewKind::Font);
         assert_eq!(preview_kind("a.pdf"), PreviewKind::Pdf);
         assert_eq!(preview_kind("a.bin"), PreviewKind::Binary);
-        assert!(PreviewKind::Video.opens_externally() && PreviewKind::Pdf.opens_externally() && PreviewKind::Font.opens_externally());
+        assert!(
+            PreviewKind::Video.opens_externally()
+                && PreviewKind::Pdf.opens_externally()
+                && PreviewKind::Font.opens_externally()
+        );
         assert!(!PreviewKind::Audio.opens_externally() && !PreviewKind::Text.opens_externally());
         assert!(PreviewKind::Audio.read_limit() > PreviewKind::Text.read_limit());
         assert_eq!(preview_kind("noext"), PreviewKind::Binary);
@@ -198,7 +231,9 @@ mod tests {
 
     #[test]
     fn archives_by_suffix() {
-        for n in ["a.tar.gz", "a.TGZ", "a.zip", "a.7z", "a.rar", "a.tar.xz", "a.tar"] {
+        for n in [
+            "a.tar.gz", "a.TGZ", "a.zip", "a.7z", "a.rar", "a.tar.xz", "a.tar",
+        ] {
             assert!(is_archive(&entry(n, false)), "{n}");
         }
         assert!(!is_archive(&entry("a.gz", false)));
@@ -226,8 +261,14 @@ mod tests {
         let d = hex_dump(b"Hello, world!\x00\x01\x02ABCDEFG", 16);
         let lines: Vec<&str> = d.lines().collect();
         assert_eq!(lines.len(), 2);
-        assert!(lines[0].starts_with("00000000  48 65 6c 6c 6f 2c 20 77 6f 72 6c 64 21 00 01 02  |Hello, world!...|"));
+        assert!(lines[0].starts_with(
+            "00000000  48 65 6c 6c 6f 2c 20 77 6f 72 6c 64 21 00 01 02  |Hello, world!...|"
+        ));
         assert!(lines[1].starts_with("00000010  41 42 43 44 45 46 47"));
-        assert_eq!(hex_dump(&[0u8; 400], 16).lines().count(), 16, "capped at 16 lines");
+        assert_eq!(
+            hex_dump(&[0u8; 400], 16).lines().count(),
+            16,
+            "capped at 16 lines"
+        );
     }
 }

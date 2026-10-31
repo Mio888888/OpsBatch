@@ -2,13 +2,13 @@
 
 use std::sync::Arc;
 
+use crate::scale::px;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::select::Select;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Sizable as _, TitleBar};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use crate::scale::px;
 use ops_i18n::t;
 use ops_ssh::hosts::Host;
 use ops_ssh::Ctx;
@@ -45,8 +45,14 @@ pub struct BatchTerminalWindow {
 impl BatchTerminalWindow {
     pub fn open(host_ids: Vec<String>, cx: &mut App) {
         let ids: Vec<String> = host_ids.into_iter().take(MAX_HOSTS).collect();
-        let options = window::window_options(WindowKind::BatchTerminal, &t!("assets.broadcastTerminalWindowTitle", count = ids.len()), cx);
-        window::replace_window("batch-terminal", options, cx, move |window, cx| cx.new(|cx| Self::new(ids, window, cx)));
+        let options = window::window_options(
+            WindowKind::BatchTerminal,
+            &t!("assets.broadcastTerminalWindowTitle", count = ids.len()),
+            cx,
+        );
+        window::replace_window("batch-terminal", options, cx, move |window, cx| {
+            cx.new(|cx| Self::new(ids, window, cx))
+        });
     }
 
     pub fn new(host_ids: Vec<String>, window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -59,27 +65,42 @@ impl BatchTerminalWindow {
             Choice::new("4", t!("batchTerminal.columns", count = 4)),
         ];
         let columns_select = cx.new(|cx| new_select(choices, "2", window, cx));
-        let subs = vec![cx.subscribe_in(&columns_select, window, |this, _, ev, _, cx| {
-            if let Some(v) = confirmed_value(ev) {
-                this.columns = v.parse().unwrap_or(2);
-                cx.notify();
-            }
-        })];
+        let subs = vec![
+            cx.subscribe_in(&columns_select, window, |this, _, ev, _, cx| {
+                if let Some(v) = confirmed_value(ev) {
+                    this.columns = v.parse().unwrap_or(2);
+                    cx.notify();
+                }
+            }),
+        ];
 
         let ids: Vec<String> = host_ids.into_iter().take(MAX_HOSTS).collect();
         let c = ctx.clone();
         let wanted = ids.clone();
         let load = cx.spawn(async move |this, cx| {
-            let all = ops_core::rt::run(async move { ops_ssh::hosts::list_hosts(&c.db).await }).await.and_then(|r| r);
+            let all = ops_core::rt::run(async move { ops_ssh::hosts::list_hosts(&c.db).await })
+                .await
+                .and_then(|r| r);
             let _ = this.update(cx, |this, cx| {
                 this.loading = false;
                 match all {
                     Ok(all) => {
                         // Keep the requested order.
-                        let hosts: Vec<Host> = wanted.iter().filter_map(|id| all.iter().find(|h| &h.id == id).cloned()).collect();
+                        let hosts: Vec<Host> = wanted
+                            .iter()
+                            .filter_map(|id| all.iter().find(|h| &h.id == id).cloned())
+                            .collect();
                         this.sessions = hosts
                             .into_iter()
-                            .map(|host| PaneSession { host, state: ConnState::Connecting, error: None, pane: None, session_id: None, attempt: 0, _sub: None })
+                            .map(|host| PaneSession {
+                                host,
+                                state: ConnState::Connecting,
+                                error: None,
+                                pane: None,
+                                session_id: None,
+                                attempt: 0,
+                                _sub: None,
+                            })
                             .collect();
                         for ix in 0..this.sessions.len() {
                             this.connect(ix, cx);
@@ -117,8 +138,16 @@ impl BatchTerminalWindow {
         &self.host_ids
     }
     pub fn stats(&self) -> (usize, usize, usize) {
-        let ok = self.sessions.iter().filter(|s| s.state == ConnState::Connected).count();
-        let err = self.sessions.iter().filter(|s| s.state == ConnState::Error).count();
+        let ok = self
+            .sessions
+            .iter()
+            .filter(|s| s.state == ConnState::Connected)
+            .count();
+        let err = self
+            .sessions
+            .iter()
+            .filter(|s| s.state == ConnState::Error)
+            .count();
         (ok, err, self.sessions.len() - ok - err)
     }
 
@@ -128,7 +157,9 @@ impl BatchTerminalWindow {
         if let Some(sid) = session_id {
             let ctx = self.ctx.clone();
             ops_core::rt::spawn(async move {
-                let _ = ops_ssh::terminal::terminal_disconnect(&ctx.terminals_mgr, sid, Some(host_id)).await;
+                let _ =
+                    ops_ssh::terminal::terminal_disconnect(&ctx.terminals_mgr, sid, Some(host_id))
+                        .await;
             });
         }
     }
@@ -162,13 +193,24 @@ impl BatchTerminalWindow {
         .detach();
     }
 
-    fn finish_connect(&mut self, ix: usize, attempt: u64, result: Result<String, String>, cx: &mut Context<Self>) {
-        let stale = self.sessions.get(ix).map(|s| s.attempt != attempt).unwrap_or(true);
+    fn finish_connect(
+        &mut self,
+        ix: usize,
+        attempt: u64,
+        result: Result<String, String>,
+        cx: &mut Context<Self>,
+    ) {
+        let stale = self
+            .sessions
+            .get(ix)
+            .map(|s| s.attempt != attempt)
+            .unwrap_or(true);
         if stale {
             if let Ok(sid) = result {
                 let ctx = self.ctx.clone();
                 ops_core::rt::spawn(async move {
-                    let _ = ops_ssh::terminal::terminal_disconnect(&ctx.terminals_mgr, sid, None).await;
+                    let _ =
+                        ops_ssh::terminal::terminal_disconnect(&ctx.terminals_mgr, sid, None).await;
                 });
             }
             return;
@@ -203,7 +245,11 @@ impl BatchTerminalWindow {
 
     /// Send input to every connected session.
     pub fn broadcast(&mut self, data: &str, cx: &mut Context<Self>) {
-        for s in self.sessions.iter().filter(|s| s.state == ConnState::Connected) {
+        for s in self
+            .sessions
+            .iter()
+            .filter(|s| s.state == ConnState::Connected)
+        {
             if let Some(p) = &s.pane {
                 p.read(cx).write_raw(data.to_string());
             }
@@ -215,8 +261,14 @@ impl BatchTerminalWindow {
         let s = &self.sessions[ix];
         let (dot, status): (Hsla, Option<(String, Hsla)>) = match s.state {
             ConnState::Connected => (theme.success, None),
-            ConnState::Connecting => (theme.primary, Some((t!("batchTerminal.paneConnecting"), theme.primary))),
-            ConnState::Error => (theme.danger, Some((t!("batchTerminal.paneFailed"), theme.danger))),
+            ConnState::Connecting => (
+                theme.primary,
+                Some((t!("batchTerminal.paneConnecting"), theme.primary)),
+            ),
+            ConnState::Error => (
+                theme.danger,
+                Some((t!("batchTerminal.paneFailed"), theme.danger)),
+            ),
         };
         let body: AnyElement = match (&s.state, &s.pane) {
             (ConnState::Error, _) => v_flex()
@@ -225,10 +277,26 @@ impl BatchTerminalWindow {
                 .justify_center()
                 .gap_2()
                 .p_3()
-                .child(div().text_size(px(12.)).text_color(theme.danger).child(s.error.clone().filter(|e| !e.is_empty()).unwrap_or_else(|| t!("batchTerminal.connectFailed"))))
-                .child(Button::new(("batch-retry", ix)).small().label(t!("terminal.retry")).on_click(cx.listener(move |this, _, _, cx| this.connect(ix, cx))))
+                .child(
+                    div().text_size(px(12.)).text_color(theme.danger).child(
+                        s.error
+                            .clone()
+                            .filter(|e| !e.is_empty())
+                            .unwrap_or_else(|| t!("batchTerminal.connectFailed")),
+                    ),
+                )
+                .child(
+                    Button::new(("batch-retry", ix))
+                        .small()
+                        .label(t!("terminal.retry"))
+                        .on_click(cx.listener(move |this, _, _, cx| this.connect(ix, cx))),
+                )
                 .into_any_element(),
-            (_, Some(p)) => div().size_full().p(px(4.)).child(p.clone()).into_any_element(),
+            (_, Some(p)) => div()
+                .size_full()
+                .p(px(4.))
+                .child(p.clone())
+                .into_any_element(),
             _ => div().into_any_element(),
         };
         v_flex()
@@ -248,9 +316,35 @@ impl BatchTerminalWindow {
                     .flex_none()
                     .bg(theme.tab_bar)
                     .child(div().size(px(6.)).rounded_full().bg(dot))
-                    .child(div().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).child(if s.host.name.is_empty() { s.host.ip.clone() } else { s.host.name.clone() }))
-                    .when(!s.host.ip.is_empty(), |d| d.child(div().text_size(px(10.)).text_color(theme.muted_foreground).child(s.host.ip.clone())))
-                    .when_some(status, |d, (text, color)| d.child(div().px_1p5().rounded_full().bg(Hsla { a: 0.12, ..color }).text_color(color).text_size(px(10.)).child(text))),
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(if s.host.name.is_empty() {
+                                s.host.ip.clone()
+                            } else {
+                                s.host.name.clone()
+                            }),
+                    )
+                    .when(!s.host.ip.is_empty(), |d| {
+                        d.child(
+                            div()
+                                .text_size(px(10.))
+                                .text_color(theme.muted_foreground)
+                                .child(s.host.ip.clone()),
+                        )
+                    })
+                    .when_some(status, |d, (text, color)| {
+                        d.child(
+                            div()
+                                .px_1p5()
+                                .rounded_full()
+                                .bg(Hsla { a: 0.12, ..color })
+                                .text_color(color)
+                                .text_size(px(10.))
+                                .child(text),
+                        )
+                    }),
             )
             .child(div().flex_1().min_h_0().child(body))
             .into_any_element()
@@ -265,7 +359,9 @@ impl Drop for BatchTerminalWindow {
                 let ctx = self.ctx.clone();
                 let host = s.host.id.clone();
                 ops_core::rt::spawn(async move {
-                    let _ = ops_ssh::terminal::terminal_disconnect(&ctx.terminals_mgr, sid, Some(host)).await;
+                    let _ =
+                        ops_ssh::terminal::terminal_disconnect(&ctx.terminals_mgr, sid, Some(host))
+                            .await;
                 });
             }
         }
@@ -296,7 +392,15 @@ impl Render for BatchTerminalWindow {
         let n_rows = grid_rows.len().max(1);
         let _ = n_rows;
 
-        let chip = |text: String, color: Hsla| div().px_1p5().rounded_full().bg(Hsla { a: 0.12, ..color }).text_color(color).text_size(px(11.)).child(text);
+        let chip = |text: String, color: Hsla| {
+            div()
+                .px_1p5()
+                .rounded_full()
+                .bg(Hsla { a: 0.12, ..color })
+                .text_color(color)
+                .text_size(px(11.))
+                .child(text)
+        };
 
         let header = h_flex()
             .id("batch-terminal-header")
@@ -305,24 +409,59 @@ impl Render for BatchTerminalWindow {
             .pr_2()
             .gap_2()
             .items_center()
-            .child(div().font_weight(FontWeight::BOLD).child(t!("batchTerminal.title")))
-            .child(div().text_size(px(12.)).text_color(theme.muted_foreground).child(t!("batchTerminal.count", count = total)))
-            .when(ok > 0, |d| d.child(chip(t!("batchTerminal.connected", count = ok), theme.success)))
-            .when(err > 0, |d| d.child(chip(t!("batchTerminal.failed", count = err), theme.danger)))
-            .when(pending > 0, |d| d.child(chip(t!("batchTerminal.connecting", count = pending), theme.primary)))
+            .child(
+                div()
+                    .font_weight(FontWeight::BOLD)
+                    .child(t!("batchTerminal.title")),
+            )
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(theme.muted_foreground)
+                    .child(t!("batchTerminal.count", count = total)),
+            )
+            .when(ok > 0, |d| {
+                d.child(chip(
+                    t!("batchTerminal.connected", count = ok),
+                    theme.success,
+                ))
+            })
+            .when(err > 0, |d| {
+                d.child(chip(t!("batchTerminal.failed", count = err), theme.danger))
+            })
+            .when(pending > 0, |d| {
+                d.child(chip(
+                    t!("batchTerminal.connecting", count = pending),
+                    theme.primary,
+                ))
+            })
             .child(div().flex_1())
-            .child(div().w(px(110.)).child(Select::new(&self.columns_select).small()))
-            .child(Button::new("batch-terminal-close").small().label(t!("batchTerminal.close")).on_click(|_, window, _| window.remove_window()));
+            .child(
+                div()
+                    .w(px(110.))
+                    .child(Select::new(&self.columns_select).small()),
+            )
+            .child(
+                Button::new("batch-terminal-close")
+                    .small()
+                    .label(t!("batchTerminal.close"))
+                    .on_click(|_, window, _| window.remove_window()),
+            );
 
-        let grid = v_flex().id("batch-terminal-grid").test_support().flex_1().min_h_0().children(grid_rows.into_iter().enumerate().map(|(r, row)| {
-            let missing = cols - row.len();
-            h_flex()
-                .id(("batch-row", r))
-                .flex_1()
-                .min_h_0()
-                .children(row.into_iter().map(|ix| self.pane_view(ix, cx)))
-                .children((0..missing).map(|_| div().flex_1()))
-        }));
+        let grid = v_flex()
+            .id("batch-terminal-grid")
+            .test_support()
+            .flex_1()
+            .min_h_0()
+            .children(grid_rows.into_iter().enumerate().map(|(r, row)| {
+                let missing = cols - row.len();
+                h_flex()
+                    .id(("batch-row", r))
+                    .flex_1()
+                    .min_h_0()
+                    .children(row.into_iter().map(|ix| self.pane_view(ix, cx)))
+                    .children((0..missing).map(|_| div().flex_1()))
+            }));
 
         v_flex()
             .id("batch-terminal-window")

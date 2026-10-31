@@ -1,12 +1,12 @@
 //! New / rename group dialog (port of the group Modal in MainLayout.tsx).
 
+use crate::scale::px;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use crate::scale::px;
 use ops_i18n::t;
 
 use crate::stores::assets::AssetsStore;
@@ -16,10 +16,17 @@ use crate::widgets::toast;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GroupDialogMode {
     /// Create under `parent` (None = top level).
-    New { parent: Option<String> },
-    Rename { id: String, name: String },
+    New {
+        parent: Option<String>,
+    },
+    Rename {
+        id: String,
+        name: String,
+    },
     /// The implicit ungrouped group: only its display name can change (local setting).
-    RenameDefault { name: String },
+    RenameDefault {
+        name: String,
+    },
 }
 
 pub struct GroupDialog {
@@ -32,11 +39,21 @@ pub struct GroupDialog {
 }
 
 impl GroupDialog {
-    pub fn open(store: Entity<AssetsStore>, mode: GroupDialogMode, window: &mut Window, cx: &mut App) {
+    pub fn open(
+        store: Entity<AssetsStore>,
+        mode: GroupDialogMode,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
         let _ = Self::open_with_handle(store, mode, window, cx);
     }
 
-    pub fn open_with_handle(store: Entity<AssetsStore>, mode: GroupDialogMode, window: &mut Window, cx: &mut App) -> Entity<GroupDialog> {
+    pub fn open_with_handle(
+        store: Entity<AssetsStore>,
+        mode: GroupDialogMode,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Entity<GroupDialog> {
         let title: SharedString = match &mode {
             GroupDialogMode::New { .. } => t!("assets.newGroup"),
             _ => t!("assets.editGroup"),
@@ -44,20 +61,40 @@ impl GroupDialog {
         .into();
         let view = cx.new(|cx| GroupDialog::new(store, mode, window, cx));
         let shown = view.clone();
-        window.open_dialog(cx, move |dialog, _, _| dialog.title(title.clone()).w(px(520.)).child(shown.clone()));
+        window.open_dialog(cx, move |dialog, _, _| {
+            dialog.title(title.clone()).w(px(520.)).child(shown.clone())
+        });
         let first = view.read(cx).input.clone();
         first.update(cx, |s, cx| s.focus(window, cx));
         view
     }
 
-    fn new(store: Entity<AssetsStore>, mode: GroupDialogMode, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(
+        store: Entity<AssetsStore>,
+        mode: GroupDialogMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let initial = match &mode {
             GroupDialogMode::New { .. } => String::new(),
-            GroupDialogMode::Rename { name, .. } | GroupDialogMode::RenameDefault { name } => name.clone(),
+            GroupDialogMode::Rename { name, .. } | GroupDialogMode::RenameDefault { name } => {
+                name.clone()
+            }
         };
         let placeholder = t!("assets.groupName");
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder(placeholder).default_value(initial));
-        Self { store, mode, input, required_error: false, error: None, saving: false }
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(placeholder)
+                .default_value(initial)
+        });
+        Self {
+            store,
+            mode,
+            input,
+            required_error: false,
+            error: None,
+            saving: false,
+        }
     }
 
     pub fn has_required_error(&self) -> bool {
@@ -85,7 +122,9 @@ impl GroupDialog {
                 let t = s.add_group(name, parent, cx);
                 Some(cx.spawn(async move |_, _| t.await.map(|_| ())))
             }
-            GroupDialogMode::Rename { id, .. } => s.rename_group(&id, name, cx).map(|t| cx.spawn(async move |_, _| t.await.map(|_| ()))),
+            GroupDialogMode::Rename { id, .. } => s
+                .rename_group(&id, name, cx)
+                .map(|t| cx.spawn(async move |_, _| t.await.map(|_| ()))),
             GroupDialogMode::RenameDefault { .. } => {
                 s.set_default_group_name(name, cx);
                 None
@@ -105,7 +144,15 @@ impl GroupDialog {
                 this.saving = false;
                 match result {
                     Ok(()) => {
-                        toast::success(window, cx, if created { t!("assets.groupCreated") } else { t!("assets.groupUpdated") });
+                        toast::success(
+                            window,
+                            cx,
+                            if created {
+                                t!("assets.groupCreated")
+                            } else {
+                                t!("assets.groupUpdated")
+                            },
+                        );
                         window.close_dialog(cx);
                     }
                     Err(e) => {
@@ -133,12 +180,18 @@ impl Render for GroupDialog {
                 self.required_error.then(|| t!("common.required").into()),
                 cx,
             ))
-            .when_some(self.error.clone(), |d, e| d.child(div().text_size(px(12.)).text_color(theme.danger).child(e)))
+            .when_some(self.error.clone(), |d, e| {
+                d.child(div().text_size(px(12.)).text_color(theme.danger).child(e))
+            })
             .child(
                 h_flex()
                     .gap_2()
                     .justify_end()
-                    .child(Button::new("group-cancel").label(t!("common.cancel")).on_click(|_, window, cx| window.close_dialog(cx)))
+                    .child(
+                        Button::new("group-cancel")
+                            .label(t!("common.cancel"))
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    )
                     .child(
                         Button::new("group-save")
                             .primary()

@@ -35,8 +35,14 @@ fn new_host(name: &str, ip: &str) -> NewHost {
 #[tokio::test]
 async fn host_crud_keeps_secrets_out_of_the_database() {
     let core = Core::open_temp("hosts").unwrap();
-    let h = hosts::add_host(&core.db, new_host("web-1", "10.0.0.1")).await.unwrap();
-    assert_eq!(h.password.as_deref(), Some(SECRET_PLACEHOLDER), "password must be a placeholder in the row");
+    let h = hosts::add_host(&core.db, new_host("web-1", "10.0.0.1"))
+        .await
+        .unwrap();
+    assert_eq!(
+        h.password.as_deref(),
+        Some(SECRET_PLACEHOLDER),
+        "password must be a placeholder in the row"
+    );
     assert_eq!(keychain::get_host_password(&h.id).unwrap(), "s3cret");
 
     let listed = hosts::list_hosts(&core.db).await.unwrap();
@@ -49,7 +55,9 @@ async fn host_crud_keeps_secrets_out_of_the_database() {
         .pool
         .get()
         .unwrap()
-        .query_row("SELECT password FROM hosts WHERE id=?1", [&h.id], |r| r.get(0))
+        .query_row("SELECT password FROM hosts WHERE id=?1", [&h.id], |r| {
+            r.get(0)
+        })
         .unwrap();
     assert_ne!(raw.as_deref(), Some("s3cret"));
 
@@ -72,34 +80,59 @@ async fn host_crud_keeps_secrets_out_of_the_database() {
         rdp_settings: None,
         proxy_settings: None,
     };
-    hosts::update_host(core.clone(), registry.clone(), upd(Some(SECRET_PLACEHOLDER), "web-1b")).await.unwrap();
+    hosts::update_host(
+        core.clone(),
+        registry.clone(),
+        upd(Some(SECRET_PLACEHOLDER), "web-1b"),
+    )
+    .await
+    .unwrap();
     assert_eq!(keychain::get_host_password(&h.id).unwrap(), "s3cret");
-    hosts::update_host(core.clone(), registry.clone(), upd(Some("n3w"), "web-1b")).await.unwrap();
+    hosts::update_host(core.clone(), registry.clone(), upd(Some("n3w"), "web-1b"))
+        .await
+        .unwrap();
     assert_eq!(keychain::get_host_password(&h.id).unwrap(), "n3w");
     assert_eq!(hosts::list_hosts(&core.db).await.unwrap()[0].name, "web-1b");
 
-    hosts::delete_host(&core, registry, h.id.clone()).await.unwrap();
+    hosts::delete_host(&core, registry, h.id.clone())
+        .await
+        .unwrap();
     assert!(hosts::list_hosts(&core.db).await.unwrap().is_empty());
-    assert!(keychain::get_host_password(&h.id).is_err(), "secret removed with the host");
+    assert!(
+        keychain::get_host_password(&h.id).is_err(),
+        "secret removed with the host"
+    );
 }
 
 #[tokio::test]
 async fn groups_nest_and_deleting_a_group_ungroups_hosts() {
     let core = Core::open_temp("groups").unwrap();
-    let parent = groups::add_group(&core.db, "prod".into(), None).await.unwrap();
-    let child = groups::add_group(&core.db, "prod-web".into(), Some(parent.id.clone())).await.unwrap();
+    let parent = groups::add_group(&core.db, "prod".into(), None)
+        .await
+        .unwrap();
+    let child = groups::add_group(&core.db, "prod-web".into(), Some(parent.id.clone()))
+        .await
+        .unwrap();
     assert_eq!(child.parent_id.as_deref(), Some(parent.id.as_str()));
     let mut h = new_host("a", "10.0.0.2");
     h.group_id = Some(parent.id.clone());
     let h = hosts::add_host(&core.db, h).await.unwrap();
     assert_eq!(h.group_id.as_deref(), Some(parent.id.as_str()));
 
-    let renamed = groups::update_group(&core.db, ops_ssh::groups::HostGroup { name: "production".into(), ..parent.clone() })
-        .await
-        .unwrap();
+    let renamed = groups::update_group(
+        &core.db,
+        ops_ssh::groups::HostGroup {
+            name: "production".into(),
+            ..parent.clone()
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(renamed.name, "production");
 
-    groups::delete_group(&core.db, parent.id.clone()).await.unwrap();
+    groups::delete_group(&core.db, parent.id.clone())
+        .await
+        .unwrap();
     let after = hosts::list_hosts(&core.db).await.unwrap();
     assert_eq!(after[0].group_id, None);
     let all = groups::list_groups(&core.db).await.unwrap();
@@ -109,9 +142,24 @@ async fn groups_nest_and_deleting_a_group_ungroups_hosts() {
 #[tokio::test]
 async fn tags_crud_and_unique_names() {
     let core = Core::open_temp("tags").unwrap();
-    let t = tags::add_tag(&core.db, "db".into(), "#ff0000".into()).await.unwrap();
-    assert!(tags::add_tag(&core.db, "db".into(), "#00ff00".into()).await.is_err(), "names are unique");
-    let t2 = tags::update_tag(&core.db, ops_ssh::tags::Tag { color: "#00ff00".into(), ..t.clone() }).await.unwrap();
+    let t = tags::add_tag(&core.db, "db".into(), "#ff0000".into())
+        .await
+        .unwrap();
+    assert!(
+        tags::add_tag(&core.db, "db".into(), "#00ff00".into())
+            .await
+            .is_err(),
+        "names are unique"
+    );
+    let t2 = tags::update_tag(
+        &core.db,
+        ops_ssh::tags::Tag {
+            color: "#00ff00".into(),
+            ..t.clone()
+        },
+    )
+    .await
+    .unwrap();
     assert_eq!(t2.color, "#00ff00");
     assert_eq!(tags::list_tags(&core.db).await.unwrap().len(), 1);
     tags::delete_tag(&core.db, t.id).await.unwrap();
@@ -124,13 +172,25 @@ async fn csv_roundtrip_skip_and_overwrite() {
     let csv = "name,ip,port,auth_type,os,tags,group_id,remark\nweb,10.1.1.1,22,password,linux,,,first\nbad,,22,password,linux,,,x\ndb,10.1.1.2,2222,key,linux,,,second\n";
     let r = import::import_hosts_csv(&core.db, csv.into(), "incremental".into()).unwrap();
     assert_eq!((r.total, r.imported, r.skipped), (3, 2, 1), "{r:?}");
-    assert!(r.errors.iter().any(|e| e.contains("line 3")), "{:?}", r.errors);
+    assert!(
+        r.errors.iter().any(|e| e.contains("line 3")),
+        "{:?}",
+        r.errors
+    );
 
     let again = import::import_hosts_csv(&core.db, csv.into(), "incremental".into()).unwrap();
-    assert_eq!((again.imported, again.skipped), (0, 3), "incremental mode skips known IPs: {again:?}");
+    assert_eq!(
+        (again.imported, again.skipped),
+        (0, 3),
+        "incremental mode skips known IPs: {again:?}"
+    );
     let over = import::import_hosts_csv(&core.db, csv.into(), "overwrite".into()).unwrap();
     assert_eq!(over.imported, 2, "{over:?}");
-    assert_eq!(hosts::list_hosts(&core.db).await.unwrap().len(), 2, "overwrite replaces, no duplicates");
+    assert_eq!(
+        hosts::list_hosts(&core.db).await.unwrap().len(),
+        2,
+        "overwrite replaces, no duplicates"
+    );
 
     let exported = import::export_hosts_csv(&core.db).unwrap();
     assert!(exported.starts_with("name,ip,port,auth_type,os,tags,group_id,remark"));
@@ -140,7 +200,9 @@ async fn csv_roundtrip_skip_and_overwrite() {
 #[tokio::test]
 async fn jump_chain_is_resolved_and_cascades() {
     let core = Core::open_temp("jump").unwrap();
-    let bastion = hosts::add_host(&core.db, new_host("bastion", "10.9.9.1")).await.unwrap();
+    let bastion = hosts::add_host(&core.db, new_host("bastion", "10.9.9.1"))
+        .await
+        .unwrap();
     let mut inner = new_host("inner", "10.9.9.2");
     inner.jump_chain = Some(serde_json::to_string(&[bastion.id.clone()]).unwrap());
     let inner = hosts::add_host(&core.db, inner).await.unwrap();
@@ -151,9 +213,13 @@ async fn jump_chain_is_resolved_and_cascades() {
     let _ = topo;
 
     let registry = registry();
-    let downstream = proxyjump::cascade_disconnect(&registry, &core.db, bastion.id.clone()).unwrap();
+    let downstream =
+        proxyjump::cascade_disconnect(&registry, &core.db, bastion.id.clone()).unwrap();
     // cascade_disconnect reports only downstream hosts that actually had a live pooled connection.
-    assert!(downstream.is_empty(), "nothing was connected: {downstream:?}");
+    assert!(
+        downstream.is_empty(),
+        "nothing was connected: {downstream:?}"
+    );
 }
 
 #[tokio::test]
@@ -166,11 +232,17 @@ async fn check_host_status_reports_reachability() {
     let up = hosts::add_host(&core.db, up).await.unwrap();
     let core2 = core.clone();
     let id = up.id.clone();
-    let st = tokio::task::spawn_blocking(move || hosts::check_host_status(&core2.db, id)).await.unwrap().unwrap();
+    let st = tokio::task::spawn_blocking(move || hosts::check_host_status(&core2.db, id))
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(st, "online");
     drop(listener);
     let core3 = core.clone();
     let id = up.id.clone();
-    let st = tokio::task::spawn_blocking(move || hosts::check_host_status(&core3.db, id)).await.unwrap().unwrap();
+    let st = tokio::task::spawn_blocking(move || hosts::check_host_status(&core3.db, id))
+        .await
+        .unwrap()
+        .unwrap();
     assert_ne!(st, "online");
 }

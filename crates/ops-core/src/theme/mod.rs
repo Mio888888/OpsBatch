@@ -9,10 +9,13 @@ mod ui;
 
 pub use color::{contrast_ratio, darken, lighten, parse_css_color, Rgba8};
 pub use data::{ACCENTS, THEMES};
-pub use settings::{normalize_terminal_font_family, ResolvedTheme, ThemeSettings, ThemeSettingsMode};
+pub use settings::{
+    normalize_terminal_font_family, ResolvedTheme, ThemeSettings, ThemeSettingsMode,
+};
 pub use ui::{
-    default_ui_scale_for_platform, normalize_ui_scale, ui_text_palette, UiTextPalette, OTHER_PLATFORM_DEFAULT_UI_SCALE,
-    UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_OPTIONS, WINDOWS_DEFAULT_UI_SCALE,
+    default_ui_scale_for_platform, normalize_ui_scale, ui_text_palette, UiTextPalette,
+    OTHER_PLATFORM_DEFAULT_UI_SCALE, UI_SCALE_MAX, UI_SCALE_MIN, UI_SCALE_OPTIONS,
+    WINDOWS_DEFAULT_UI_SCALE,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,9 +93,22 @@ impl TerminalPalette {
     /// ANSI colours 0..=15 in order.
     pub fn ansi16(&self) -> [&'static str; 16] {
         [
-            self.black, self.red, self.green, self.yellow, self.blue, self.magenta, self.cyan, self.white,
-            self.bright_black, self.bright_red, self.bright_green, self.bright_yellow, self.bright_blue,
-            self.bright_magenta, self.bright_cyan, self.bright_white,
+            self.black,
+            self.red,
+            self.green,
+            self.yellow,
+            self.blue,
+            self.magenta,
+            self.cyan,
+            self.white,
+            self.bright_black,
+            self.bright_red,
+            self.bright_green,
+            self.bright_yellow,
+            self.bright_blue,
+            self.bright_magenta,
+            self.bright_cyan,
+            self.bright_white,
         ]
     }
 }
@@ -151,11 +167,27 @@ mod tests {
     #[test]
     fn every_colour_string_parses() {
         for t in THEMES {
-            for c in [t.preview.background, t.preview.line_strong, t.preview.line_medium, t.preview.line_weak, t.preview.accent,
-                t.ui.page_bg, t.ui.sidebar_bg, t.ui.main_bg, t.ui.card_bg, t.ui.header_bg, t.ui.border, t.ui.border_strong,
-                t.ui.input_bg, t.ui.input_border, t.ui.nav_hover, t.terminal.background, t.terminal.foreground,
-                t.terminal.cursor, t.terminal.selection_background]
-            {
+            for c in [
+                t.preview.background,
+                t.preview.line_strong,
+                t.preview.line_medium,
+                t.preview.line_weak,
+                t.preview.accent,
+                t.ui.page_bg,
+                t.ui.sidebar_bg,
+                t.ui.main_bg,
+                t.ui.card_bg,
+                t.ui.header_bg,
+                t.ui.border,
+                t.ui.border_strong,
+                t.ui.input_bg,
+                t.ui.input_border,
+                t.ui.nav_hover,
+                t.terminal.background,
+                t.terminal.foreground,
+                t.terminal.cursor,
+                t.terminal.selection_background,
+            ] {
                 assert!(parse_css_color(c).is_some(), "{}: cannot parse {c:?}", t.id);
             }
             for c in t.terminal.ansi16() {
@@ -163,7 +195,11 @@ mod tests {
             }
         }
         for a in ACCENTS {
-            assert!(parse_css_color(a.base).is_some() && parse_css_color(a.strong).is_some(), "{}", a.id);
+            assert!(
+                parse_css_color(a.base).is_some() && parse_css_color(a.strong).is_some(),
+                "{}",
+                a.id
+            );
         }
     }
 
@@ -176,7 +212,13 @@ mod tests {
         for t in THEMES {
             let bg = parse_css_color(t.terminal.background).unwrap();
             let dark = bg.relative_luminance() < 0.4;
-            assert_eq!(dark, t.tone == ThemeTone::Dark, "{} claims {:?}", t.id, t.tone);
+            assert_eq!(
+                dark,
+                t.tone == ThemeTone::Dark,
+                "{} claims {:?}",
+                t.id,
+                t.tone
+            );
         }
     }
 
@@ -187,8 +229,16 @@ mod tests {
         for t in light_themes() {
             for bg in [t.ui.page_bg, t.ui.sidebar_bg, t.ui.main_bg, t.ui.card_bg] {
                 let bg = parse_css_color(bg).unwrap();
-                assert!(contrast_ratio(parse_css_color(p.secondary).unwrap(), bg) >= 4.5, "{} secondary", t.id);
-                assert!(contrast_ratio(parse_css_color(p.muted).unwrap(), bg) >= 4.5, "{} muted", t.id);
+                assert!(
+                    contrast_ratio(parse_css_color(p.secondary).unwrap(), bg) >= 4.5,
+                    "{} secondary",
+                    t.id
+                );
+                assert!(
+                    contrast_ratio(parse_css_color(p.muted).unwrap(), bg) >= 4.5,
+                    "{} muted",
+                    t.id
+                );
             }
         }
     }

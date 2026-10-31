@@ -21,8 +21,8 @@ pub struct Database {
 #[cfg(test)]
 mod tests {
     use super::{
-        Database, CURRENT_SCHEMA_VERSION, DEFAULT_LIBRARY_REPO_BRANCH,
-        DEFAULT_LIBRARY_REPO_ID, DEFAULT_LIBRARY_REPO_URL,
+        Database, CURRENT_SCHEMA_VERSION, DEFAULT_LIBRARY_REPO_BRANCH, DEFAULT_LIBRARY_REPO_ID,
+        DEFAULT_LIBRARY_REPO_URL,
     };
 
     fn temp_db_path(name: &str) -> std::path::PathBuf {
@@ -350,7 +350,8 @@ impl Database {
         // it logged "database is locked" on first start. The mode is persistent in the file.
         {
             let conn = Connection::open(db_path).map_err(|e| e.to_string())?;
-            conn.execute_batch("PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;").map_err(|e| e.to_string())?;
+            conn.execute_batch("PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL;")
+                .map_err(|e| e.to_string())?;
         }
         let manager = SqliteConnectionManager::file(db_path);
         let pool = Pool::builder()

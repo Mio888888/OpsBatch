@@ -34,8 +34,15 @@ struct BlocklistTable {
 
 /// `DEFAULT_COMMAND_BLOCKLIST`: the common, POSIX and PowerShell patterns of Netcatty's `commandBlocklist.json`.
 pub fn default_command_blocklist() -> Vec<String> {
-    let table: BlocklistTable = serde_json::from_str(include_str!("command_blocklist.json")).expect("command_blocklist.json is valid");
-    [table.common, table.posix_native, table.posix, table.powershell].concat()
+    let table: BlocklistTable = serde_json::from_str(include_str!("command_blocklist.json"))
+        .expect("command_blocklist.json is valid");
+    [
+        table.common,
+        table.posix_native,
+        table.posix,
+        table.powershell,
+    ]
+    .concat()
 }
 
 /// A blocklist entry is a regular expression; an empty one is allowed (a freshly added row).
@@ -43,13 +50,24 @@ pub fn validate_pattern(pattern: &str) -> Result<(), String> {
     if pattern.is_empty() {
         return Ok(());
     }
-    fancy_regex::Regex::new(pattern).map(|_| ()).map_err(|e| e.to_string())
+    fancy_regex::Regex::new(pattern)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 /// The first blocklist pattern that matches `command` (case-insensitively: `Remove-Item` and `remove-item` are the
 /// same PowerShell command). Invalid and empty patterns never match.
 pub fn blocklist_match<'a>(patterns: &'a [String], command: &str) -> Option<&'a str> {
-    patterns.iter().filter(|p| !p.trim().is_empty()).find(|p| fancy_regex::Regex::new(&format!("(?i){p}")).ok().and_then(|re| re.is_match(command).ok()).unwrap_or(false)).map(String::as_str)
+    patterns
+        .iter()
+        .filter(|p| !p.trim().is_empty())
+        .find(|p| {
+            fancy_regex::Regex::new(&format!("(?i){p}"))
+                .ok()
+                .and_then(|re| re.is_match(command).ok())
+                .unwrap_or(false)
+        })
+        .map(String::as_str)
 }
 
 // ---------------------------------------------------------------------------
@@ -119,18 +137,36 @@ pub fn supports_command_pattern(capability_id: &str) -> bool {
 }
 
 pub fn create_grant_id() -> String {
-    format!("grant_{}_{}", chrono::Utc::now().timestamp_millis(), &uuid::Uuid::new_v4().simple().to_string()[..6])
+    format!(
+        "grant_{}_{}",
+        chrono::Utc::now().timestamp_millis(),
+        &uuid::Uuid::new_v4().simple().to_string()[..6]
+    )
 }
 
 /// A new rule as the "add" button makes it: the first grantable capability, every session.
 pub fn new_grant() -> PermissionGrantRule {
-    PermissionGrantRule { id: create_grant_id(), capability_id: GRANTABLE_CAPABILITIES[0].to_string(), session_pattern: "*".into(), created_at: chrono::Utc::now().timestamp_millis(), ..Default::default() }
+    PermissionGrantRule {
+        id: create_grant_id(),
+        capability_id: GRANTABLE_CAPABILITIES[0].to_string(),
+        session_pattern: "*".into(),
+        created_at: chrono::Utc::now().timestamp_millis(),
+        ..Default::default()
+    }
 }
 
 /// `sanitizePermissionGrants`: keeps well-formed entries of an imported JSON document.
 pub fn sanitize_grants(raw: &serde_json::Value) -> Vec<PermissionGrantRule> {
-    let Some(entries) = raw.as_array() else { return Vec::new() };
-    let text = |v: &serde_json::Value, key: &str| v.get(key).and_then(|x| x.as_str()).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string);
+    let Some(entries) = raw.as_array() else {
+        return Vec::new();
+    };
+    let text = |v: &serde_json::Value, key: &str| {
+        v.get(key)
+            .and_then(|x| x.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+    };
     entries
         .iter()
         .filter(|e| e.is_object())
@@ -145,12 +181,17 @@ pub fn sanitize_grants(raw: &serde_json::Value) -> Vec<PermissionGrantRule> {
                 }
             }
             Some(PermissionGrantRule {
-                id: text(e, "id").map(|s| s.chars().take(64).collect()).unwrap_or_else(create_grant_id),
+                id: text(e, "id")
+                    .map(|s| s.chars().take(64).collect())
+                    .unwrap_or_else(create_grant_id),
                 capability_id,
                 session_pattern: text(e, "sessionPattern").unwrap_or_else(|| "*".into()),
                 command_pattern: text(e, "commandPattern"),
                 args_pattern,
-                created_at: e.get("createdAt").and_then(|v| v.as_i64()).unwrap_or_else(|| chrono::Utc::now().timestamp_millis()),
+                created_at: e
+                    .get("createdAt")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or_else(|| chrono::Utc::now().timestamp_millis()),
                 note: text(e, "note").map(|s| s.chars().take(240).collect()),
             })
         })
@@ -158,7 +199,11 @@ pub fn sanitize_grants(raw: &serde_json::Value) -> Vec<PermissionGrantRule> {
 }
 
 /// `importGrants`: replaces or merges (by id) the current rules with the imported ones.
-pub fn import_grants(current: &[PermissionGrantRule], raw: &serde_json::Value, replace: bool) -> Result<Vec<PermissionGrantRule>, String> {
+pub fn import_grants(
+    current: &[PermissionGrantRule],
+    raw: &serde_json::Value,
+    replace: bool,
+) -> Result<Vec<PermissionGrantRule>, String> {
     if !raw.is_array() {
         return Err("权限授权文件必须是 JSON 数组".into());
     }
@@ -190,7 +235,10 @@ pub fn pattern_matches(pattern: &str, value: &str) -> bool {
         if let Some(last) = pattern.rfind('/').filter(|i| *i > 0) {
             let (body, flags) = (&pattern[1..last], &pattern[last + 1..]);
             let prefix = if flags.contains('i') { "(?i)" } else { "" };
-            return fancy_regex::Regex::new(&format!("{prefix}{body}")).ok().and_then(|re| re.is_match(value).ok()).unwrap_or(false);
+            return fancy_regex::Regex::new(&format!("{prefix}{body}"))
+                .ok()
+                .and_then(|re| re.is_match(value).ok())
+                .unwrap_or(false);
         }
     }
     if !pattern.contains('*') && !pattern.contains('?') {
@@ -211,7 +259,9 @@ pub fn pattern_matches(pattern: &str, value: &str) -> bool {
     if let Some(head) = escaped.strip_suffix(" .*") {
         escaped = format!("{head}( .*)?");
     }
-    regex::Regex::new(&format!("(?s)^{escaped}$")).map(|re| re.is_match(value)).unwrap_or(false)
+    regex::Regex::new(&format!("(?s)^{escaped}$"))
+        .map(|re| re.is_match(value))
+        .unwrap_or(false)
 }
 
 /// Splits a shell line on `&&`, `||`, `;`, `|` and newlines outside quotes; `cd`-like segments are dropped
@@ -260,7 +310,15 @@ pub fn command_segments(command: &str) -> Vec<String> {
         .into_iter()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
-        .filter(|s| !matches!(s.split_whitespace().next().map(str::to_ascii_lowercase).as_deref(), Some("cd" | "chdir" | "popd" | "pushd" | "push-location" | "set-location")))
+        .filter(|s| {
+            !matches!(
+                s.split_whitespace()
+                    .next()
+                    .map(str::to_ascii_lowercase)
+                    .as_deref(),
+                Some("cd" | "chdir" | "popd" | "pushd" | "push-location" | "set-location")
+            )
+        })
         .collect()
 }
 
@@ -270,8 +328,14 @@ pub fn always_allow_patterns(command: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for segment in command_segments(command) {
         let mut words = segment.split_whitespace();
-        let Some(program) = words.next() else { continue };
-        let pattern = if words.next().is_some() { format!("{program} *") } else { program.to_string() };
+        let Some(program) = words.next() else {
+            continue;
+        };
+        let pattern = if words.next().is_some() {
+            format!("{program} *")
+        } else {
+            program.to_string()
+        };
         if !out.contains(&pattern) {
             out.push(pattern);
         }
@@ -289,34 +353,51 @@ pub struct MatchContext {
 
 fn rule_matches_target(rule: &PermissionGrantRule, ctx: &MatchContext) -> bool {
     if let Some(host_id) = rule.session_pattern.strip_prefix("host:") {
-        let opens_this_host = ctx.capability_id == "vault.host.open" && ctx.args.get("hostId").map(String::as_str) == Some(host_id);
-        return !host_id.is_empty() && ctx.host_id.as_deref() == Some(host_id) && (ctx.session_id.is_some() || opens_this_host);
+        let opens_this_host = ctx.capability_id == "vault.host.open"
+            && ctx.args.get("hostId").map(String::as_str) == Some(host_id);
+        return !host_id.is_empty()
+            && ctx.host_id.as_deref() == Some(host_id)
+            && (ctx.session_id.is_some() || opens_this_host);
     }
     rule.capability_id != "*"
 }
 
 fn rule_matches_capability(rule: &PermissionGrantRule, ctx: &MatchContext) -> bool {
-    (rule.capability_id == ctx.capability_id || rule.capability_id == "*") && rule_matches_target(rule, ctx)
+    (rule.capability_id == ctx.capability_id || rule.capability_id == "*")
+        && rule_matches_target(rule, ctx)
 }
 
 fn args_match(rule: &PermissionGrantRule, ctx: &MatchContext) -> bool {
-    rule.args_pattern.iter().all(|(k, p)| ctx.args.get(k).is_some_and(|v| pattern_matches(p, v)))
+    rule.args_pattern
+        .iter()
+        .all(|(k, p)| ctx.args.get(k).is_some_and(|v| pattern_matches(p, v)))
 }
 
 /// `matchPermissionGrant`: a command grant must cover every segment of the command line; other grants match on
 /// the capability (and the optional argument patterns).
-pub fn match_grant<'a>(rules: &'a [PermissionGrantRule], ctx: &MatchContext) -> Option<&'a PermissionGrantRule> {
+pub fn match_grant<'a>(
+    rules: &'a [PermissionGrantRule],
+    ctx: &MatchContext,
+) -> Option<&'a PermissionGrantRule> {
     if rules.is_empty() {
         return None;
     }
     if let Some(command) = ctx.args.get("command").filter(|c| !c.is_empty()) {
         let segments = command_segments(command);
-        let eligible: Vec<&PermissionGrantRule> = rules.iter().filter(|r| rule_matches_capability(r, ctx) && r.command_pattern.is_some() && args_match(r, ctx)).collect();
+        let eligible: Vec<&PermissionGrantRule> = rules
+            .iter()
+            .filter(|r| {
+                rule_matches_capability(r, ctx) && r.command_pattern.is_some() && args_match(r, ctx)
+            })
+            .collect();
         if !segments.is_empty() && !eligible.is_empty() {
             let mut first = None;
             let mut all = true;
             for segment in &segments {
-                match eligible.iter().find(|r| pattern_matches(r.command_pattern.as_deref().unwrap_or(""), segment)) {
+                match eligible
+                    .iter()
+                    .find(|r| pattern_matches(r.command_pattern.as_deref().unwrap_or(""), segment))
+                {
                     Some(rule) => {
                         first.get_or_insert(*rule);
                     }
@@ -331,7 +412,9 @@ pub fn match_grant<'a>(rules: &'a [PermissionGrantRule], ctx: &MatchContext) -> 
             }
         }
     }
-    rules.iter().find(|r| rule_matches_capability(r, ctx) && r.command_pattern.is_none() && args_match(r, ctx))
+    rules.iter().find(|r| {
+        rule_matches_capability(r, ctx) && r.command_pattern.is_none() && args_match(r, ctx)
+    })
 }
 
 #[cfg(test)]
@@ -375,7 +458,10 @@ mod tests {
     #[test]
     fn limits_are_clamped() {
         assert_eq!(normalize_command_timeout(0), 1);
-        assert_eq!(normalize_command_timeout(1_000_000), MAX_COMMAND_TIMEOUT_SECONDS);
+        assert_eq!(
+            normalize_command_timeout(1_000_000),
+            MAX_COMMAND_TIMEOUT_SECONDS
+        );
         assert_eq!(normalize_response_idle_timeout(-5), 1);
         assert_eq!(normalize_max_iterations(500), 100);
         assert_eq!(normalize_max_iterations(20), 20);
@@ -399,18 +485,37 @@ mod tests {
 
     #[test]
     fn command_lines_split_on_operators_outside_quotes() {
-        assert_eq!(command_segments("cd /tmp && ls -l | grep 'a|b'; echo \"x && y\""), vec!["ls -l", "grep 'a|b'", "echo \"x && y\""]);
-        assert_eq!(always_allow_patterns("ls -l /var && uptime"), vec!["ls *", "uptime"]);
+        assert_eq!(
+            command_segments("cd /tmp && ls -l | grep 'a|b'; echo \"x && y\""),
+            vec!["ls -l", "grep 'a|b'", "echo \"x && y\""]
+        );
+        assert_eq!(
+            always_allow_patterns("ls -l /var && uptime"),
+            vec!["ls *", "uptime"]
+        );
     }
 
     fn rule(cap: &str, command: Option<&str>) -> PermissionGrantRule {
-        PermissionGrantRule { id: create_grant_id(), capability_id: cap.into(), session_pattern: "*".into(), command_pattern: command.map(str::to_string), ..Default::default() }
+        PermissionGrantRule {
+            id: create_grant_id(),
+            capability_id: cap.into(),
+            session_pattern: "*".into(),
+            command_pattern: command.map(str::to_string),
+            ..Default::default()
+        }
     }
 
     #[test]
     fn command_grants_must_cover_every_segment() {
-        let rules = vec![rule("terminal.execute", Some("lscpu *")), rule("terminal.execute", Some("uptime"))];
-        let ctx = |cmd: &str| MatchContext { capability_id: "terminal.execute".into(), args: BTreeMap::from([("command".to_string(), cmd.to_string())]), ..Default::default() };
+        let rules = vec![
+            rule("terminal.execute", Some("lscpu *")),
+            rule("terminal.execute", Some("uptime")),
+        ];
+        let ctx = |cmd: &str| MatchContext {
+            capability_id: "terminal.execute".into(),
+            args: BTreeMap::from([("command".to_string(), cmd.to_string())]),
+            ..Default::default()
+        };
         assert!(match_grant(&rules, &ctx("lscpu -e")).is_some());
         assert!(match_grant(&rules, &ctx("lscpu && uptime")).is_some());
         assert!(match_grant(&rules, &ctx("lscpu && reboot")).is_none());
@@ -420,7 +525,10 @@ mod tests {
     #[test]
     fn plain_grants_match_the_capability() {
         let rules = vec![rule("sftp.upload", None)];
-        let ctx = |cap: &str| MatchContext { capability_id: cap.into(), ..Default::default() };
+        let ctx = |cap: &str| MatchContext {
+            capability_id: cap.into(),
+            ..Default::default()
+        };
         assert!(match_grant(&rules, &ctx("sftp.upload")).is_some());
         assert!(match_grant(&rules, &ctx("sftp.delete")).is_none());
         assert!(match_grant(&[], &ctx("sftp.upload")).is_none());
@@ -431,7 +539,12 @@ mod tests {
         let mut r = rule("terminal.execute", None);
         r.session_pattern = "host:h1".into();
         let rules = vec![r];
-        let mut ctx = MatchContext { capability_id: "terminal.execute".into(), host_id: Some("h1".into()), session_id: Some("s".into()), ..Default::default() };
+        let mut ctx = MatchContext {
+            capability_id: "terminal.execute".into(),
+            host_id: Some("h1".into()),
+            session_id: Some("s".into()),
+            ..Default::default()
+        };
         assert!(match_grant(&rules, &ctx).is_some());
         ctx.host_id = Some("h2".into());
         assert!(match_grant(&rules, &ctx).is_none());
@@ -457,7 +570,12 @@ mod tests {
 
     #[test]
     fn import_replaces_or_merges_by_id() {
-        let current = vec![PermissionGrantRule { id: "a".into(), capability_id: "sftp.write".into(), session_pattern: "*".into(), ..Default::default() }];
+        let current = vec![PermissionGrantRule {
+            id: "a".into(),
+            capability_id: "sftp.write".into(),
+            session_pattern: "*".into(),
+            ..Default::default()
+        }];
         let raw = serde_json::json!([{"id": "a", "capabilityId": "sftp.delete"}, {"id": "b", "capabilityId": "sftp.mkdir"}]);
         let merged = import_grants(&current, &raw, false).unwrap();
         assert_eq!(merged.len(), 2);

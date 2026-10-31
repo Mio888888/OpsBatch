@@ -1,11 +1,11 @@
 //! Asciinema recording replay (the original shows the accumulated output with ANSI colours in a <pre>).
 
+use crate::scale::px;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::select::Select;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Sizable as _, WindowExt as _};
 use gpui_kit::*;
-use crate::scale::px;
 use ops_core::asciinema::{AsciinemaRecording, RecordingMeta};
 use ops_i18n::t;
 
@@ -38,18 +38,46 @@ impl AsciinemaPlayer {
     pub fn open(history_id: String, window: &mut Window, cx: &mut App) -> Entity<Self> {
         let view = cx.new(|cx| Self::new(history_id, window, cx));
         let shown = view.clone();
-        window.open_dialog(cx, move |d, _, _| d.title(t!("commands.recordingReplay")).w(px(900.)).child(shown.clone()));
+        window.open_dialog(cx, move |d, _, _| {
+            d.title(t!("commands.recordingReplay"))
+                .w(px(900.))
+                .child(shown.clone())
+        });
         view
     }
 
     pub fn new(history_id: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let speed_select = cx.new(|cx| new_select(SPEEDS.iter().map(|s| Choice::new(s.to_string(), format!("{s}x"))).collect(), "1", window, cx));
+        let speed_select = cx.new(|cx| {
+            new_select(
+                SPEEDS
+                    .iter()
+                    .map(|s| Choice::new(s.to_string(), format!("{s}x")))
+                    .collect(),
+                "1",
+                window,
+                cx,
+            )
+        });
         let subs = vec![cx.subscribe_in(&speed_select, window, |this, _, ev, _, _| {
             if let Some(v) = confirmed_value(ev).and_then(|v| v.parse::<f32>().ok()) {
                 this.speed = v;
             }
         })];
-        let mut this = Self { history_id, recordings: Vec::new(), host_select: None, recording: None, loading: false, playing: false, position: 0, output: String::new(), speed: 1.0, speed_select, play_task: None, load_seq: 0, _subs: subs };
+        let mut this = Self {
+            history_id,
+            recordings: Vec::new(),
+            host_select: None,
+            recording: None,
+            loading: false,
+            playing: false,
+            position: 0,
+            output: String::new(),
+            speed: 1.0,
+            speed_select,
+            play_task: None,
+            load_seq: 0,
+            _subs: subs,
+        };
         this.load_list(window, cx);
         this
     }
@@ -76,17 +104,41 @@ impl AsciinemaPlayer {
     fn load_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let (ctx, id) = (crate::services::ctx(cx), self.history_id.clone());
         cx.spawn_in(window, async move |this, cx| {
-            let list = ops_core::rt::run(async move { ops_core::asciinema::list_recordings(&ctx.core, id) }).await.and_then(|r| r).unwrap_or_default();
+            let list =
+                ops_core::rt::run(
+                    async move { ops_core::asciinema::list_recordings(&ctx.core, id) },
+                )
+                .await
+                .and_then(|r| r)
+                .unwrap_or_default();
             let _ = this.update_in(cx, |this, window, cx| {
                 this.recordings = list;
                 if let Some(first) = this.recordings.first().cloned() {
-                    let choices = this.recordings.iter().map(|r| Choice::new(r.host_id.clone(), format!("{} ({:.1}s)", if r.host_name.is_empty() { &r.host_id } else { &r.host_name }, r.duration))).collect();
+                    let choices = this
+                        .recordings
+                        .iter()
+                        .map(|r| {
+                            Choice::new(
+                                r.host_id.clone(),
+                                format!(
+                                    "{} ({:.1}s)",
+                                    if r.host_name.is_empty() {
+                                        &r.host_id
+                                    } else {
+                                        &r.host_name
+                                    },
+                                    r.duration
+                                ),
+                            )
+                        })
+                        .collect();
                     let sel = cx.new(|cx| new_select(choices, &first.host_id, window, cx));
-                    this._subs.push(cx.subscribe_in(&sel, window, |this, _, ev, window, cx| {
-                        if let Some(h) = confirmed_value(ev) {
-                            this.load_recording(&h, window, cx);
-                        }
-                    }));
+                    this._subs
+                        .push(cx.subscribe_in(&sel, window, |this, _, ev, window, cx| {
+                            if let Some(h) = confirmed_value(ev) {
+                                this.load_recording(&h, window, cx);
+                            }
+                        }));
                     this.host_select = Some(sel);
                     this.load_recording(&first.host_id, window, cx);
                 }
@@ -102,9 +154,17 @@ impl AsciinemaPlayer {
         self.load_seq += 1;
         let seq = self.load_seq;
         cx.notify();
-        let (ctx, id, host) = (crate::services::ctx(cx), self.history_id.clone(), host_id.to_string());
+        let (ctx, id, host) = (
+            crate::services::ctx(cx),
+            self.history_id.clone(),
+            host_id.to_string(),
+        );
         cx.spawn_in(window, async move |this, cx| {
-            let rec = ops_core::rt::run(async move { ops_core::asciinema::read_asciinema_recording(&ctx.core, id, host) }).await.and_then(|r| r);
+            let rec = ops_core::rt::run(async move {
+                ops_core::asciinema::read_asciinema_recording(&ctx.core, id, host)
+            })
+            .await
+            .and_then(|r| r);
             let _ = this.update_in(cx, |this, _, cx| {
                 if seq != this.load_seq {
                     return; // a newer selection superseded this load
@@ -120,7 +180,12 @@ impl AsciinemaPlayer {
     }
 
     pub fn play(&mut self, cx: &mut Context<Self>) {
-        if self.recording.as_ref().map_or(true, |r| r.events.is_empty()) || self.playing {
+        if self
+            .recording
+            .as_ref()
+            .map_or(true, |r| r.events.is_empty())
+            || self.playing
+        {
             return;
         }
         self.playing = true;
@@ -144,7 +209,11 @@ impl AsciinemaPlayer {
                 .ok()
                 .flatten();
             match delay {
-                Some(ms) => cx.background_executor().timer(std::time::Duration::from_millis(ms)).await,
+                Some(ms) => {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(ms))
+                        .await
+                }
                 None => {
                     let _ = this.update(cx, |this, cx| {
                         this.playing = false;
@@ -182,60 +251,140 @@ impl Render for AsciinemaPlayer {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let total = self.event_count();
-        let progress = if total == 0 { 0.0 } else { self.position as f32 / total as f32 };
-        let ansi = crate::ansi::parse(&self.output);
-        let runs: Vec<(std::ops::Range<usize>, HighlightStyle)> = ansi.spans.iter().map(|(r, c)| (r.clone(), HighlightStyle { color: Some(rgb(*c).into()), ..Default::default() })).collect();
-        let body: AnyElement = if self.loading {
-            div().p_6().flex().justify_center().text_color(theme.muted_foreground).child(t!("common.loading")).into_any_element()
-        } else if self.recording.is_some() {
-            v_flex()
-                .gap_3()
-                .child(div().h(px(4.)).rounded_full().bg(theme.border).child(div().h_full().rounded_full().bg(theme.primary).w(relative(progress))))
-                .child(
-                    div()
-                        .id("asciinema-output")
-                        .test_support()
-                        .h(px(380.))
-                        .overflow_y_scroll()
-                        .p_4()
-                        .rounded(px(8.))
-                        .bg(rgb(0x1e1e1e))
-                        .text_color(rgb(0xd4d4d4))
-                        .font_family("Menlo")
-                        .text_size(px(13.))
-                        .child(if self.output.is_empty() { StyledText::new(if self.playing { String::new() } else { "▶".to_string() }) } else { StyledText::new(ansi.text.clone()).with_highlights(runs) }),
-                )
-                .child(
-                    h_flex()
-                        .justify_between()
-                        .items_center()
-                        .child(
-                            h_flex()
-                                .gap_2()
-                                .child(if self.playing {
-                                    Button::new("asc-pause").danger().label("⏸").on_click(cx.listener(|this, _, _, cx| {
-                                        this.pause();
-                                        cx.notify();
-                                    }))
-                                } else {
-                                    Button::new("asc-play").primary().label("▶").disabled_when(self.position >= total).on_click(cx.listener(|this, _, _, cx| this.play(cx)))
-                                })
-                                .child(Button::new("asc-end").label("⏭").on_click(cx.listener(|this, _, _, cx| this.skip_to_end(cx))))
-                                .child(Button::new("asc-reset").label("↺").on_click(cx.listener(|this, _, _, cx| this.reset(cx)))),
-                        )
-                        .child(h_flex().gap_2().items_center().child(div().w(px(90.)).child(Select::new(&self.speed_select).small())).child(div().text_size(px(12.)).text_color(theme.muted_foreground).child(format!("{}/{}", self.position, total)))),
-                )
-                .into_any_element()
+        let progress = if total == 0 {
+            0.0
         } else {
-            div().p_6().flex().justify_center().text_color(theme.muted_foreground).child(t!("common.noData")).into_any_element()
+            self.position as f32 / total as f32
         };
+        let ansi = crate::ansi::parse(&self.output);
+        let runs: Vec<(std::ops::Range<usize>, HighlightStyle)> = ansi
+            .spans
+            .iter()
+            .map(|(r, c)| {
+                (
+                    r.clone(),
+                    HighlightStyle {
+                        color: Some(rgb(*c).into()),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect();
+        let body: AnyElement =
+            if self.loading {
+                div()
+                    .p_6()
+                    .flex()
+                    .justify_center()
+                    .text_color(theme.muted_foreground)
+                    .child(t!("common.loading"))
+                    .into_any_element()
+            } else if self.recording.is_some() {
+                v_flex()
+                    .gap_3()
+                    .child(
+                        div().h(px(4.)).rounded_full().bg(theme.border).child(
+                            div()
+                                .h_full()
+                                .rounded_full()
+                                .bg(theme.primary)
+                                .w(relative(progress)),
+                        ),
+                    )
+                    .child(
+                        div()
+                            .id("asciinema-output")
+                            .test_support()
+                            .h(px(380.))
+                            .overflow_y_scroll()
+                            .p_4()
+                            .rounded(px(8.))
+                            .bg(rgb(0x1e1e1e))
+                            .text_color(rgb(0xd4d4d4))
+                            .font_family("Menlo")
+                            .text_size(px(13.))
+                            .child(if self.output.is_empty() {
+                                StyledText::new(if self.playing {
+                                    String::new()
+                                } else {
+                                    "▶".to_string()
+                                })
+                            } else {
+                                StyledText::new(ansi.text.clone()).with_highlights(runs)
+                            }),
+                    )
+                    .child(
+                        h_flex()
+                            .justify_between()
+                            .items_center()
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .child(if self.playing {
+                                        Button::new("asc-pause").danger().label("⏸").on_click(
+                                            cx.listener(|this, _, _, cx| {
+                                                this.pause();
+                                                cx.notify();
+                                            }),
+                                        )
+                                    } else {
+                                        Button::new("asc-play")
+                                            .primary()
+                                            .label("▶")
+                                            .disabled_when(self.position >= total)
+                                            .on_click(cx.listener(|this, _, _, cx| this.play(cx)))
+                                    })
+                                    .child(Button::new("asc-end").label("⏭").on_click(
+                                        cx.listener(|this, _, _, cx| this.skip_to_end(cx)),
+                                    ))
+                                    .child(
+                                        Button::new("asc-reset")
+                                            .label("↺")
+                                            .on_click(cx.listener(|this, _, _, cx| this.reset(cx))),
+                                    ),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap_2()
+                                    .items_center()
+                                    .child(
+                                        div()
+                                            .w(px(90.))
+                                            .child(Select::new(&self.speed_select).small()),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(12.))
+                                            .text_color(theme.muted_foreground)
+                                            .child(format!("{}/{}", self.position, total)),
+                                    ),
+                            ),
+                    )
+                    .into_any_element()
+            } else {
+                div()
+                    .p_6()
+                    .flex()
+                    .justify_center()
+                    .text_color(theme.muted_foreground)
+                    .child(t!("common.noData"))
+                    .into_any_element()
+            };
         v_flex()
             .id("asciinema-player")
             .test_support()
             .gap_3()
-            .when_some(self.host_select.clone(), |d, sel| d.child(div().w(px(300.)).child(Select::new(&sel))))
+            .when_some(self.host_select.clone(), |d, sel| {
+                d.child(div().w(px(300.)).child(Select::new(&sel)))
+            })
             .child(body)
-            .child(h_flex().justify_end().child(Button::new("asc-close").label(t!("common.close")).on_click(|_, window, cx| window.close_dialog(cx))))
+            .child(
+                h_flex().justify_end().child(
+                    Button::new("asc-close")
+                        .label(t!("common.close"))
+                        .on_click(|_, window, cx| window.close_dialog(cx)),
+                ),
+            )
     }
 }
 

@@ -1,14 +1,14 @@
 use crate::ctx::Ctx;
-use std::sync::Arc;
 use rusqlite::params;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
+use crate::ssh;
 use ops_core::db::Database;
 use ops_core::security::shell_quote;
-use crate::ssh;
 
 /// hosts 表查询的连接字段：(ip, port, auth_type, name, username, password, private_key, proxy_settings)
 type HostConnectionRow = (
@@ -289,10 +289,8 @@ pub fn file_transfer(
                                 error: Some(format!("路径解析失败: {}", e)),
                             };
                             records.push(record.clone());
-                            let _ = app.emit(
-                                &format!("transfer:{}:progress", task_id_clone),
-                                &record,
-                            );
+                            let _ =
+                                app.emit(&format!("transfer:{}:progress", task_id_clone), &record);
                             continue;
                         }
                     }

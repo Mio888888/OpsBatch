@@ -5,7 +5,9 @@ use std::net::TcpListener;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use ops_core::update::{check_app_update_from, download_update, installer_asset_name, UpdateSource};
+use ops_core::update::{
+    check_app_update_from, download_update, installer_asset_name, UpdateSource,
+};
 use sha2::{Digest, Sha256};
 
 const TAG: &str = "v9.9.9";
@@ -17,7 +19,10 @@ struct Mirror {
 }
 
 fn sha(bytes: &[u8]) -> String {
-    Sha256::digest(bytes).iter().map(|b| format!("{b:02x}")).collect()
+    Sha256::digest(bytes)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 fn payload() -> Vec<u8> {
@@ -27,7 +32,10 @@ fn payload() -> Vec<u8> {
 fn start(os: &'static str, arch: &'static str) -> Mirror {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
-    let (corrupt, no_sums) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)));
+    let (corrupt, no_sums) = (
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicBool::new(false)),
+    );
     let (c, n, b) = (corrupt.clone(), no_sums.clone(), base.clone());
     let asset = installer_asset_name(TAG, os, arch).unwrap();
     std::thread::spawn(move || {
@@ -39,7 +47,10 @@ fn start(os: &'static str, arch: &'static str) -> Mirror {
                 let len = stream.read(&mut buf).unwrap_or(0);
                 let request = String::from_utf8_lossy(&buf[..len]).to_string();
                 let path = request.split_whitespace().nth(1).unwrap_or("/").to_string();
-                let reply = |status: &str, headers: &str, body: &[u8], stream: &mut std::net::TcpStream| {
+                let reply = |status: &str,
+                             headers: &str,
+                             body: &[u8],
+                             stream: &mut std::net::TcpStream| {
                     let _ = stream.write_all(format!("HTTP/1.1 {status}\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes());
                     for chunk in body.chunks(32 * 1024) {
                         let _ = stream.write_all(chunk);
@@ -47,8 +58,15 @@ fn start(os: &'static str, arch: &'static str) -> Mirror {
                 };
                 let good = payload();
                 match path.as_str() {
-                    "/releases/latest" => reply("302 Found", &format!("Location: {b}/releases/tag/{TAG}\r\n"), b"", &mut stream),
-                    p if p == format!("/releases/tag/{TAG}") => reply("200 OK", "", b"release", &mut stream),
+                    "/releases/latest" => reply(
+                        "302 Found",
+                        &format!("Location: {b}/releases/tag/{TAG}\r\n"),
+                        b"",
+                        &mut stream,
+                    ),
+                    p if p == format!("/releases/tag/{TAG}") => {
+                        reply("200 OK", "", b"release", &mut stream)
+                    }
                     "/releases.atom" => {
                         let feed = format!(
                             "<feed><entry><title>{TAG}</title><link href=\"https://example.test/releases/tag/{TAG}\" /><updated>2026-10-01T00:00:00Z</updated><content type=\"html\">&lt;li&gt;mirror notes&lt;/li&gt;</content></entry></feed>"
@@ -57,9 +75,19 @@ fn start(os: &'static str, arch: &'static str) -> Mirror {
                     }
                     p if p == format!("/releases/download/{TAG}/SHA256SUMS") => {
                         if n.load(Ordering::SeqCst) {
-                            reply("200 OK", "", format!("{}  unrelated.bin\n", "0".repeat(64)).as_bytes(), &mut stream)
+                            reply(
+                                "200 OK",
+                                "",
+                                format!("{}  unrelated.bin\n", "0".repeat(64)).as_bytes(),
+                                &mut stream,
+                            )
                         } else {
-                            reply("200 OK", "", format!("{}  {asset}\n", sha(&good)).as_bytes(), &mut stream)
+                            reply(
+                                "200 OK",
+                                "",
+                                format!("{}  {asset}\n", sha(&good)).as_bytes(),
+                                &mut stream,
+                            )
                         }
                     }
                     p if p == format!("/releases/download/{TAG}/{asset}") => {
@@ -74,7 +102,11 @@ fn start(os: &'static str, arch: &'static str) -> Mirror {
             });
         }
     });
-    Mirror { base, corrupt, no_sums }
+    Mirror {
+        base,
+        corrupt,
+        no_sums,
+    }
 }
 
 #[test]
@@ -96,13 +128,34 @@ fn verified_download_reports_progress_and_leaves_no_partial_file() {
     let dir = std::env::temp_dir().join(format!("opsbatch-update-ok-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let mut seen = Vec::new();
-    let path = ops_core::rt::block_on(download_update(&source, TAG, "macos", "aarch64", &dir, |d, t| seen.push((d, t)))).unwrap();
+    let path = ops_core::rt::block_on(download_update(
+        &source,
+        TAG,
+        "macos",
+        "aarch64",
+        &dir,
+        |d, t| seen.push((d, t)),
+    ))
+    .unwrap();
     assert_eq!(std::fs::read(&path).unwrap(), payload());
-    assert_eq!(path.file_name().unwrap(), "OpsBatch-9.9.9-macos-aarch64.dmg");
-    assert!(seen.windows(2).all(|w| w[0].0 <= w[1].0), "progress never goes backwards");
+    assert_eq!(
+        path.file_name().unwrap(),
+        "OpsBatch-9.9.9-macos-aarch64.dmg"
+    );
+    assert!(
+        seen.windows(2).all(|w| w[0].0 <= w[1].0),
+        "progress never goes backwards"
+    );
     assert_eq!(seen.first().map(|s| s.0), Some(0));
-    assert_eq!(seen.last().copied(), Some((payload().len() as u64, Some(payload().len() as u64))));
-    assert!(std::fs::read_dir(&dir).unwrap().all(|e| !e.unwrap().file_name().to_string_lossy().ends_with(".part")));
+    assert_eq!(
+        seen.last().copied(),
+        Some((payload().len() as u64, Some(payload().len() as u64)))
+    );
+    assert!(std::fs::read_dir(&dir).unwrap().all(|e| !e
+        .unwrap()
+        .file_name()
+        .to_string_lossy()
+        .ends_with(".part")));
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -112,8 +165,14 @@ fn tampered_missing_or_unsupported_downloads_are_rejected() {
     let source = UpdateSource::with_base(&m.base);
     let dir = std::env::temp_dir().join(format!("opsbatch-update-bad-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let run = |os: &str, arch: &str| ops_core::rt::block_on(download_update(&source, TAG, os, arch, &dir, |_, _| {}));
-    let empty = |dir: &std::path::Path| std::fs::read_dir(dir).map(|d| d.count() == 0).unwrap_or(true);
+    let run = |os: &str, arch: &str| {
+        ops_core::rt::block_on(download_update(&source, TAG, os, arch, &dir, |_, _| {}))
+    };
+    let empty = |dir: &std::path::Path| {
+        std::fs::read_dir(dir)
+            .map(|d| d.count() == 0)
+            .unwrap_or(true)
+    };
 
     m.corrupt.store(true, Ordering::SeqCst);
     let err = run("windows", "x86_64").unwrap_err();
@@ -122,7 +181,9 @@ fn tampered_missing_or_unsupported_downloads_are_rejected() {
 
     m.corrupt.store(false, Ordering::SeqCst);
     m.no_sums.store(true, Ordering::SeqCst);
-    assert!(run("windows", "x86_64").unwrap_err().contains("校验文件中没有"));
+    assert!(run("windows", "x86_64")
+        .unwrap_err()
+        .contains("校验文件中没有"));
     m.no_sums.store(false, Ordering::SeqCst);
 
     assert!(run("freebsd", "x86_64").unwrap_err().contains("暂无可安装"));

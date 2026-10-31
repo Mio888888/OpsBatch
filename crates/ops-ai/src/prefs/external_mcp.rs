@@ -68,7 +68,14 @@ pub struct ExternalMcpHttpSettings {
 
 impl Default for ExternalMcpHttpSettings {
     fn default() -> Self {
-        Self { enabled: false, port: DEFAULT_HTTP_PORT, allow_custom_bind: false, listen_address: DEFAULT_HTTP_HOST.into(), client_host: String::new(), token: String::new() }
+        Self {
+            enabled: false,
+            port: DEFAULT_HTTP_PORT,
+            allow_custom_bind: false,
+            listen_address: DEFAULT_HTTP_HOST.into(),
+            client_host: String::new(),
+            token: String::new(),
+        }
     }
 }
 
@@ -103,7 +110,9 @@ impl Default for ExternalMcpSettings {
 impl ExternalMcpSettings {
     pub fn normalize(&mut self) {
         self.idle_timeout_minutes = self.idle_timeout_minutes.clamp(MIN_MINUTES, MAX_MINUTES);
-        self.session_idle_timeout_minutes = self.session_idle_timeout_minutes.clamp(MIN_MINUTES, MAX_MINUTES);
+        self.session_idle_timeout_minutes = self
+            .session_idle_timeout_minutes
+            .clamp(MIN_MINUTES, MAX_MINUTES);
         if self.http.port < 1024 {
             self.http.port = DEFAULT_HTTP_PORT;
         }
@@ -129,23 +138,42 @@ pub fn is_loopback_or_default(address: &str) -> bool {
 pub fn is_ip_address(value: &str) -> bool {
     let v = value.trim();
     if let Some(parts) = Some(v.split('.').collect::<Vec<_>>()).filter(|p| p.len() == 4) {
-        return parts.iter().all(|p| !p.is_empty() && p.len() <= 3 && p.chars().all(|c| c.is_ascii_digit()) && p.parse::<u16>().is_ok_and(|n| n <= 255) && p.parse::<u16>().map(|n| n.to_string()) == Ok((*p).to_string()));
+        return parts.iter().all(|p| {
+            !p.is_empty()
+                && p.len() <= 3
+                && p.chars().all(|c| c.is_ascii_digit())
+                && p.parse::<u16>().is_ok_and(|n| n <= 255)
+                && p.parse::<u16>().map(|n| n.to_string()) == Ok((*p).to_string())
+        });
     }
     v.contains(':') && v.chars().all(|c| c.is_ascii_hexdigit() || c == ':')
 }
 
 /// `1024..=65535`
 pub fn parse_port(value: &str) -> Option<u16> {
-    value.trim().parse::<u32>().ok().filter(|p| (1024..=65535).contains(p)).map(|p| p as u16)
+    value
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|p| (1024..=65535).contains(p))
+        .map(|p| p as u16)
 }
 
 fn format_host(host: &str) -> String {
-    if host.contains(':') && !host.starts_with('[') { format!("[{host}]") } else { host.to_string() }
+    if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]")
+    } else {
+        host.to_string()
+    }
 }
 
 /// URL the client connects to; a wildcard bind needs the host the client reaches this machine by.
 pub fn http_url(listen_address: &str, port: u16, client_host: &str) -> String {
-    let host = if is_wildcard_address(listen_address) { client_host.trim() } else { listen_address.trim() };
+    let host = if is_wildcard_address(listen_address) {
+        client_host.trim()
+    } else {
+        listen_address.trim()
+    };
     if host.is_empty() || is_wildcard_address(host) {
         return String::new();
     }
@@ -154,7 +182,11 @@ pub fn http_url(listen_address: &str, port: u16, client_host: &str) -> String {
 
 /// A random 256-bit token, hex encoded.
 pub fn generate_token() -> String {
-    format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple())
+    format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    )
 }
 
 pub fn shell_quote(value: &str) -> String {
@@ -166,7 +198,11 @@ fn toml_string(value: &str) -> String {
 }
 
 pub fn codex_http_toml(url: &str) -> String {
-    format!("[mcp_servers.{HTTP_SERVER_NAME}]\nurl = {}\nbearer_token_env_var = {}", serde_json::to_string(url).unwrap(), serde_json::to_string(HTTP_BEARER_ENV).unwrap())
+    format!(
+        "[mcp_servers.{HTTP_SERVER_NAME}]\nurl = {}\nbearer_token_env_var = {}",
+        serde_json::to_string(url).unwrap(),
+        serde_json::to_string(HTTP_BEARER_ENV).unwrap()
+    )
 }
 
 pub fn codex_http_env_line(token: &str) -> String {
@@ -174,7 +210,14 @@ pub fn codex_http_env_line(token: &str) -> String {
 }
 
 pub fn claude_http_add_command(url: &str, token: &str) -> String {
-    ["claude mcp add --transport http", HTTP_SERVER_NAME, &shell_quote(url), "--header", &shell_quote(&format!("Authorization: Bearer {token}"))].join(" ")
+    [
+        "claude mcp add --transport http",
+        HTTP_SERVER_NAME,
+        &shell_quote(url),
+        "--header",
+        &shell_quote(&format!("Authorization: Bearer {token}")),
+    ]
+    .join(" ")
 }
 
 pub fn generic_http_json(url: &str, token: &str) -> String {
@@ -182,25 +225,44 @@ pub fn generic_http_json(url: &str, token: &str) -> String {
 }
 
 fn env_flag(flag: &str, discovery: Option<&str>) -> String {
-    discovery.map(|d| format!(" {flag} {DISCOVERY_ENV_VAR}={}", shell_quote(d))).unwrap_or_default()
+    discovery
+        .map(|d| format!(" {flag} {DISCOVERY_ENV_VAR}={}", shell_quote(d)))
+        .unwrap_or_default()
 }
 
 pub fn codex_add_command(launcher: &str, discovery: Option<&str>) -> String {
-    format!("codex mcp add {SERVER_NAME}{} -- {}", env_flag("--env", discovery), shell_quote(launcher))
+    format!(
+        "codex mcp add {SERVER_NAME}{} -- {}",
+        env_flag("--env", discovery),
+        shell_quote(launcher)
+    )
 }
 
 pub fn claude_add_command(launcher: &str, discovery: Option<&str>) -> String {
-    format!("claude mcp add -s user {SERVER_NAME}{} -- {}", env_flag("-e", discovery), shell_quote(launcher))
+    format!(
+        "claude mcp add -s user {SERVER_NAME}{} -- {}",
+        env_flag("-e", discovery),
+        shell_quote(launcher)
+    )
 }
 
 pub fn grok_add_command(launcher: &str, discovery: Option<&str>) -> String {
-    format!("grok mcp add {SERVER_NAME}{} -- {}", env_flag("-e", discovery), shell_quote(launcher))
+    format!(
+        "grok mcp add {SERVER_NAME}{} -- {}",
+        env_flag("-e", discovery),
+        shell_quote(launcher)
+    )
 }
 
 /// TOML table shared by Codex and Grok.
 pub fn toml_snippet(launcher: &str, discovery: Option<&str>) -> String {
-    let env = discovery.map(|d| format!("\nenv = {{ {DISCOVERY_ENV_VAR} = {} }}", toml_string(d))).unwrap_or_default();
-    format!("[mcp_servers.{SERVER_NAME}]\ncommand = {}\nargs = []{env}", toml_string(launcher))
+    let env = discovery
+        .map(|d| format!("\nenv = {{ {DISCOVERY_ENV_VAR} = {} }}", toml_string(d)))
+        .unwrap_or_default();
+    format!(
+        "[mcp_servers.{SERVER_NAME}]\ncommand = {}\nargs = []{env}",
+        toml_string(launcher)
+    )
 }
 
 /// JSON `mcpServers` entry shared by Claude Code and Cursor.
@@ -217,7 +279,12 @@ pub fn onboarding_prompt(launcher: Option<&str>, discovery: Option<&str>) -> Str
     let Some(launcher) = launcher.filter(|l| !l.is_empty()) else {
         return "Please connect OpsBatch to this session via MCP. In the OpsBatch desktop app, open Settings → AI → Tool Access, turn on External MCP, then copy the generated prompt from the Tool Access section and run it here. After that, list the opsbatch-external MCP tools and call get_environment to verify the connection.".to_string();
     };
-    let mut lines = vec!["Please register OpsBatch's MCP server in your MCP client configuration:".to_string(), format!("- Server name: {SERVER_NAME}"), "- Transport: local stdio".to_string(), format!("- Command: {launcher}")];
+    let mut lines = vec![
+        "Please register OpsBatch's MCP server in your MCP client configuration:".to_string(),
+        format!("- Server name: {SERVER_NAME}"),
+        "- Transport: local stdio".to_string(),
+        format!("- Command: {launcher}"),
+    ];
     if let Some(d) = discovery.filter(|d| !d.is_empty()) {
         lines.push(format!("- Environment: {DISCOVERY_ENV_VAR}={d}"));
     }
@@ -232,10 +299,16 @@ mod tests {
 
     #[test]
     fn urls_wrap_ipv6_and_need_a_client_host_for_wildcards() {
-        assert_eq!(http_url("127.0.0.1", 47391, ""), "http://127.0.0.1:47391/mcp");
+        assert_eq!(
+            http_url("127.0.0.1", 47391, ""),
+            "http://127.0.0.1:47391/mcp"
+        );
         assert_eq!(http_url("::1", 4000, ""), "http://[::1]:4000/mcp");
         assert_eq!(http_url("0.0.0.0", 4000, ""), "");
-        assert_eq!(http_url("0.0.0.0", 4000, " 10.0.0.5 "), "http://10.0.0.5:4000/mcp");
+        assert_eq!(
+            http_url("0.0.0.0", 4000, " 10.0.0.5 "),
+            "http://10.0.0.5:4000/mcp"
+        );
         assert_eq!(http_url("::", 4000, "0.0.0.0"), "");
     }
 
@@ -255,11 +328,22 @@ mod tests {
 
     #[test]
     fn settings_are_clamped_and_loopback_unless_custom_bind_is_on() {
-        let mut s = ExternalMcpSettings { idle_timeout_minutes: 0, session_idle_timeout_minutes: 99999, ..Default::default() };
+        let mut s = ExternalMcpSettings {
+            idle_timeout_minutes: 0,
+            session_idle_timeout_minutes: 99999,
+            ..Default::default()
+        };
         s.http.port = 80;
         s.http.listen_address = "0.0.0.0".into();
         s.normalize();
-        assert_eq!((s.idle_timeout_minutes, s.session_idle_timeout_minutes, s.http.port), (1, 1440, DEFAULT_HTTP_PORT));
+        assert_eq!(
+            (
+                s.idle_timeout_minutes,
+                s.session_idle_timeout_minutes,
+                s.http.port
+            ),
+            (1, 1440, DEFAULT_HTTP_PORT)
+        );
         assert_eq!(s.http.listen_address, "127.0.0.1");
         s.http.allow_custom_bind = true;
         s.http.listen_address = "0.0.0.0".into();
@@ -270,28 +354,48 @@ mod tests {
     #[test]
     fn client_commands_quote_their_arguments() {
         assert_eq!(codex_add_command("/a b/launch", Some("/tmp/d.json")), "codex mcp add opsbatch-external --env OPSBATCH_EXTERNAL_MCP_DISCOVERY_FILE='/tmp/d.json' -- '/a b/launch'");
-        assert_eq!(claude_add_command("/l", None), "claude mcp add -s user opsbatch-external -- '/l'");
-        assert_eq!(grok_add_command("/l", Some("/d")), "grok mcp add opsbatch-external -e OPSBATCH_EXTERNAL_MCP_DISCOVERY_FILE='/d' -- '/l'");
+        assert_eq!(
+            claude_add_command("/l", None),
+            "claude mcp add -s user opsbatch-external -- '/l'"
+        );
+        assert_eq!(
+            grok_add_command("/l", Some("/d")),
+            "grok mcp add opsbatch-external -e OPSBATCH_EXTERNAL_MCP_DISCOVERY_FILE='/d' -- '/l'"
+        );
         assert_eq!(shell_quote("it's"), "'it'\\''s'");
     }
 
     #[test]
     fn config_snippets() {
         assert_eq!(toml_snippet("C:\\x\\l.exe", Some("/d")), "[mcp_servers.opsbatch-external]\ncommand = \"C:\\\\x\\\\l.exe\"\nargs = []\nenv = { OPSBATCH_EXTERNAL_MCP_DISCOVERY_FILE = \"/d\" }");
-        let json: serde_json::Value = serde_json::from_str(&json_snippet("/l", Some("/d"))).unwrap();
+        let json: serde_json::Value =
+            serde_json::from_str(&json_snippet("/l", Some("/d"))).unwrap();
         assert_eq!(json["mcpServers"]["opsbatch-external"]["command"], "/l");
-        assert_eq!(json["mcpServers"]["opsbatch-external"]["env"]["OPSBATCH_EXTERNAL_MCP_DISCOVERY_FILE"], "/d");
+        assert_eq!(
+            json["mcpServers"]["opsbatch-external"]["env"]["OPSBATCH_EXTERNAL_MCP_DISCOVERY_FILE"],
+            "/d"
+        );
         let none: serde_json::Value = serde_json::from_str(&json_snippet("/l", None)).unwrap();
         assert!(none["mcpServers"]["opsbatch-external"].get("env").is_none());
     }
 
     #[test]
     fn http_snippets_carry_the_token() {
-        assert!(codex_http_toml("http://h/mcp").contains("bearer_token_env_var = \"OPSBATCH_MCP_BEARER_TOKEN\""));
-        assert_eq!(codex_http_env_line("t'k"), "export OPSBATCH_MCP_BEARER_TOKEN='t'\\''k'");
-        assert!(claude_http_add_command("http://h/mcp", "tok").contains("'Authorization: Bearer tok'"));
-        let json: serde_json::Value = serde_json::from_str(&generic_http_json("http://h/mcp", "tok")).unwrap();
-        assert_eq!(json["mcpServers"]["opsbatch-http"]["headers"]["Authorization"], "Bearer tok");
+        assert!(codex_http_toml("http://h/mcp")
+            .contains("bearer_token_env_var = \"OPSBATCH_MCP_BEARER_TOKEN\""));
+        assert_eq!(
+            codex_http_env_line("t'k"),
+            "export OPSBATCH_MCP_BEARER_TOKEN='t'\\''k'"
+        );
+        assert!(
+            claude_http_add_command("http://h/mcp", "tok").contains("'Authorization: Bearer tok'")
+        );
+        let json: serde_json::Value =
+            serde_json::from_str(&generic_http_json("http://h/mcp", "tok")).unwrap();
+        assert_eq!(
+            json["mcpServers"]["opsbatch-http"]["headers"]["Authorization"],
+            "Bearer tok"
+        );
         assert_ne!(generate_token(), generate_token());
         assert_eq!(generate_token().len(), 64);
     }
@@ -300,6 +404,8 @@ mod tests {
     fn onboarding_prompt_depends_on_the_launcher() {
         assert!(onboarding_prompt(None, None).contains("turn on External MCP"));
         let p = onboarding_prompt(Some("/l"), Some("/d"));
-        assert!(p.contains("- Command: /l") && p.contains("OPSBATCH_EXTERNAL_MCP_DISCOVERY_FILE=/d"));
+        assert!(
+            p.contains("- Command: /l") && p.contains("OPSBATCH_EXTERNAL_MCP_DISCOVERY_FILE=/d")
+        );
     }
 }

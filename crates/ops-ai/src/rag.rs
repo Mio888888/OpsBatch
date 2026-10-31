@@ -383,10 +383,7 @@ pub fn rag_import_document(
     Ok(chunk_count)
 }
 
-pub fn rag_delete_collection(
-    db: &Database,
-    collection_id: String,
-) -> Result<(), String> {
+pub fn rag_delete_collection(db: &Database, collection_id: String) -> Result<(), String> {
     let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "DELETE FROM rag_chunks WHERE collection_id = ?1",

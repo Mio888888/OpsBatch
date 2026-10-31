@@ -1,7 +1,7 @@
 use crate::ctx::Ctx;
-use std::sync::Arc;
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -10,8 +10,8 @@ use russh::{client, ChannelMsg, ChannelReadHalf, ChannelWriteHalf};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
-use ops_core::db::Database;
 use crate::ssh;
+use ops_core::db::Database;
 
 const FORWARD_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 const FORWARD_BUFFER_SIZE: usize = 64 * 1024;
@@ -653,7 +653,10 @@ pub fn forward_list(
     let ids = host_forwards.get(&host_id).cloned().unwrap_or_default();
     drop(host_forwards);
 
-    Ok(ids.into_iter().filter_map(|id| manager.latest.get(&id).map(|e| e.value().clone())).collect())
+    Ok(ids
+        .into_iter()
+        .filter_map(|id| manager.latest.get(&id).map(|e| e.value().clone()))
+        .collect())
 }
 pub fn forward_add(
     app: Arc<Ctx>,
@@ -718,8 +721,15 @@ pub fn forward_add(
         connected_at: Some(chrono::Utc::now().timestamp()),
     };
     // A failure already reported by the forward task (e.g. port in use) wins over this optimistic entry.
-    manager.latest.entry(forward_id).or_insert_with(|| entry.clone());
-    Ok(manager.latest.get(&entry.id).map(|e| e.value().clone()).unwrap_or(entry))
+    manager
+        .latest
+        .entry(forward_id)
+        .or_insert_with(|| entry.clone());
+    Ok(manager
+        .latest
+        .get(&entry.id)
+        .map(|e| e.value().clone())
+        .unwrap_or(entry))
 }
 pub fn forward_remove(
     manager: &ForwardManager,

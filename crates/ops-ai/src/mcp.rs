@@ -124,10 +124,7 @@ pub fn mcp_list_servers(db: &Database) -> Result<Vec<McpServerConfig>, String> {
     Ok(result)
 }
 
-pub fn mcp_add_server(
-    db: &Database,
-    config: McpServerConfig,
-) -> Result<(), String> {
+pub fn mcp_add_server(db: &Database, config: McpServerConfig) -> Result<(), String> {
     let conn = db.pool.get().map_err(|e| e.to_string())?;
     let args_json = serde_json::to_string(&config.args).map_err(|e| e.to_string())?;
     let env_json = serde_json::to_string(&config.env).map_err(|e| e.to_string())?;
@@ -192,10 +189,7 @@ pub async fn mcp_connect_stdio(
     Ok(())
 }
 
-pub async fn mcp_disconnect(
-    manager: &Arc<McpManager>,
-    server_id: String,
-) -> Result<(), String> {
+pub async fn mcp_disconnect(manager: &Arc<McpManager>, server_id: String) -> Result<(), String> {
     let mut processes = manager.processes.lock().await;
     if let Some(mut child) = processes.remove(&server_id) {
         let _ = child.kill().await;

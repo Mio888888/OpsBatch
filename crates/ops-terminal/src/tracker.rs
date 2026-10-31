@@ -70,16 +70,25 @@ pub fn create_tracked_command(command: &str, done_prefix: &str) -> TrackedComman
 
 /// Regex source matching the completion marker of one execution; capture group 1 is the exit code.
 pub fn done_pattern(execution_id: &str) -> Regex {
-    Regex::new(&format!(r"{}(-?\d+)__", regex::escape(&format!("{TRACKER_DONE_PREFIX}{execution_id}__:")))).unwrap()
+    Regex::new(&format!(
+        r"{}(-?\d+)__",
+        regex::escape(&format!("{TRACKER_DONE_PREFIX}{execution_id}__:"))
+    ))
+    .unwrap()
 }
 
 pub fn strip_tracked_command_output_artifacts(output: &str) -> String {
     let without_lines = artifact_line_re().replace_all(output, "");
-    done_marker_re().replace_all(&without_lines, "").into_owned()
+    done_marker_re()
+        .replace_all(&without_lines, "")
+        .into_owned()
 }
 
 fn find_tracker_token_index(text: &str, from: usize) -> Option<usize> {
-    let status = text.get(from..).and_then(|t| t.find(TRACKER_STATUS_TOKEN)).map(|i| i + from);
+    let status = text
+        .get(from..)
+        .and_then(|t| t.find(TRACKER_STATUS_TOKEN))
+        .map(|i| i + from);
     let done = partial_done_re().find_at(text, from).map(|m| m.start());
     match (status, done) {
         (None, d) => d,
@@ -115,7 +124,10 @@ fn tracker_prefix_suffix_length(text: &str) -> usize {
 fn line_start(text: &str, index: usize) -> usize {
     let from = index.saturating_sub(1);
     let end = (from + 1).min(text.len());
-    let end = (0..=end).rev().find(|i| text.is_char_boundary(*i)).unwrap_or(0);
+    let end = (0..=end)
+        .rev()
+        .find(|i| text.is_char_boundary(*i))
+        .unwrap_or(0);
     text[..end].rfind('\n').map(|p| p + 1).unwrap_or(0)
 }
 
@@ -163,7 +175,9 @@ impl TrackedCommandOutputCleaner {
         let mut text = format!("{}{}", std::mem::take(&mut self.carried_marker), data);
         // a marker cut off by the end of the chunk waits for the next one
         for len in (1..FRESH_LINE_MARKER.len()).rev() {
-            if text.is_char_boundary(text.len().saturating_sub(len)) && text.ends_with(&FRESH_LINE_MARKER[..len]) {
+            if text.is_char_boundary(text.len().saturating_sub(len))
+                && text.ends_with(&FRESH_LINE_MARKER[..len])
+            {
                 self.carried_marker = FRESH_LINE_MARKER[..len].to_string();
                 text.truncate(text.len() - len);
                 break;
@@ -206,9 +220,17 @@ impl TrackedCommandOutputCleaner {
             }
 
             let Some(tracker_index) = find_tracker_token_index(&source, cursor) else {
-                let trailing = trailing_done_prefix_re().find(&source[cursor..]).map(|m| cursor + m.start());
-                if let Some(done_prefix_index) = trailing.or_else(|| source[cursor..].find(TRACKER_DONE_PREFIX).map(|rel| cursor + rel)) {
-                    if trailing.is_some() || has_potential_partial_tracker(&source, done_prefix_index) {
+                let trailing = trailing_done_prefix_re()
+                    .find(&source[cursor..])
+                    .map(|m| cursor + m.start());
+                if let Some(done_prefix_index) = trailing.or_else(|| {
+                    source[cursor..]
+                        .find(TRACKER_DONE_PREFIX)
+                        .map(|rel| cursor + rel)
+                }) {
+                    if trailing.is_some()
+                        || has_potential_partial_tracker(&source, done_prefix_index)
+                    {
                         let pending_start = line_start(&source, done_prefix_index);
                         output.push_str(&source[cursor..pending_start.max(cursor)]);
                         self.pending = source[pending_start.max(cursor)..].to_string();
@@ -298,15 +320,27 @@ mod tests {
     #[test]
     fn ordinary_output_is_untouched() {
         let mut c = TrackedCommandOutputCleaner::new();
-        assert_eq!(c.clean("\x1b[31mred\x1b[0m text\r\n"), "\x1b[31mred\x1b[0m text\r\n");
+        assert_eq!(
+            c.clean("\x1b[31mred\x1b[0m text\r\n"),
+            "\x1b[31mred\x1b[0m text\r\n"
+        );
         assert_eq!(c.clean("a\x1b"), "a");
-        assert_eq!(c.clean("[1mb"), "\x1b[1mb", "an escape split across chunks is put back together");
+        assert_eq!(
+            c.clean("[1mb"),
+            "\x1b[1mb",
+            "an escape split across chunks is put back together"
+        );
     }
 
     #[test]
     fn the_tracked_command_asks_for_the_fresh_line() {
         let t = create_tracked_command("echo hi", "__OPSBATCH_AI_DONE_abc__:");
-        assert!(t.hidden_tracker.contains("printf '\\033]7777;opsbatch-fresh-line\\007'"), "{}", t.hidden_tracker);
+        assert!(
+            t.hidden_tracker
+                .contains("printf '\\033]7777;opsbatch-fresh-line\\007'"),
+            "{}",
+            t.hidden_tracker
+        );
         assert!(t.hidden_tracker.contains("__opsbatch_ai_status=$?"));
     }
 
@@ -328,7 +362,9 @@ mod tests {
     #[test]
     fn done_pattern_extracts_the_exit_code_of_that_execution_only() {
         let re = done_pattern("abc123");
-        let caps = re.captures("noise __OPSBATCH_AI_DONE_abc123__:-7__ tail").unwrap();
+        let caps = re
+            .captures("noise __OPSBATCH_AI_DONE_abc123__:-7__ tail")
+            .unwrap();
         assert_eq!(&caps[1], "-7");
         assert!(re.captures("__OPSBATCH_AI_DONE_other__:0__").is_none());
     }
@@ -342,7 +378,10 @@ mod tests {
 
     #[test]
     fn cleaner_passes_ordinary_output_through_unchanged() {
-        assert_eq!(run_cleaner(&["hello ", "world\r\n", "total 0"]), "hello world\r\ntotal 0");
+        assert_eq!(
+            run_cleaner(&["hello ", "world\r\n", "total 0"]),
+            "hello world\r\ntotal 0"
+        );
     }
 
     #[test]
@@ -387,8 +426,11 @@ mod tests {
                 continue;
             }
             let (a, b) = full.split_at(split);
-            assert_eq!(run_cleaner(&[a, b]), "部署完成 ✓\r\n结束", "split at {split}");
+            assert_eq!(
+                run_cleaner(&[a, b]),
+                "部署完成 ✓\r\n结束",
+                "split at {split}"
+            );
         }
     }
 }
-

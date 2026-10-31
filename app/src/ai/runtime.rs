@@ -8,7 +8,9 @@ struct AiRuntime(RuntimeLimits);
 impl Global for AiRuntime {}
 
 pub fn limits(cx: &App) -> RuntimeLimits {
-    cx.try_global::<AiRuntime>().map(|r| r.0.clone()).unwrap_or_default()
+    cx.try_global::<AiRuntime>()
+        .map(|r| r.0.clone())
+        .unwrap_or_default()
 }
 
 pub fn set(cx: &mut App, limits: RuntimeLimits) {

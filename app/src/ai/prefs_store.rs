@@ -35,7 +35,12 @@ impl EventEmitter<PrefsEvent> for PrefsStore {}
 
 impl PrefsStore {
     pub fn new(cx: &mut Context<Self>) -> Self {
-        let mut this = Self { prefs: AiPrefs::default(), loaded: false, saving: false, dirty: false };
+        let mut this = Self {
+            prefs: AiPrefs::default(),
+            loaded: false,
+            saving: false,
+            dirty: false,
+        };
         // the keys live in the vault: reading while it is locked would show blanks and saving would erase the keys
         if crate::vault::is_unlocked(cx) {
             this.load(cx);
@@ -51,7 +56,9 @@ impl PrefsStore {
     fn load(&mut self, cx: &mut Context<Self>) {
         let ctx = crate::services::ctx(cx);
         cx.spawn(async move |this, cx| {
-            let result = ops_core::rt::run(async move { prefs::load_prefs(&ctx.db) }).await.and_then(|r| r);
+            let result = ops_core::rt::run(async move { prefs::load_prefs(&ctx.db) })
+                .await
+                .and_then(|r| r);
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok(prefs) => this.prefs = prefs,
@@ -101,7 +108,9 @@ impl PrefsStore {
         let snapshot = self.prefs.clone();
         let ctx = crate::services::ctx(cx);
         cx.spawn(async move |this, cx| {
-            let result = ops_core::rt::run(async move { prefs::save_prefs(&ctx.db, &snapshot) }).await.and_then(|r| r);
+            let result = ops_core::rt::run(async move { prefs::save_prefs(&ctx.db, &snapshot) })
+                .await
+                .and_then(|r| r);
             let _ = this.update(cx, |this, cx| {
                 this.saving = false;
                 match result {

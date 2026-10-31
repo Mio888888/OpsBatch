@@ -42,11 +42,7 @@ pub async fn list_tags(db: &Database) -> Result<Vec<Tag>, String> {
     .await
     .map_err(|e| e.to_string())?
 }
-pub async fn add_tag(
-    db: &Database,
-    name: String,
-    color: String,
-) -> Result<Tag, String> {
+pub async fn add_tag(db: &Database, name: String, color: String) -> Result<Tag, String> {
     let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let id = uuid::Uuid::new_v4().to_string();

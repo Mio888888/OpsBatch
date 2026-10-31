@@ -67,7 +67,12 @@ fn ctrl_byte(c: char) -> Option<u8> {
 
 /// Bytes to send for a key press. `key` is the GPUI key name ("enter", "up", "a", ...), `key_char` the text the
 /// key would insert. Returns `None` when the key produces nothing (pure modifier, unknown key).
-pub fn encode_key(key: &str, key_char: Option<&str>, mods: Mods, modes: KeyModes) -> Option<Vec<u8>> {
+pub fn encode_key(
+    key: &str,
+    key_char: Option<&str>,
+    mods: Mods,
+    modes: KeyModes,
+) -> Option<Vec<u8>> {
     let with_alt = |mut v: Vec<u8>| {
         if mods.alt {
             v.insert(0, 0x1b);
@@ -127,17 +132,24 @@ pub fn encode_key(key: &str, key_char: Option<&str>, mods: Mods, modes: KeyModes
             if mods.ctrl && single {
                 with_alt(vec![ctrl_byte(first)?])
             } else if mods.alt && single {
-                match key_char.filter(|t| modes.option_composes_text && !t.is_empty() && *t != key) {
+                match key_char.filter(|t| modes.option_composes_text && !t.is_empty() && *t != key)
+                {
                     Some(composed) => composed.as_bytes().to_vec(),
                     None => {
-                        let text = if mods.shift { key_char.unwrap_or(key) } else { key };
+                        let text = if mods.shift {
+                            key_char.unwrap_or(key)
+                        } else {
+                            key
+                        };
                         let mut v = vec![0x1b];
                         v.extend_from_slice(text.as_bytes());
                         v
                     }
                 }
             } else {
-                key_char.filter(|t| !t.is_empty()).map(|t| t.as_bytes().to_vec())?
+                key_char
+                    .filter(|t| !t.is_empty())
+                    .map(|t| t.as_bytes().to_vec())?
             }
         }
     };
@@ -173,7 +185,13 @@ pub enum MouseAction {
 }
 
 /// SGR (1006) mouse report. `col`/`row` are 0-based cells. Returns `None` for actions the encoding cannot express.
-pub fn encode_mouse_sgr(button: MouseButton, action: MouseAction, mods: Mods, col: usize, row: usize) -> Option<Vec<u8>> {
+pub fn encode_mouse_sgr(
+    button: MouseButton,
+    action: MouseAction,
+    mods: Mods,
+    col: usize,
+    row: usize,
+) -> Option<Vec<u8>> {
     let mut b: u32 = match button {
         MouseButton::Left => 0,
         MouseButton::Middle => 1,
@@ -182,7 +200,9 @@ pub fn encode_mouse_sgr(button: MouseButton, action: MouseAction, mods: Mods, co
         MouseButton::WheelUp => 64,
         MouseButton::WheelDown => 65,
     };
-    if matches!(button, MouseButton::WheelUp | MouseButton::WheelDown) && action != MouseAction::Press {
+    if matches!(button, MouseButton::WheelUp | MouseButton::WheelDown)
+        && action != MouseAction::Press
+    {
         return None;
     }
     if action == MouseAction::Motion {
@@ -197,7 +217,11 @@ pub fn encode_mouse_sgr(button: MouseButton, action: MouseAction, mods: Mods, co
     if mods.ctrl {
         b += 16;
     }
-    let last = if action == MouseAction::Release { 'm' } else { 'M' };
+    let last = if action == MouseAction::Release {
+        'm'
+    } else {
+        'M'
+    };
     Some(format!("\x1b[<{};{};{}{}", b, col + 1, row + 1, last).into_bytes())
 }
 
@@ -209,17 +233,35 @@ mod tests {
         encode_key(key, ch, m, KeyModes::default())
     }
     fn s(v: Option<Vec<u8>>) -> String {
-        String::from_utf8(v.unwrap()).unwrap().escape_default().to_string()
+        String::from_utf8(v.unwrap())
+            .unwrap()
+            .escape_default()
+            .to_string()
     }
-    const CTRL: Mods = Mods { shift: false, alt: false, ctrl: true };
-    const ALT: Mods = Mods { shift: false, alt: true, ctrl: false };
-    const SHIFT: Mods = Mods { shift: true, alt: false, ctrl: false };
+    const CTRL: Mods = Mods {
+        shift: false,
+        alt: false,
+        ctrl: true,
+    };
+    const ALT: Mods = Mods {
+        shift: false,
+        alt: true,
+        ctrl: false,
+    };
+    const SHIFT: Mods = Mods {
+        shift: true,
+        alt: false,
+        ctrl: false,
+    };
 
     #[test]
     fn plain_text_and_named_keys() {
         assert_eq!(s(enc("a", Some("a"), Mods::none())), "a");
         assert_eq!(s(enc("a", Some("A"), SHIFT)), "A");
-        assert_eq!(s(enc("你", Some("你"), Mods::none())), "你".escape_default().to_string());
+        assert_eq!(
+            s(enc("你", Some("你"), Mods::none())),
+            "你".escape_default().to_string()
+        );
         assert_eq!(s(enc("enter", None, Mods::none())), "\\r");
         assert_eq!(s(enc("backspace", None, Mods::none())), "\\u{7f}");
         assert_eq!(s(enc("escape", None, Mods::none())), "\\u{1b}");
@@ -246,18 +288,31 @@ mod tests {
         assert_eq!(enc("f", Some("f"), ALT), Some(vec![0x1b, b'f']));
         assert_eq!(enc("enter", None, ALT), Some(vec![0x1b, b'\r']));
         assert_eq!(enc("backspace", None, ALT), Some(vec![0x1b, 0x7f]));
-        let mac = KeyModes { option_composes_text: true, ..Default::default() };
-        assert_eq!(encode_key("s", Some("ß"), ALT, mac), Some("ß".as_bytes().to_vec()));
+        let mac = KeyModes {
+            option_composes_text: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            encode_key("s", Some("ß"), ALT, mac),
+            Some("ß".as_bytes().to_vec())
+        );
         assert_eq!(encode_key("s", Some("s"), ALT, mac), Some(vec![0x1b, b's']));
     }
 
     #[test]
     fn cursor_keys_follow_application_mode_and_modifiers() {
         assert_eq!(s(enc("up", None, Mods::none())), "\\u{1b}[A");
-        let app = KeyModes { app_cursor: true, ..Default::default() };
+        let app = KeyModes {
+            app_cursor: true,
+            ..Default::default()
+        };
         assert_eq!(s(encode_key("up", None, Mods::none(), app)), "\\u{1b}OA");
         assert_eq!(s(enc("right", None, CTRL)), "\\u{1b}[1;5C");
-        assert_eq!(s(encode_key("left", None, ALT, app)), "\\u{1b}[1;3D", "modifiers force CSI even in app mode");
+        assert_eq!(
+            s(encode_key("left", None, ALT, app)),
+            "\\u{1b}[1;3D",
+            "modifiers force CSI even in app mode"
+        );
         assert_eq!(s(enc("home", None, Mods::none())), "\\u{1b}[H");
         assert_eq!(s(enc("end", None, SHIFT)), "\\u{1b}[1;2F");
     }
@@ -275,22 +330,92 @@ mod tests {
 
     #[test]
     fn paste_encodings() {
-        assert_eq!(String::from_utf8(bracketed_paste("ls\nwhoami")).unwrap(), "\x1b[200~ls\nwhoami\x1b[201~");
+        assert_eq!(
+            String::from_utf8(bracketed_paste("ls\nwhoami")).unwrap(),
+            "\x1b[200~ls\nwhoami\x1b[201~"
+        );
         let evil = bracketed_paste("a\x1b[201~rm -rf /");
-        assert_eq!(String::from_utf8(evil).unwrap(), "\x1b[200~arm -rf /\x1b[201~", "cannot close the bracket early");
+        assert_eq!(
+            String::from_utf8(evil).unwrap(),
+            "\x1b[200~arm -rf /\x1b[201~",
+            "cannot close the bracket early"
+        );
         assert_eq!(plain_paste("a\r\nb\nc"), b"a\rb\rc");
     }
 
     #[test]
     fn mouse_sgr_reports() {
         let m = Mods::none();
-        assert_eq!(s(encode_mouse_sgr(MouseButton::Left, MouseAction::Press, m, 0, 0)), "\\u{1b}[<0;1;1M");
-        assert_eq!(s(encode_mouse_sgr(MouseButton::Left, MouseAction::Release, m, 9, 4)), "\\u{1b}[<0;10;5m");
-        assert_eq!(s(encode_mouse_sgr(MouseButton::Right, MouseAction::Press, CTRL, 2, 3)), "\\u{1b}[<18;3;4M");
-        assert_eq!(s(encode_mouse_sgr(MouseButton::Left, MouseAction::Motion, m, 1, 1)), "\\u{1b}[<32;2;2M");
-        assert_eq!(s(encode_mouse_sgr(MouseButton::None, MouseAction::Motion, m, 1, 1)), "\\u{1b}[<35;2;2M");
-        assert_eq!(s(encode_mouse_sgr(MouseButton::WheelUp, MouseAction::Press, m, 0, 0)), "\\u{1b}[<64;1;1M");
-        assert_eq!(s(encode_mouse_sgr(MouseButton::WheelDown, MouseAction::Press, SHIFT, 0, 0)), "\\u{1b}[<69;1;1M");
+        assert_eq!(
+            s(encode_mouse_sgr(
+                MouseButton::Left,
+                MouseAction::Press,
+                m,
+                0,
+                0
+            )),
+            "\\u{1b}[<0;1;1M"
+        );
+        assert_eq!(
+            s(encode_mouse_sgr(
+                MouseButton::Left,
+                MouseAction::Release,
+                m,
+                9,
+                4
+            )),
+            "\\u{1b}[<0;10;5m"
+        );
+        assert_eq!(
+            s(encode_mouse_sgr(
+                MouseButton::Right,
+                MouseAction::Press,
+                CTRL,
+                2,
+                3
+            )),
+            "\\u{1b}[<18;3;4M"
+        );
+        assert_eq!(
+            s(encode_mouse_sgr(
+                MouseButton::Left,
+                MouseAction::Motion,
+                m,
+                1,
+                1
+            )),
+            "\\u{1b}[<32;2;2M"
+        );
+        assert_eq!(
+            s(encode_mouse_sgr(
+                MouseButton::None,
+                MouseAction::Motion,
+                m,
+                1,
+                1
+            )),
+            "\\u{1b}[<35;2;2M"
+        );
+        assert_eq!(
+            s(encode_mouse_sgr(
+                MouseButton::WheelUp,
+                MouseAction::Press,
+                m,
+                0,
+                0
+            )),
+            "\\u{1b}[<64;1;1M"
+        );
+        assert_eq!(
+            s(encode_mouse_sgr(
+                MouseButton::WheelDown,
+                MouseAction::Press,
+                SHIFT,
+                0,
+                0
+            )),
+            "\\u{1b}[<69;1;1M"
+        );
         assert!(encode_mouse_sgr(MouseButton::WheelUp, MouseAction::Release, m, 0, 0).is_none());
     }
 }

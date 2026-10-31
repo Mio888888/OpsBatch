@@ -1,11 +1,11 @@
 //! The settings window: a section rail on the left, the selected section on the right (port of `SettingsPage`).
 
+use crate::scale::px;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::{h_flex, v_flex, Icon, TitleBar};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use crate::scale::px;
 use ops_i18n::t;
 
 use super::appearance::AppearanceSection;
@@ -92,7 +92,9 @@ pub struct SettingsWindow {
 impl SettingsWindow {
     pub fn open(section: Section, cx: &mut App) {
         let options = window::window_options(WindowKind::Settings, &t!("nav.settings"), cx);
-        window::open_or_focus("settings", options, cx, move |window, cx| cx.new(|cx| Self::new(section, window, cx)));
+        window::open_or_focus("settings", options, cx, move |window, cx| {
+            cx.new(|cx| Self::new(section, window, cx))
+        });
         // an already open window jumps to the requested section
         if let Some(open) = cx.try_global::<OpenSettings>().and_then(|g| g.0.upgrade()) {
             open.update(cx, |this, cx| this.select(section, cx));
@@ -162,33 +164,74 @@ impl Render for SettingsWindow {
         };
         let current = self.section;
         // `.settings-sidebar-card`: 208px, sidebar colour, 50px top padding for the window buttons
-        let nav = v_flex().id("settings-nav").test_support().w(px(208.)).flex_shrink_0().h_full().pt(px(50.)).pb(px(14.)).px(px(10.)).gap(px(1.)).border_r_1().border_color(ui.border).bg(ui.sidebar).children(Section::ALL.iter().enumerate().map(|(ix, s)| {
-            let s = *s;
-            let active = s == current;
-            h_flex()
-                .id(("settings-section", ix))
-                .test_support()
-                .relative()
-                .w_full()
-                .h(px(32.))
-                .gap(px(10.))
-                .border_1()
-                .border_color(gpui_kit::transparent_black())
-                .py(px(6.))
-                .pr(px(10.))
-                .pl(px(12.))
-                .rounded(px(8.))
-                .items_center()
-                .cursor_pointer()
-                .text_color(if active { ui.primary } else { ui.text_secondary })
-                .when(active, |d| d.bg(ui.input_bg))
-                .when(!active, |d| d.hover(move |d| d.bg(ui.nav_hover).text_color(ui.text)))
-                // the 2x16 accent bar at the left edge of the selected item
-                .when(active, |d| d.child(div().absolute().left(px(3.)).top_1_2().mt(px(-8.)).w(px(2.)).h(px(16.)).rounded(px(2.)).bg(ui.primary)))
-                .child(Icon::new(s.icon()).size_4().opacity(if active { 1.0 } else { 0.72 }))
-                .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).line_height(relative(1.3)).child(t!(&format!("settings.sections.{}", s.key()))))
-                .on_click(cx.listener(move |this, _, _, cx| this.select(s, cx)))
-        }));
+        let nav = v_flex()
+            .id("settings-nav")
+            .test_support()
+            .w(px(208.))
+            .flex_shrink_0()
+            .h_full()
+            .pt(px(50.))
+            .pb(px(14.))
+            .px(px(10.))
+            .gap(px(1.))
+            .border_r_1()
+            .border_color(ui.border)
+            .bg(ui.sidebar)
+            .children(Section::ALL.iter().enumerate().map(|(ix, s)| {
+                let s = *s;
+                let active = s == current;
+                h_flex()
+                    .id(("settings-section", ix))
+                    .test_support()
+                    .relative()
+                    .w_full()
+                    .h(px(32.))
+                    .gap(px(10.))
+                    .border_1()
+                    .border_color(gpui_kit::transparent_black())
+                    .py(px(6.))
+                    .pr(px(10.))
+                    .pl(px(12.))
+                    .rounded(px(8.))
+                    .items_center()
+                    .cursor_pointer()
+                    .text_color(if active {
+                        ui.primary
+                    } else {
+                        ui.text_secondary
+                    })
+                    .when(active, |d| d.bg(ui.input_bg))
+                    .when(!active, |d| {
+                        d.hover(move |d| d.bg(ui.nav_hover).text_color(ui.text))
+                    })
+                    // the 2x16 accent bar at the left edge of the selected item
+                    .when(active, |d| {
+                        d.child(
+                            div()
+                                .absolute()
+                                .left(px(3.))
+                                .top_1_2()
+                                .mt(px(-8.))
+                                .w(px(2.))
+                                .h(px(16.))
+                                .rounded(px(2.))
+                                .bg(ui.primary),
+                        )
+                    })
+                    .child(
+                        Icon::new(s.icon())
+                            .size_4()
+                            .opacity(if active { 1.0 } else { 0.72 }),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(13.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .line_height(relative(1.3))
+                            .child(t!(&format!("settings.sections.{}", s.key()))),
+                    )
+                    .on_click(cx.listener(move |this, _, _, cx| this.select(s, cx)))
+            }));
         // `.settings-main-card` / `.settings-main-body`: main colour, 18/24/24 padding
         let main = div()
             .id("settings-body")
@@ -201,9 +244,20 @@ impl Render for SettingsWindow {
             .map(|d| {
                 if full_bleed {
                     // embedded library pages: same 18/24/24 padding, the list scrolls inside its card
-                    d.pt(px(18.)).px(px(24.)).pb(px(24.)).child(div().size_full().child(body))
+                    d.pt(px(18.))
+                        .px(px(24.))
+                        .pb(px(24.))
+                        .child(div().size_full().child(body))
                 } else {
-                    d.overflow_y_scroll().pt(px(18.)).px(px(24.)).pb(px(24.)).child(div().max_w(px(if current == Section::Ai { 820. } else { 640. })).child(body))
+                    d.overflow_y_scroll()
+                        .pt(px(18.))
+                        .px(px(24.))
+                        .pb(px(24.))
+                        .child(
+                            div()
+                                .max_w(px(if current == Section::Ai { 820. } else { 640. }))
+                                .child(body),
+                        )
                 }
             });
         // The window has no title bar of its own: the traffic lights float over the sidebar and the
@@ -216,6 +270,15 @@ impl Render for SettingsWindow {
             .bg(ui.page)
             .text_color(ui.text)
             .child(h_flex().size_full().child(nav).child(main))
-            .child(TitleBar::new().absolute().top_0().left_0().right_0().h(px(34.)).bg(gpui_kit::transparent_black()).border_b_0())
+            .child(
+                TitleBar::new()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .h(px(34.))
+                    .bg(gpui_kit::transparent_black())
+                    .border_b_0(),
+            )
     }
 }

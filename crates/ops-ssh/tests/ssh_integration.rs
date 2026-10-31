@@ -23,31 +23,63 @@ fn drain_until(rx: &flume::Receiver<String>, needle: &str, secs: u64) -> String 
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn terminal_roundtrip_resize_and_close() {
-    let Some(fx) = support::fixture("terminal").await else { return };
-    let sid = terminal::terminal_connect(fx.ctx.clone(), fx.host_id.clone(), Some(100), Some(30), None)
-        .await
-        .expect("terminal_connect");
+    let Some(fx) = support::fixture("terminal").await else {
+        return;
+    };
+    let sid = terminal::terminal_connect(
+        fx.ctx.clone(),
+        fx.host_id.clone(),
+        Some(100),
+        Some(30),
+        None,
+    )
+    .await
+    .expect("terminal_connect");
     let rx = fx.ctx.terminals.take(&sid).expect("terminal stream");
 
-    terminal::terminal_write(&fx.ctx.terminals_mgr, &fx.ctx.registry, sid.clone(), "echo MARK$((20+22))X\n".into())
-        .await
-        .expect("write");
+    terminal::terminal_write(
+        &fx.ctx.terminals_mgr,
+        &fx.ctx.registry,
+        sid.clone(),
+        "echo MARK$((20+22))X\n".into(),
+    )
+    .await
+    .expect("write");
     let out = drain_until(&rx, "MARK42X", 15);
     assert!(out.contains("MARK42X"), "output was: {out:?}");
 
-    terminal::terminal_resize(&fx.ctx.terminals_mgr, &fx.ctx.registry, sid.clone(), 120, 40).await.expect("resize");
-    terminal::terminal_write(&fx.ctx.terminals_mgr, &fx.ctx.registry, sid.clone(), "stty size\n".into()).await.unwrap();
+    terminal::terminal_resize(
+        &fx.ctx.terminals_mgr,
+        &fx.ctx.registry,
+        sid.clone(),
+        120,
+        40,
+    )
+    .await
+    .expect("resize");
+    terminal::terminal_write(
+        &fx.ctx.terminals_mgr,
+        &fx.ctx.registry,
+        sid.clone(),
+        "stty size\n".into(),
+    )
+    .await
+    .unwrap();
     let out = drain_until(&rx, "40 120", 10);
     assert!(out.contains("40 120"), "stty size after resize: {out:?}");
 
-    terminal::terminal_disconnect(&fx.ctx.terminals_mgr, sid.clone(), Some(fx.host_id.clone())).await.expect("disconnect");
+    terminal::terminal_disconnect(&fx.ctx.terminals_mgr, sid.clone(), Some(fx.host_id.clone()))
+        .await
+        .expect("disconnect");
     let tail = drain_until(&rx, "\u{0}never", 5);
     let _ = tail;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn batch_execute_records_history_and_events() {
-    let Some(fx) = support::fixture("exec").await else { return };
+    let Some(fx) = support::fixture("exec").await else {
+        return;
+    };
     let task_id = "task-e2e-1".to_string();
     let rx = fx.ctx.events.subscribe(format!("exec:{task_id}:*"));
     let r = execution::execute_command(
@@ -81,9 +113,14 @@ async fn batch_execute_records_history_and_events() {
     assert!(saw_output.contains("out-line"), "{saw_output}");
 
     let history = execution::list_execution_history(&fx.ctx.db).await.unwrap();
-    let h = history.iter().find(|h| h.id == task_id).expect("history row");
+    let h = history
+        .iter()
+        .find(|h| h.id == task_id)
+        .expect("history row");
     assert_eq!(h.host_count, 1);
-    let details = execution::get_execution_detail(&fx.ctx.db, task_id).await.unwrap();
+    let details = execution::get_execution_detail(&fx.ctx.db, task_id)
+        .await
+        .unwrap();
     assert_eq!(details.len(), 1);
     assert!(details[0].output.contains("out-line"));
 }
@@ -100,33 +137,46 @@ macro_rules! blk {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sftp_full_lifecycle() {
-    let Some(fx) = support::fixture("sftp").await else { return };
+    let Some(fx) = support::fixture("sftp").await else {
+        return;
+    };
     let ctx = fx.ctx.clone();
     let host = fx.host_id.clone();
     let root = fx.work.to_string_lossy().to_string();
 
-    sftp::sftp_open(ctx.clone(), host.clone()).await.expect("sftp_open");
+    sftp::sftp_open(ctx.clone(), host.clone())
+        .await
+        .expect("sftp_open");
     let home = blk!(ctx, host => sftp::sftp_home_dir(&ctx.sftp, host)).expect("home");
     assert!(!home.is_empty());
 
     // mkdir + write + read + list + stat + exists
     let dir = format!("{root}/dir1");
-    blk!(ctx, host, dir => sftp::sftp_mkdir(&ctx.db, &ctx.sftp, &ctx.registry, host, dir)).expect("mkdir");
+    blk!(ctx, host, dir => sftp::sftp_mkdir(&ctx.db, &ctx.sftp, &ctx.registry, host, dir))
+        .expect("mkdir");
     let file = format!("{dir}/hello.txt");
     let content = "你好 sftp\nline2\n".to_string();
     blk!(ctx, host, file, content => sftp::sftp_write_file(&ctx.db, &ctx.sftp, &ctx.registry, host, file, content)).expect("write");
     assert_eq!(std::fs::read_to_string(&file).unwrap(), content);
-    let read = sftp::sftp_read_file(ctx.clone(), host.clone(), file.clone(), None).await.expect("read");
+    let read = sftp::sftp_read_file(ctx.clone(), host.clone(), file.clone(), None)
+        .await
+        .expect("read");
     assert!(!read.is_empty(), "read returned empty");
-    let list = sftp::sftp_list_dir(ctx.clone(), host.clone(), dir.clone()).await.expect("list");
-    assert!(list.iter().any(|e| e.name == "hello.txt" && !e.is_dir), "{list:?}");
+    let list = sftp::sftp_list_dir(ctx.clone(), host.clone(), dir.clone())
+        .await
+        .expect("list");
+    assert!(
+        list.iter().any(|e| e.name == "hello.txt" && !e.is_dir),
+        "{list:?}"
+    );
     let st = blk!(ctx, host, file => sftp::sftp_stat(&ctx.sftp, host, file)).expect("stat");
     assert_eq!(st.size, content.len() as u64);
     assert!(blk!(ctx, host, file => sftp::sftp_exists(&ctx.sftp, host, file)).unwrap());
 
     // rename
     let renamed = format!("{dir}/renamed.txt");
-    blk!(ctx, host, file, renamed => sftp::sftp_rename(&ctx.sftp, host, file, renamed)).expect("rename");
+    blk!(ctx, host, file, renamed => sftp::sftp_rename(&ctx.sftp, host, file, renamed))
+        .expect("rename");
     assert!(std::path::Path::new(&renamed).exists() && !std::path::Path::new(&file).exists());
 
     // upload / download with progress events
@@ -135,31 +185,63 @@ async fn sftp_full_lifecycle() {
     std::fs::write(&local_src, &payload).unwrap();
     let rx = ctx.events.subscribe("sftp-transfer:*");
     let remote_dst = format!("{dir}/uploaded.bin");
-    sftp::sftp_upload(ctx.clone(), host.clone(), local_src.to_string_lossy().into(), remote_dst.clone(), "t-up".into())
-        .await
-        .expect("upload");
+    sftp::sftp_upload(
+        ctx.clone(),
+        host.clone(),
+        local_src.to_string_lossy().into(),
+        remote_dst.clone(),
+        "t-up".into(),
+    )
+    .await
+    .expect("upload");
     assert_eq!(std::fs::read(&remote_dst).unwrap(), payload);
     let local_dst = fx.work.join("downloaded.bin");
-    sftp::sftp_download(ctx.clone(), host.clone(), remote_dst.clone(), local_dst.to_string_lossy().into(), "t-down".into())
-        .await
-        .expect("download");
+    sftp::sftp_download(
+        ctx.clone(),
+        host.clone(),
+        remote_dst.clone(),
+        local_dst.to_string_lossy().into(),
+        "t-down".into(),
+    )
+    .await
+    .expect("download");
     assert_eq!(std::fs::read(&local_dst).unwrap(), payload);
     let topics: Vec<String> = rx.try_iter().map(|e| e.topic.clone()).collect();
-    assert!(topics.iter().any(|t| t == "sftp-transfer:t-up:done"), "{topics:?}");
-    assert!(topics.iter().any(|t| t == "sftp-transfer:t-down:done"), "{topics:?}");
+    assert!(
+        topics.iter().any(|t| t == "sftp-transfer:t-up:done"),
+        "{topics:?}"
+    );
+    assert!(
+        topics.iter().any(|t| t == "sftp-transfer:t-down:done"),
+        "{topics:?}"
+    );
 
     // archive extraction (remote `tar`) + tree
     let tar_dir = fx.work.join("tarsrc");
     std::fs::create_dir_all(tar_dir.join("inner")).unwrap();
     std::fs::write(tar_dir.join("inner/a.txt"), "A").unwrap();
     let archive = fx.work.join("pack.tar.gz");
-    assert!(std::process::Command::new("tar").arg("czf").arg(&archive).arg("-C").arg(&tar_dir).arg(".").status().unwrap().success());
+    assert!(std::process::Command::new("tar")
+        .arg("czf")
+        .arg(&archive)
+        .arg("-C")
+        .arg(&tar_dir)
+        .arg(".")
+        .status()
+        .unwrap()
+        .success());
     let out_dir = format!("{root}/extracted");
-    blk!(ctx, host, out_dir => sftp::sftp_mkdir(&ctx.db, &ctx.sftp, &ctx.registry, host, out_dir)).unwrap();
+    blk!(ctx, host, out_dir => sftp::sftp_mkdir(&ctx.db, &ctx.sftp, &ctx.registry, host, out_dir))
+        .unwrap();
     let archive_s: String = archive.to_string_lossy().into();
     blk!(ctx, host, archive_s, out_dir => sftp::sftp_extract_archive(&ctx.db, &ctx.registry, host, archive_s, out_dir)).expect("extract");
-    assert_eq!(std::fs::read_to_string(format!("{out_dir}/inner/a.txt")).unwrap(), "A");
-    sftp::sftp_read_file_tree(ctx.clone(), host.clone(), root.clone(), Some(3)).await.expect("tree");
+    assert_eq!(
+        std::fs::read_to_string(format!("{out_dir}/inner/a.txt")).unwrap(),
+        "A"
+    );
+    sftp::sftp_read_file_tree(ctx.clone(), host.clone(), root.clone(), Some(3))
+        .await
+        .expect("tree");
 
     // remove
     blk!(ctx, host, renamed => sftp::sftp_remove(&ctx.sftp, host, renamed)).expect("remove");
@@ -171,7 +253,9 @@ async fn sftp_full_lifecycle() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn local_port_forward_echoes_through_ssh() {
-    let Some(fx) = support::fixture("forward").await else { return };
+    let Some(fx) = support::fixture("forward").await else {
+        return;
+    };
     let ctx = fx.ctx.clone();
     let host = fx.host_id.clone();
     // Echo server the "remote side" will reach.
@@ -179,7 +263,9 @@ async fn local_port_forward_echoes_through_ssh() {
     let echo_addr = echo.local_addr().unwrap();
     tokio::spawn(async move {
         loop {
-            let Ok((mut s, _)) = echo.accept().await else { break };
+            let Ok((mut s, _)) = echo.accept().await else {
+                break;
+            };
             tokio::spawn(async move {
                 use tokio::io::{AsyncReadExt, AsyncWriteExt};
                 let mut buf = [0u8; 1024];
@@ -208,7 +294,12 @@ async fn local_port_forward_echoes_through_ssh() {
     let mut buf = [0u8; 64];
     let mut n = 0;
     for attempt in 0..5 {
-        let mut c = match tokio::time::timeout(Duration::from_secs(10), tokio::net::TcpStream::connect(("127.0.0.1", local_port))).await {
+        let mut c = match tokio::time::timeout(
+            Duration::from_secs(10),
+            tokio::net::TcpStream::connect(("127.0.0.1", local_port)),
+        )
+        .await
+        {
             Ok(Ok(c)) => c,
             _ => {
                 tokio::time::sleep(Duration::from_millis(200)).await;
@@ -233,12 +324,18 @@ async fn local_port_forward_echoes_through_ssh() {
     let fid = entry.id.clone();
     blk!(ctx, host, fid => forward::forward_stop(&ctx.forwards, host, fid)).expect("stop");
     blk!(ctx, host, fid => forward::forward_remove(&ctx.forwards, host, fid)).expect("remove");
-    assert!(blk!(ctx, host => forward::forward_list(&ctx.forwards, host)).unwrap().is_empty());
+    assert!(
+        blk!(ctx, host => forward::forward_list(&ctx.forwards, host))
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn batch_transfer_uploads_file_and_reports_done() {
-    let Some(fx) = support::fixture("transfer").await else { return };
+    let Some(fx) = support::fixture("transfer").await else {
+        return;
+    };
     let ctx = fx.ctx.clone();
     let src = fx.work.join("payload.txt");
     std::fs::write(&src, "batch-payload").unwrap();
@@ -267,10 +364,16 @@ async fn batch_transfer_uploads_file_and_reports_done() {
         }
     }
     assert!(done.is_some(), "no transfer done event: {topics:?}");
-    assert_eq!(std::fs::read_to_string(remote_dir.join("payload.txt")).unwrap(), "batch-payload");
+    assert_eq!(
+        std::fs::read_to_string(remote_dir.join("payload.txt")).unwrap(),
+        "batch-payload"
+    );
 }
 
-fn wait_done(rx: &flume::Receiver<std::sync::Arc<ops_core::events::AppEvent>>, secs: u64) -> (String, Option<serde_json::Value>) {
+fn wait_done(
+    rx: &flume::Receiver<std::sync::Arc<ops_core::events::AppEvent>>,
+    secs: u64,
+) -> (String, Option<serde_json::Value>) {
     let mut out = String::new();
     let deadline = std::time::Instant::now() + Duration::from_secs(secs);
     while std::time::Instant::now() < deadline {
@@ -288,7 +391,9 @@ fn wait_done(rx: &flume::Receiver<std::sync::Arc<ops_core::events::AppEvent>>, s
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn exec_through_jump_host_chain() {
-    let Some(fx) = support::fixture("jump-exec").await else { return };
+    let Some(fx) = support::fixture("jump-exec").await else {
+        return;
+    };
     let ctx = fx.ctx.clone();
     // Host B reaches the same sshd *through* host A (direct-tcpip over A's connection).
     let user = std::env::var("USER").unwrap_or_else(|_| "root".into());
@@ -314,8 +419,17 @@ async fn exec_through_jump_host_chain() {
     .await
     .unwrap();
     let rx = ctx.events.subscribe("exec:jump-1:*");
-    execution::execute_command(ctx.clone(), &ctx.db, "jump-1".into(), vec![b.id.clone()], "echo via-jump-ok".into(), 2, 30, None)
-        .expect("execute");
+    execution::execute_command(
+        ctx.clone(),
+        &ctx.db,
+        "jump-1".into(),
+        vec![b.id.clone()],
+        "echo via-jump-ok".into(),
+        2,
+        30,
+        None,
+    )
+    .expect("execute");
     let (out, done) = wait_done(&rx, 25);
     assert!(done.is_some(), "no done: {out}");
     assert!(out.contains("via-jump-ok"), "{out}");
@@ -325,7 +439,9 @@ async fn exec_through_jump_host_chain() {
 /// recorded result instead of hanging the batch. A long-running command is NOT cut off by it (documented parity).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn exec_connect_timeout_fails_fast_and_is_recorded() {
-    let Some(fx) = support::fixture("exec-timeout").await else { return };
+    let Some(fx) = support::fixture("exec-timeout").await else {
+        return;
+    };
     let ctx = fx.ctx.clone();
     // 192.0.2.0/24 is TEST-NET-1: never routable, so the TCP connect cannot succeed.
     let dead = ops_ssh::hosts::add_host(
@@ -351,25 +467,52 @@ async fn exec_connect_timeout_fails_fast_and_is_recorded() {
     .unwrap();
     let rx = ctx.events.subscribe("exec:to-1:*");
     let started = std::time::Instant::now();
-    execution::execute_command(ctx.clone(), &ctx.db, "to-1".into(), vec![dead.id.clone()], "true".into(), 1, 2, None).unwrap();
+    execution::execute_command(
+        ctx.clone(),
+        &ctx.db,
+        "to-1".into(),
+        vec![dead.id.clone()],
+        "true".into(),
+        1,
+        2,
+        None,
+    )
+    .unwrap();
     let (_out, done) = wait_done(&rx, 30);
     assert!(done.is_some(), "no done event for an unreachable host");
-    assert!(started.elapsed() < Duration::from_secs(20), "connect timeout did not bound the wait: {:?}", started.elapsed());
-    let d = execution::get_execution_detail(&ctx.db, "to-1".into()).await.unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(20),
+        "connect timeout did not bound the wait: {:?}",
+        started.elapsed()
+    );
+    let d = execution::get_execution_detail(&ctx.db, "to-1".into())
+        .await
+        .unwrap();
     assert_eq!(d.len(), 1);
     assert_ne!(d[0].status, "success", "{:?}", d[0].status);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn local_pty_terminal_and_background_process() {
-    let Some(fx) = support::fixture("local-pty").await else { return };
+    let Some(fx) = support::fixture("local-pty").await else {
+        return;
+    };
     let ctx = fx.ctx.clone();
     let sid = blk!(ctx => terminal::terminal_connect_local(ctx.clone(), &ctx.terminals_mgr, Some(80), Some(24))).unwrap_or_else(|e| panic!("local connect: {e}"));
     let rx = ctx.terminals.take(&sid).expect("stream");
-    terminal::terminal_write(&ctx.terminals_mgr, &ctx.registry, sid.clone(), "echo PTY$((6*7))Z\n".into()).await.unwrap();
+    terminal::terminal_write(
+        &ctx.terminals_mgr,
+        &ctx.registry,
+        sid.clone(),
+        "echo PTY$((6*7))Z\n".into(),
+    )
+    .await
+    .unwrap();
     let out = drain_until(&rx, "PTY42Z", 15);
     assert!(out.contains("PTY42Z"), "{out:?}");
-    terminal::terminal_disconnect(&ctx.terminals_mgr, sid, None).await.unwrap();
+    terminal::terminal_disconnect(&ctx.terminals_mgr, sid, None)
+        .await
+        .unwrap();
 
     let marker = fx.work.join("bg-marker.txt");
     let info = terminal::terminal_spawn_background_process(
@@ -385,17 +528,36 @@ async fn local_pty_terminal_and_background_process() {
     while !marker.exists() && std::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    assert_eq!(std::fs::read_to_string(&marker).unwrap().trim(), "background-ran");
-    assert!(std::path::Path::new(&info.log_file).starts_with(fx.ctx.data_dir()), "log under data dir: {}", info.log_file);
+    assert_eq!(
+        std::fs::read_to_string(&marker).unwrap().trim(),
+        "background-ran"
+    );
+    assert!(
+        std::path::Path::new(&info.log_file).starts_with(fx.ctx.data_dir()),
+        "log under data dir: {}",
+        info.log_file
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn monitor_snapshot_does_not_panic_on_non_linux() {
-    let Some(fx) = support::fixture("monitor").await else { return };
-    let r = ops_ssh::hosts::get_host_monitor_snapshot(fx.ctx.core.clone(), fx.ctx.registry.clone(), fx.host_id.clone()).await;
+    let Some(fx) = support::fixture("monitor").await else {
+        return;
+    };
+    let r = ops_ssh::hosts::get_host_monitor_snapshot(
+        fx.ctx.core.clone(),
+        fx.ctx.registry.clone(),
+        fx.host_id.clone(),
+    )
+    .await;
     // Linux/procfs hosts yield a snapshot; others may return partial data or a clear error — never a panic/hang.
     match r {
-        Ok(s) => eprintln!("MONITOR ok: os={:?} procs={} fs={}", s.os, s.processes.len(), s.filesystems.len()),
+        Ok(s) => eprintln!(
+            "MONITOR ok: os={:?} procs={} fs={}",
+            s.os,
+            s.processes.len(),
+            s.filesystems.len()
+        ),
         Err(e) => eprintln!("MONITOR err (acceptable off-Linux): {e}"),
     }
 }

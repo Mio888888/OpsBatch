@@ -23,7 +23,10 @@ fn nal_units(data: &[u8]) -> Vec<&[u8]> {
     let mut starts = Vec::new();
     let mut i = 0;
     while i + 3 <= data.len() {
-        if data[i] == 0 && data[i + 1] == 0 && (data[i + 2] == 1 || (data[i + 2] == 0 && i + 4 <= data.len() && data[i + 3] == 1)) {
+        if data[i] == 0
+            && data[i + 1] == 0
+            && (data[i + 2] == 1 || (data[i + 2] == 0 && i + 4 <= data.len() && data[i + 3] == 1))
+        {
             starts.push(i);
             i += 3;
         } else {
@@ -38,7 +41,9 @@ fn nal_units(data: &[u8]) -> Vec<&[u8]> {
 }
 
 fn main() -> anyhow_free::Result<()> {
-    let path = std::env::args().nth(1).unwrap_or_else(|| "target/spike-data/test1080.h264".into());
+    let path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "target/spike-data/test1080.h264".into());
     let data = std::fs::read(&path)?;
     let nals = nal_units(&data);
     println!("{path}: {} bytes, {} NAL units", data.len(), nals.len());

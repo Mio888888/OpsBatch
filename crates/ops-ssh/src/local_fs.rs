@@ -54,10 +54,7 @@ pub fn local_authorize_directory(manager: &LocalFsManager, path: &Path) -> Resul
     manager.authorize_root(&canonical)?;
     Ok(canonical.to_string_lossy().to_string())
 }
-pub fn local_is_authorized(
-    manager: &LocalFsManager,
-    path: String,
-) -> Result<bool, String> {
+pub fn local_is_authorized(manager: &LocalFsManager, path: String) -> Result<bool, String> {
     manager.is_authorized(&path)
 }
 

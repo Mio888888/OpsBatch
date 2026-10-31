@@ -43,7 +43,11 @@ pub enum PermissionMode {
 }
 
 impl PermissionMode {
-    pub const ALL: [PermissionMode; 3] = [PermissionMode::Observer, PermissionMode::Confirm, PermissionMode::Auto];
+    pub const ALL: [PermissionMode; 3] = [
+        PermissionMode::Observer,
+        PermissionMode::Confirm,
+        PermissionMode::Auto,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -146,7 +150,9 @@ impl Default for AiPrefs {
 
 impl AiPrefs {
     pub fn active_provider(&self) -> Option<&ProviderConfig> {
-        self.providers.iter().find(|p| p.id == self.active_provider_id)
+        self.providers
+            .iter()
+            .find(|p| p.id == self.active_provider_id)
     }
 
     pub fn provider_mut(&mut self, id: &str) -> Option<&mut ProviderConfig> {
@@ -164,7 +170,12 @@ impl AiPrefs {
             self.active_provider_id.clear();
             self.active_model_id.clear();
         }
-        let orphaned: Vec<String> = self.agent_provider_map.iter().filter(|(_, provider)| provider.as_str() == id).map(|(agent, _)| agent.clone()).collect();
+        let orphaned: Vec<String> = self
+            .agent_provider_map
+            .iter()
+            .filter(|(_, provider)| provider.as_str() == id)
+            .map(|(agent, _)| agent.clone())
+            .collect();
         for agent in orphaned {
             self.agent_provider_map.remove(&agent);
             self.agent_model_map.remove(&agent);
@@ -174,7 +185,11 @@ impl AiPrefs {
     /// The provider switch of `SettingsAITab`: at most one provider is enabled, and it is the active one.
     pub fn set_provider_enabled(&mut self, id: &str, enabled: bool) {
         if enabled {
-            let default_model = self.providers.iter().find(|p| p.id == id).and_then(|p| p.default_model.clone());
+            let default_model = self
+                .providers
+                .iter()
+                .find(|p| p.id == id)
+                .and_then(|p| p.default_model.clone());
             self.active_provider_id = id.to_string();
             if let Some(model) = default_model.filter(|m| !m.is_empty()) {
                 self.active_model_id = model;
@@ -196,9 +211,11 @@ impl AiPrefs {
     /// Normalizes values that came from disk or the form (clamped timeouts, deduped quick messages, ...).
     pub fn normalize(&mut self) {
         self.command_timeout = safety::normalize_command_timeout(self.command_timeout as i64);
-        self.response_idle_timeout = safety::normalize_response_idle_timeout(self.response_idle_timeout as i64);
+        self.response_idle_timeout =
+            safety::normalize_response_idle_timeout(self.response_idle_timeout as i64);
         self.max_iterations = safety::normalize_max_iterations(self.max_iterations as i64);
-        self.quick_messages = quick::sanitize_quick_messages(std::mem::take(&mut self.quick_messages));
+        self.quick_messages =
+            quick::sanitize_quick_messages(std::mem::take(&mut self.quick_messages));
         self.external_mcp.normalize();
         if let Some(search) = &mut self.web_search {
             search.normalize();
@@ -252,7 +269,8 @@ fn reveal_secrets(prefs: &mut AiPrefs) {
             p.api_key = Some(key).filter(|k| !k.is_empty());
         }
         if p.has_secret_headers {
-            if let Ok(json) = ops_core::keychain::get_api_key(&provider_headers_secret_name(&p.id)) {
+            if let Ok(json) = ops_core::keychain::get_api_key(&provider_headers_secret_name(&p.id))
+            {
                 p.custom_headers = serde_json::from_str(&json).unwrap_or_default();
             }
         }
@@ -291,13 +309,20 @@ fn seal_secrets(prefs: &AiPrefs) -> Result<AiPrefs, String> {
     for a in &mut sealed.external_agents {
         a.api_key = stash_secret(&agent_secret_name(&a.id), &a.api_key)?;
     }
-    stash_secret(MCP_HTTP_TOKEN_SECRET, &Some(sealed.external_mcp.http.token.clone()))?;
+    stash_secret(
+        MCP_HTTP_TOKEN_SECRET,
+        &Some(sealed.external_mcp.http.token.clone()),
+    )?;
     Ok(sealed)
 }
 
 fn read_row(db: &Database, key: &str) -> Result<Option<String>, String> {
     let conn = db.pool.get().map_err(|e| e.to_string())?;
-    match conn.query_row("SELECT value FROM settings WHERE key=?1", params![key], |r| r.get::<_, String>(0)) {
+    match conn.query_row(
+        "SELECT value FROM settings WHERE key=?1",
+        params![key],
+        |r| r.get::<_, String>(0),
+    ) {
         Ok(v) => Ok(Some(v)),
         Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
         Err(e) => Err(e.to_string()),
@@ -308,7 +333,9 @@ fn read_row(db: &Database, key: &str) -> Result<Option<String>, String> {
 /// Tauri build gets that provider listed (and active) so nothing configured there disappears.
 pub fn load_prefs(db: &Database) -> Result<AiPrefs, String> {
     let mut prefs = match read_row(db, PREFS_KEY)? {
-        Some(json) => serde_json::from_str::<AiPrefs>(&json).map_err(|e| format!("AI 设置解析失败: {e}"))?,
+        Some(json) => {
+            serde_json::from_str::<AiPrefs>(&json).map_err(|e| format!("AI 设置解析失败: {e}"))?
+        }
         None => migrate_legacy(db)?,
     };
     reveal_secrets(&mut prefs);
@@ -348,7 +375,11 @@ pub fn save_prefs(db: &Database, prefs: &AiPrefs) -> Result<(), String> {
     let json = serde_json::to_string(&sealed).map_err(|e| e.to_string())?;
     {
         let conn = db.pool.get().map_err(|e| e.to_string())?;
-        conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)", params![PREFS_KEY, json]).map_err(|e| e.to_string())?;
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+            params![PREFS_KEY, json],
+        )
+        .map_err(|e| e.to_string())?;
     }
     sync_legacy_config(db, &prefs)
 }
@@ -356,9 +387,19 @@ pub fn save_prefs(db: &Database, prefs: &AiPrefs) -> Result<(), String> {
 /// What `ai_config` (the single provider the chat clients read) should hold for these preferences.
 pub fn legacy_config_for(prefs: &AiPrefs) -> Option<crate::client::AiConfig> {
     let p = prefs.active_provider().filter(|p| p.enabled)?;
-    let model = if prefs.active_model_id.trim().is_empty() { p.default_model.clone().unwrap_or_default() } else { prefs.active_model_id.clone() };
+    let model = if prefs.active_model_id.trim().is_empty() {
+        p.default_model.clone().unwrap_or_default()
+    } else {
+        prefs.active_model_id.clone()
+    };
     let (kind, api_url) = provider::legacy_endpoint(p);
-    Some(crate::client::AiConfig { provider: kind.to_string(), api_url, api_key: p.api_key.clone().unwrap_or_default(), model, enabled: true })
+    Some(crate::client::AiConfig {
+        provider: kind.to_string(),
+        api_url,
+        api_key: p.api_key.clone().unwrap_or_default(),
+        model,
+        enabled: true,
+    })
 }
 
 fn sync_legacy_config(db: &Database, prefs: &AiPrefs) -> Result<(), String> {
@@ -366,14 +407,22 @@ fn sync_legacy_config(db: &Database, prefs: &AiPrefs) -> Result<(), String> {
         Some(config) => crate::client::save_ai_config_blocking(db, config),
         None => {
             // nothing active: keep the stored provider but switch the assistant off
-            let Some(mut existing) = read_row(db, "ai_config")?.and_then(|j| serde_json::from_str::<crate::client::AiConfig>(&j).ok()) else { return Ok(()) };
+            let Some(mut existing) = read_row(db, "ai_config")?
+                .and_then(|j| serde_json::from_str::<crate::client::AiConfig>(&j).ok())
+            else {
+                return Ok(());
+            };
             if !existing.enabled {
                 return Ok(());
             }
             existing.enabled = false;
             let conn = db.pool.get().map_err(|e| e.to_string())?;
             let json = serde_json::to_string(&existing).map_err(|e| e.to_string())?;
-            conn.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('ai_config', ?1)", params![json]).map_err(|e| e.to_string())?;
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('ai_config', ?1)",
+                params![json],
+            )
+            .map_err(|e| e.to_string())?;
             Ok(())
         }
     }
@@ -402,13 +451,26 @@ impl Default for RuntimeLimits {
 
 impl From<AiPrefs> for RuntimeLimits {
     fn from(p: AiPrefs) -> Self {
-        Self { permission_mode: p.global_permission_mode, command_blocklist: p.command_blocklist, command_timeout: p.command_timeout, response_idle_timeout: p.response_idle_timeout, max_iterations: p.max_iterations, permission_grants: p.permission_grants, privacy: p.privacy, show_selection_action: p.show_terminal_selection_ai_action, web_search_ready: p.web_search.as_ref().is_some_and(|w| w.is_ready()), quick_messages: p.quick_messages }
+        Self {
+            permission_mode: p.global_permission_mode,
+            command_blocklist: p.command_blocklist,
+            command_timeout: p.command_timeout,
+            response_idle_timeout: p.response_idle_timeout,
+            max_iterations: p.max_iterations,
+            permission_grants: p.permission_grants,
+            privacy: p.privacy,
+            show_selection_action: p.show_terminal_selection_ai_action,
+            web_search_ready: p.web_search.as_ref().is_some_and(|w| w.is_ready()),
+            quick_messages: p.quick_messages,
+        }
     }
 }
 
 /// Cheap read for the runtime: no secrets are fetched and a missing / unreadable document yields the defaults.
 pub fn runtime_limits(db: &Database) -> RuntimeLimits {
-    let Ok(Some(json)) = read_row(db, PREFS_KEY) else { return RuntimeLimits::default() };
+    let Ok(Some(json)) = read_row(db, PREFS_KEY) else {
+        return RuntimeLimits::default();
+    };
     let mut prefs = serde_json::from_str::<AiPrefs>(&json).unwrap_or_default();
     prefs.normalize();
     prefs.into()
@@ -434,7 +496,12 @@ impl RequestOptions {
     pub fn for_provider(p: &ProviderConfig) -> Self {
         let a = p.advanced_params.clone().unwrap_or_default();
         Self {
-            headers: p.custom_headers.iter().filter(|(n, _)| !n.trim().is_empty()).map(|(n, v)| (n.trim().to_string(), v.clone())).collect(),
+            headers: p
+                .custom_headers
+                .iter()
+                .filter(|(n, _)| !n.trim().is_empty())
+                .map(|(n, v)| (n.trim().to_string(), v.clone()))
+                .collect(),
             skip_tls_verify: p.skip_tls_verify,
             max_tokens: a.max_tokens,
             temperature: a.temperature,
@@ -450,9 +517,15 @@ impl RequestOptions {
 /// Request options for the chat clients. Header values live in the keychain, so only those are fetched; a missing or
 /// unreadable document means no extras.
 pub fn request_options(db: &Database) -> RequestOptions {
-    let Ok(Some(json)) = read_row(db, PREFS_KEY) else { return RequestOptions::default() };
-    let Ok(prefs) = serde_json::from_str::<AiPrefs>(&json) else { return RequestOptions::default() };
-    let Some(mut p) = prefs.active_provider().filter(|p| p.enabled).cloned() else { return RequestOptions::default() };
+    let Ok(Some(json)) = read_row(db, PREFS_KEY) else {
+        return RequestOptions::default();
+    };
+    let Ok(prefs) = serde_json::from_str::<AiPrefs>(&json) else {
+        return RequestOptions::default();
+    };
+    let Some(mut p) = prefs.active_provider().filter(|p| p.enabled).cloned() else {
+        return RequestOptions::default();
+    };
     if p.has_secret_headers {
         if let Ok(h) = ops_core::keychain::get_api_key(&provider_headers_secret_name(&p.id)) {
             p.custom_headers = serde_json::from_str(&h).unwrap_or_default();

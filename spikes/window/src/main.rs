@@ -65,7 +65,11 @@ fn open_or_focus<V: 'static + Render>(
 
 fn window_options(cx: &App, w: f32, h: f32, title: &str) -> WindowOptions {
     WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(w), px(h)), cx))),
+        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+            None,
+            size(px(w), px(h)),
+            cx,
+        ))),
         window_min_size: Some(size(px(480.), px(320.))),
         titlebar: Some(TitlebarOptions {
             title: Some(title.to_string().into()),
@@ -96,45 +100,83 @@ impl Render for MainView {
             .flex()
             .flex_col()
             .bg(cx.theme().background)
-            .child(TitleBar::new().child(div().text_size(px(12.)).child("OpsBatch window spike (drag the title bar, double-click to zoom)")))
+            .child(
+                TitleBar::new().child(
+                    div()
+                        .text_size(px(12.))
+                        .child("OpsBatch window spike (drag the title bar, double-click to zoom)"),
+                ),
+            )
             .child(
                 div()
                     .flex_1()
                     .v_flex()
                     .gap_3()
                     .p_4()
-                    .child(format!("Shared counter (lives outside the window): {clicks}"))
+                    .child(format!(
+                        "Shared counter (lives outside the window): {clicks}"
+                    ))
                     .child(
                         div()
                             .h_flex()
                             .gap_2()
                             .child(Button::new("inc").primary().label("Increment").on_click({
                                 let shared = shared.clone();
-                                move |_, _, cx| shared.update(cx, |s, cx| { s.clicks += 1; cx.notify(); })
+                                move |_, _, cx| {
+                                    shared.update(cx, |s, cx| {
+                                        s.clicks += 1;
+                                        cx.notify();
+                                    })
+                                }
                             }))
-                            .child(Button::new("settings").label("Open Settings (singleton)").on_click(|_, _, cx| {
-                                let opts = window_options(cx, 640., 420., "Settings");
-                                open_or_focus("settings", opts, cx, |_, cx| cx.new(|_| LabelView("Settings window".into())));
-                            }))
+                            .child(
+                                Button::new("settings")
+                                    .label("Open Settings (singleton)")
+                                    .on_click(|_, _, cx| {
+                                        let opts = window_options(cx, 640., 420., "Settings");
+                                        open_or_focus("settings", opts, cx, |_, cx| {
+                                            cx.new(|_| LabelView("Settings window".into()))
+                                        });
+                                    }),
+                            )
                             .child(Button::new("ed-a").label("Editor A").on_click(|_, _, cx| {
                                 let opts = window_options(cx, 560., 380., "Editor A");
-                                open_or_focus("editor-a", opts, cx, |_, cx| cx.new(|_| LabelView("Editor A".into())));
+                                open_or_focus("editor-a", opts, cx, |_, cx| {
+                                    cx.new(|_| LabelView("Editor A".into()))
+                                });
                             }))
                             .child(Button::new("ed-b").label("Editor B").on_click(|_, _, cx| {
                                 let opts = window_options(cx, 560., 380., "Editor B");
-                                open_or_focus("editor-b", opts, cx, |_, cx| cx.new(|_| LabelView("Editor B".into())));
+                                open_or_focus("editor-b", opts, cx, |_, cx| {
+                                    cx.new(|_| LabelView("Editor B".into()))
+                                });
                             })),
                     )
                     .child(
-                        div().h_flex().gap_2()
-                            .child(Button::new("totray").label("Close to tray (drop window, keep app)").on_click(|_, window, _| window.remove_window()))
-                            .child(Button::new("hideapp").label("cx.hide() (hide whole app)").on_click(|_, _, cx| cx.hide())),
+                        div()
+                            .h_flex()
+                            .gap_2()
+                            .child(
+                                Button::new("totray")
+                                    .label("Close to tray (drop window, keep app)")
+                                    .on_click(|_, window, _| window.remove_window()),
+                            )
+                            .child(
+                                Button::new("hideapp")
+                                    .label("cx.hide() (hide whole app)")
+                                    .on_click(|_, _, cx| cx.hide()),
+                            ),
                     )
-                    .child(div().text_size(px(12.))                    .text_color(cx.theme().muted_foreground).child(format!(
-                        "window active: {} | controls: {:?}",
-                        window.is_window_active(),
-                        window.window_controls()
-                    ))),
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(cx.theme().muted_foreground)
+                            .child(format!(
+                                "window active: {} | controls: {:?}",
+                                window.is_window_active(),
+                                window.window_controls()
+                            )),
+                    ),
             )
     }
 }
@@ -175,7 +217,10 @@ fn main() {
         .run(|cx| {
             gpui_kit::init(cx);
             cx.on_action(|_: &Quit, cx| cx.quit());
-            cx.bind_keys([KeyBinding::new("cmd-q", Quit, None), KeyBinding::new("ctrl-q", Quit, None)]);
+            cx.bind_keys([
+                KeyBinding::new("cmd-q", Quit, None),
+                KeyBinding::new("ctrl-q", Quit, None),
+            ]);
             cx.set_global(WindowRegistry::default());
             let shared = cx.new(|_| Shared { clicks: 0 });
             cx.set_global(AppState(shared));
@@ -200,7 +245,9 @@ fn main() {
 
             // Poll tray events on the GPUI foreground executor.
             cx.spawn(async move |cx| loop {
-                cx.background_executor().timer(Duration::from_millis(100)).await;
+                cx.background_executor()
+                    .timer(Duration::from_millis(100))
+                    .await;
                 let _ = cx.update(|cx| {
                     while let Ok(ev) = MenuEvent::receiver().try_recv() {
                         let (show_id, quit_id) = {
@@ -214,8 +261,15 @@ fn main() {
                         }
                     }
                     while let Ok(ev) = TrayIconEvent::receiver().try_recv() {
-                        if let TrayIconEvent::Click { button: tray_icon::MouseButton::Left, button_state: tray_icon::MouseButtonState::Up, .. }
-                        | TrayIconEvent::DoubleClick { button: tray_icon::MouseButton::Left, .. } = ev
+                        if let TrayIconEvent::Click {
+                            button: tray_icon::MouseButton::Left,
+                            button_state: tray_icon::MouseButtonState::Up,
+                            ..
+                        }
+                        | TrayIconEvent::DoubleClick {
+                            button: tray_icon::MouseButton::Left,
+                            ..
+                        } = ev
                         {
                             open_main(cx);
                         }

@@ -150,7 +150,12 @@ impl HostFormValues {
         let rdp: Value = serde_json::from_str(&host.rdp_settings).unwrap_or(Value::Null);
         let proxy: Value = serde_json::from_str(&host.proxy_settings).unwrap_or(Value::Null);
         let rdp_str = |k: &str| rdp.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-        let rdp_num = |k: &str, d: u32| rdp.get(k).and_then(Value::as_f64).map(|v| (v as u32).to_string()).unwrap_or_else(|| d.to_string());
+        let rdp_num = |k: &str, d: u32| {
+            rdp.get(k)
+                .and_then(Value::as_f64)
+                .map(|v| (v as u32).to_string())
+                .unwrap_or_else(|| d.to_string())
+        };
         let rdp_bool = |k: &str, d: bool| rdp.get(k).and_then(Value::as_bool).unwrap_or(d);
         let os = if host.os == "vnc" || rdp.get("protocol").and_then(Value::as_str) == Some("vnc") {
             OsKind::Vnc
@@ -161,17 +166,27 @@ impl HostFormValues {
             Some("http") => ProxyKind::Http,
             _ => ProxyKind::Socks5,
         };
-        let proxy_on = proxy.get("enabled").and_then(Value::as_bool).unwrap_or(false);
+        let proxy_on = proxy
+            .get("enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         Self {
             name: host.name.clone(),
             ip: host.ip.clone(),
             port: host.port.to_string(),
-            auth: if host.auth_type == "key" { AuthKind::Key } else { AuthKind::Password },
+            auth: if host.auth_type == "key" {
+                AuthKind::Key
+            } else {
+                AuthKind::Password
+            },
             username: host.username.clone(),
             password: String::new(),
             private_key: String::new(),
             os,
-            group_id: host.group_id.clone().unwrap_or_else(|| DEFAULT_GROUP_ID.into()),
+            group_id: host
+                .group_id
+                .clone()
+                .unwrap_or_else(|| DEFAULT_GROUP_ID.into()),
             remark: host.remark.clone(),
             jump_chain: serde_json::from_str(&host.jump_chain).unwrap_or_default(),
             rdp_domain: rdp_str("domain"),
@@ -188,10 +203,26 @@ impl HostFormValues {
             vnc_shared: rdp_bool("vncShared", true),
             proxy_enabled: proxy_on,
             proxy_type: proxy_kind,
-            proxy_host: proxy.get("host").and_then(Value::as_str).unwrap_or("").to_string(),
-            proxy_port: proxy.get("port").and_then(Value::as_f64).map(|v| (v as u32).to_string()).unwrap_or_else(|| proxy_kind.default_port().to_string()),
-            proxy_username: proxy.get("username").and_then(Value::as_str).unwrap_or("").to_string(),
-            proxy_password: proxy.get("password").and_then(Value::as_str).unwrap_or("").to_string(),
+            proxy_host: proxy
+                .get("host")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            proxy_port: proxy
+                .get("port")
+                .and_then(Value::as_f64)
+                .map(|v| (v as u32).to_string())
+                .unwrap_or_else(|| proxy_kind.default_port().to_string()),
+            proxy_username: proxy
+                .get("username")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+            proxy_password: proxy
+                .get("password")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
         }
     }
 
@@ -203,7 +234,10 @@ impl HostFormValues {
         self.os = next;
         match next {
             OsKind::Windows => {
-                if port.is_none() || port == Some(DEFAULT_SSH_PORT) || port == Some(DEFAULT_VNC_PORT) {
+                if port.is_none()
+                    || port == Some(DEFAULT_SSH_PORT)
+                    || port == Some(DEFAULT_VNC_PORT)
+                {
                     self.port = DEFAULT_RDP_PORT.to_string();
                 }
                 if user.is_empty() || user == "root" || user == "vnc" {
@@ -221,7 +255,10 @@ impl HostFormValues {
                 false
             }
             OsKind::Vnc => {
-                if port.is_none() || port == Some(DEFAULT_SSH_PORT) || port == Some(DEFAULT_RDP_PORT) {
+                if port.is_none()
+                    || port == Some(DEFAULT_SSH_PORT)
+                    || port == Some(DEFAULT_RDP_PORT)
+                {
                     self.port = DEFAULT_VNC_PORT.to_string();
                 }
                 if user.is_empty() || user == "root" || user == "Administrator" {
@@ -239,7 +276,10 @@ impl HostFormValues {
                 true
             }
             OsKind::Linux => {
-                if port.is_none() || port == Some(DEFAULT_RDP_PORT) || port == Some(DEFAULT_VNC_PORT) {
+                if port.is_none()
+                    || port == Some(DEFAULT_RDP_PORT)
+                    || port == Some(DEFAULT_VNC_PORT)
+                {
                     self.port = DEFAULT_SSH_PORT.to_string();
                 }
                 if user.is_empty() || user == "Administrator" || user == "vnc" {
@@ -280,11 +320,17 @@ impl HostFormValues {
     }
 
     fn port_value(&self) -> i32 {
-        self.port.trim().parse::<u32>().ok().filter(|p| (1..=65535).contains(p)).map(|p| p as i32).unwrap_or(match self.os {
-            OsKind::Windows => DEFAULT_RDP_PORT as i32,
-            OsKind::Vnc => DEFAULT_VNC_PORT as i32,
-            OsKind::Linux => DEFAULT_SSH_PORT as i32,
-        })
+        self.port
+            .trim()
+            .parse::<u32>()
+            .ok()
+            .filter(|p| (1..=65535).contains(p))
+            .map(|p| p as i32)
+            .unwrap_or(match self.os {
+                OsKind::Windows => DEFAULT_RDP_PORT as i32,
+                OsKind::Vnc => DEFAULT_VNC_PORT as i32,
+                OsKind::Linux => DEFAULT_SSH_PORT as i32,
+            })
     }
 
     fn password_to_submit(&self) -> Option<String> {
@@ -309,7 +355,11 @@ impl HostFormValues {
     fn username_to_submit(&self) -> String {
         if self.os == OsKind::Vnc {
             let u = self.username.trim();
-            if u.is_empty() { "vnc".into() } else { u.to_string() }
+            if u.is_empty() {
+                "vnc".into()
+            } else {
+                u.to_string()
+            }
         } else {
             self.username.clone()
         }
@@ -324,7 +374,8 @@ impl HostFormValues {
     }
 
     fn group_to_submit(&self) -> Option<String> {
-        (!self.group_id.is_empty() && self.group_id != DEFAULT_GROUP_ID).then(|| self.group_id.clone())
+        (!self.group_id.is_empty() && self.group_id != DEFAULT_GROUP_ID)
+            .then(|| self.group_id.clone())
     }
 
     fn jump_chain_json(&self) -> String {
@@ -341,7 +392,10 @@ impl HostFormValues {
         match self.os {
             OsKind::Vnc => {
                 m.insert("protocol".into(), json!("vnc"));
-                m.insert("vncPort".into(), json!(normalize_port(&self.vnc_port, DEFAULT_VNC_PORT)));
+                m.insert(
+                    "vncPort".into(),
+                    json!(normalize_port(&self.vnc_port, DEFAULT_VNC_PORT)),
+                );
                 if !self.vnc_username.trim().is_empty() {
                     m.insert("vncUsername".into(), json!(self.vnc_username.trim()));
                 }
@@ -350,7 +404,14 @@ impl HostFormValues {
                 }
                 // The client picks the type from the server's offer (a username means ARD); the stored method keeps the
                 // Tauri build, which shares this database, doing the same.
-                m.insert("vncAuthMethod".into(), json!(if self.vnc_username.trim().is_empty() { "vnc" } else { "ard" }));
+                m.insert(
+                    "vncAuthMethod".into(),
+                    json!(if self.vnc_username.trim().is_empty() {
+                        "vnc"
+                    } else {
+                        "ard"
+                    }),
+                );
                 m.insert("vncViewOnly".into(), json!(self.vnc_view_only));
                 m.insert("vncShared".into(), json!(self.vnc_shared));
             }
@@ -359,10 +420,18 @@ impl HostFormValues {
                 if !self.rdp_domain.trim().is_empty() {
                     m.insert("domain".into(), json!(self.rdp_domain.trim()));
                 }
-                if let Some(w) = normalize_desktop(&self.rdp_width, MIN_RDP_DESKTOP_WIDTH, MAX_RDP_DESKTOP_WIDTH) {
+                if let Some(w) = normalize_desktop(
+                    &self.rdp_width,
+                    MIN_RDP_DESKTOP_WIDTH,
+                    MAX_RDP_DESKTOP_WIDTH,
+                ) {
                     m.insert("desktopWidth".into(), json!(w));
                 }
-                if let Some(h) = normalize_desktop(&self.rdp_height, MIN_RDP_DESKTOP_HEIGHT, MAX_RDP_DESKTOP_HEIGHT) {
+                if let Some(h) = normalize_desktop(
+                    &self.rdp_height,
+                    MIN_RDP_DESKTOP_HEIGHT,
+                    MAX_RDP_DESKTOP_HEIGHT,
+                ) {
                     m.insert("desktopHeight".into(), json!(h));
                 }
                 m.insert("enableClipboard".into(), json!(self.rdp_clipboard));
@@ -385,9 +454,22 @@ impl HostFormValues {
         }
         let mut m = Map::new();
         m.insert("enabled".into(), json!(true));
-        m.insert("type".into(), json!(if self.proxy_type == ProxyKind::Http { "http" } else { "socks5" }));
+        m.insert(
+            "type".into(),
+            json!(if self.proxy_type == ProxyKind::Http {
+                "http"
+            } else {
+                "socks5"
+            }),
+        );
         m.insert("host".into(), json!(host));
-        m.insert("port".into(), json!(normalize_port(&self.proxy_port, self.proxy_type.default_port())));
+        m.insert(
+            "port".into(),
+            json!(normalize_port(
+                &self.proxy_port,
+                self.proxy_type.default_port()
+            )),
+        );
         if !self.proxy_username.trim().is_empty() {
             m.insert("username".into(), json!(self.proxy_username.trim()));
         }
@@ -453,7 +535,9 @@ fn normalize_desktop(s: &str, min: u32, max: u32) -> Option<u32> {
 }
 
 fn normalize_port(s: &str, fallback: u32) -> u32 {
-    parse_number(s).map(|v| (v.round() as i64).clamp(1, 65535) as u32).unwrap_or(fallback)
+    parse_number(s)
+        .map(|v| (v.round() as i64).clamp(1, 65535) as u32)
+        .unwrap_or(fallback)
 }
 
 #[cfg(test)]
@@ -492,12 +576,20 @@ mod tests {
         f.rdp_height = "99999".into();
         f.rdp_disk_path = " /tmp/share ".into();
         let v = json_of(&f.rdp_settings_json());
-        assert_eq!((v["desktopWidth"].clone(), v["desktopHeight"].clone()), (json!(640), json!(2160)));
+        assert_eq!(
+            (v["desktopWidth"].clone(), v["desktopHeight"].clone()),
+            (json!(640), json!(2160))
+        );
         assert!(v.get("diskPath").is_none(), "ignored while mapDisk is off");
         f.rdp_map_disk = true;
-        assert_eq!(json_of(&f.rdp_settings_json())["diskPath"], json!("/tmp/share"));
+        assert_eq!(
+            json_of(&f.rdp_settings_json())["diskPath"],
+            json!("/tmp/share")
+        );
         f.rdp_width = "abc".into();
-        assert!(json_of(&f.rdp_settings_json()).get("desktopWidth").is_none());
+        assert!(json_of(&f.rdp_settings_json())
+            .get("desktopWidth")
+            .is_none());
     }
 
     #[test]
@@ -509,14 +601,27 @@ mod tests {
         let v = json_of(&f.rdp_settings_json());
         assert_eq!(v["protocol"], json!("vnc"));
         assert_eq!(v["vncPort"], json!(5900));
-        assert_eq!((v["vncUsername"].clone(), v["vncPassword"].clone()), (json!("me"), json!("pw")));
-        assert_eq!((v["vncAuthMethod"].clone(), v["vncViewOnly"].clone(), v["vncShared"].clone()), (json!("ard"), json!(false), json!(true)));
+        assert_eq!(
+            (v["vncUsername"].clone(), v["vncPassword"].clone()),
+            (json!("me"), json!("pw"))
+        );
+        assert_eq!(
+            (
+                v["vncAuthMethod"].clone(),
+                v["vncViewOnly"].clone(),
+                v["vncShared"].clone()
+            ),
+            (json!("ard"), json!(false), json!(true))
+        );
         f.vnc_port = "99999".into();
         assert_eq!(json_of(&f.rdp_settings_json())["vncPort"], json!(65535));
         // no username: password-only VNC auth
         f.vnc_username = "  ".into();
         let v = json_of(&f.rdp_settings_json());
-        assert_eq!((v.get("vncUsername"), v["vncAuthMethod"].clone()), (None, json!("vnc")));
+        assert_eq!(
+            (v.get("vncUsername"), v["vncAuthMethod"].clone()),
+            (None, json!("vnc"))
+        );
     }
 
     #[test]
@@ -565,7 +670,14 @@ mod tests {
         let host = host_from_new(&nh);
         let back = HostFormValues::from_host(&host);
         assert!(back.proxy_enabled);
-        assert_eq!((back.proxy_type, back.proxy_host.as_str(), back.proxy_port.as_str()), (ProxyKind::Http, "proxy.internal", "8080"));
+        assert_eq!(
+            (
+                back.proxy_type,
+                back.proxy_host.as_str(),
+                back.proxy_port.as_str()
+            ),
+            (ProxyKind::Http, "proxy.internal", "8080")
+        );
     }
 
     fn host_from_new(n: &NewHost) -> Host {
@@ -598,7 +710,10 @@ mod tests {
         f.private_key = "KEY".into();
         f.jump_chain = vec!["h1".into()];
         assert!(!f.change_os(OsKind::Windows));
-        assert_eq!((f.port.as_str(), f.username.as_str(), f.auth), ("3389", "Administrator", AuthKind::Password));
+        assert_eq!(
+            (f.port.as_str(), f.username.as_str(), f.auth),
+            ("3389", "Administrator", AuthKind::Password)
+        );
         assert!(f.private_key.is_empty() && f.jump_chain.is_empty());
 
         assert!(f.change_os(OsKind::Vnc), "VNC returns to the basic tab");
@@ -652,25 +767,46 @@ mod tests {
         f.password = "pw".into();
         f.jump_chain = vec!["j1".into()];
         let n = f.to_new_host();
-        assert_eq!((n.auth_type.as_deref(), n.password.as_deref(), n.group_id.as_deref(), n.os.as_deref()), (Some("password"), Some("pw"), Some("g1"), Some("linux")));
+        assert_eq!(
+            (
+                n.auth_type.as_deref(),
+                n.password.as_deref(),
+                n.group_id.as_deref(),
+                n.os.as_deref()
+            ),
+            (Some("password"), Some("pw"), Some("g1"), Some("linux"))
+        );
         assert_eq!(n.jump_chain.as_deref(), Some("[\"j1\"]"));
 
         f.auth = AuthKind::Key;
         f.private_key = "-----KEY-----".into();
         f.group_id = DEFAULT_GROUP_ID.into();
         let n = f.to_new_host();
-        assert_eq!((n.auth_type.as_deref(), n.private_key.as_deref(), n.group_id), (Some("key"), Some("-----KEY-----"), None));
+        assert_eq!(
+            (n.auth_type.as_deref(), n.private_key.as_deref(), n.group_id),
+            (Some("key"), Some("-----KEY-----"), None)
+        );
 
         f.change_os(OsKind::Windows);
         f.password = "winpw".into();
         let n = f.to_new_host();
-        assert_eq!((n.auth_type.as_deref(), n.private_key, n.jump_chain.as_deref()), (Some("password"), None, Some("[]")));
+        assert_eq!(
+            (
+                n.auth_type.as_deref(),
+                n.private_key,
+                n.jump_chain.as_deref()
+            ),
+            (Some("password"), None, Some("[]"))
+        );
 
         f.change_os(OsKind::Vnc);
         f.username = "".into();
         f.password = "ignored".into();
         let n = f.to_new_host();
-        assert_eq!((n.username.as_deref(), n.password, n.port), (Some("vnc"), None, Some(5900)));
+        assert_eq!(
+            (n.username.as_deref(), n.password, n.port),
+            (Some("vnc"), None, Some(5900))
+        );
     }
 
     #[test]
@@ -685,9 +821,19 @@ mod tests {
         host.password = Some(SECRET_PLACEHOLDER.into());
         host.tags = "[\"x\"]".into();
         let edit = HostFormValues::from_host(&host);
-        assert_eq!((edit.name.as_str(), edit.remark.as_str(), edit.password.as_str()), ("db", "主库", ""));
+        assert_eq!(
+            (
+                edit.name.as_str(),
+                edit.remark.as_str(),
+                edit.password.as_str()
+            ),
+            ("db", "主库", "")
+        );
         let upd = edit.to_update_host("h9", &host.tags);
-        assert_eq!((upd.id.as_str(), upd.password, upd.tags.as_str()), ("h9", None, "[\"x\"]"));
+        assert_eq!(
+            (upd.id.as_str(), upd.password, upd.tags.as_str()),
+            ("h9", None, "[\"x\"]")
+        );
     }
 
     #[test]

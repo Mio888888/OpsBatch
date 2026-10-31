@@ -73,7 +73,10 @@ pub fn language_from_locale(locale: &str) -> Language {
 
 pub fn resolve_system_language() -> Language {
     let locales = sys_locale::get_locales().collect::<Vec<_>>();
-    if locales.iter().any(|l| language_from_locale(l) == Language::ZhCn) {
+    if locales
+        .iter()
+        .any(|l| language_from_locale(l) == Language::ZhCn)
+    {
         Language::ZhCn
     } else {
         Language::EnUs
@@ -200,14 +203,21 @@ mod tests {
         assert!(zh.len() > 1000, "{}", zh.len());
         let only_zh: Vec<_> = zh.keys().filter(|k| !en.contains_key(*k)).collect();
         let only_en: Vec<_> = en.keys().filter(|k| !zh.contains_key(*k)).collect();
-        assert!(only_zh.is_empty() && only_en.is_empty(), "zh-only: {only_zh:?} en-only: {only_en:?}");
+        assert!(
+            only_zh.is_empty() && only_en.is_empty(),
+            "zh-only: {only_zh:?} en-only: {only_en:?}"
+        );
     }
 
     #[test]
     fn placeholders_match_between_languages() {
         let zh = dictionary(Language::ZhCn);
         let en = dictionary(Language::EnUs);
-        let bad: Vec<_> = zh.iter().filter(|(k, v)| placeholders(v) != placeholders(&en[*k])).map(|(k, _)| k).collect();
+        let bad: Vec<_> = zh
+            .iter()
+            .filter(|(k, v)| placeholders(v) != placeholders(&en[*k]))
+            .map(|(k, _)| k)
+            .collect();
         assert!(bad.is_empty(), "placeholder mismatch: {bad:?}");
     }
 
@@ -216,8 +226,14 @@ mod tests {
         let exported_zh: HashMap<String, String> = serde_json::from_str(ZH_CN).unwrap();
         let extra_zh: HashMap<String, String> = serde_json::from_str(ZH_CN_EXTRA).unwrap();
         let extra_en: HashMap<String, String> = serde_json::from_str(EN_US_EXTRA).unwrap();
-        assert!(extra_zh.keys().all(|k| !exported_zh.contains_key(k)), "extra keys must be new");
-        assert_eq!(extra_zh.keys().collect::<BTreeSet<_>>(), extra_en.keys().collect::<BTreeSet<_>>());
+        assert!(
+            extra_zh.keys().all(|k| !exported_zh.contains_key(k)),
+            "extra keys must be new"
+        );
+        assert_eq!(
+            extra_zh.keys().collect::<BTreeSet<_>>(),
+            extra_en.keys().collect::<BTreeSet<_>>()
+        );
         assert_eq!(template(Language::EnUs, "tray.quit"), "Quit");
         assert_eq!(template(Language::ZhCn, "tray.show"), "显示主窗口");
     }
@@ -231,11 +247,17 @@ mod tests {
 
     #[test]
     fn interpolation_replaces_named_values_and_keeps_unknown() {
-        assert_eq!(translate(Language::EnUs, "common.totalItems", &[("count", &5)]), "5 items");
+        assert_eq!(
+            translate(Language::EnUs, "common.totalItems", &[("count", &5)]),
+            "5 items"
+        );
         assert_eq!(interpolate("a {x} b {y}", &[("x", &1)]), "a 1 b {y}");
         assert_eq!(interpolate("brace { alone", &[("x", &1)]), "brace { alone");
         assert_eq!(interpolate("{x}{x}", &[("x", &"ab")]), "abab");
-        assert_eq!(interpolate("json {\"a\": 1}", &[("a", &9)]), "json {\"a\": 1}");
+        assert_eq!(
+            interpolate("json {\"a\": 1}", &[("a", &9)]),
+            "json {\"a\": 1}"
+        );
     }
 
     #[test]

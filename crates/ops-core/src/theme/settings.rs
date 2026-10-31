@@ -2,10 +2,16 @@
 
 use std::collections::HashMap;
 
-use super::ui::{current_platform_default_ui_scale, normalize_ui_scale, ui_text_palette, UiTextPalette};
-use super::{accent_by_id, dark_themes, light_themes, theme_by_id, Accent, ThemeDef, ThemeTone, ACCENTS, DEFAULT_ACCENT_ID, DEFAULT_THEME_ID, THEMES};
+use super::ui::{
+    current_platform_default_ui_scale, normalize_ui_scale, ui_text_palette, UiTextPalette,
+};
+use super::{
+    accent_by_id, dark_themes, light_themes, theme_by_id, Accent, ThemeDef, ThemeTone, ACCENTS,
+    DEFAULT_ACCENT_ID, DEFAULT_THEME_ID, THEMES,
+};
 
-pub const LEGACY_TERMINAL_FONT_FAMILY: &str = "\"Cascadia Code\", Menlo, Monaco, \"Courier New\", monospace";
+pub const LEGACY_TERMINAL_FONT_FAMILY: &str =
+    "\"Cascadia Code\", Menlo, Monaco, \"Courier New\", monospace";
 pub const DEFAULT_TERMINAL_FONT_FAMILY: &str =
     "\"Cascadia Code\", Consolas, \"Lucida Console\", Menlo, Monaco, \"Courier New\", monospace";
 
@@ -96,13 +102,25 @@ impl ThemeSettings {
                 Some("manual") => ThemeSettingsMode::Manual,
                 _ => d.theme_mode,
             },
-            terminal_theme_id: get("terminalThemeId").map(str::to_string).unwrap_or(d.terminal_theme_id),
-            terminal_theme_tone: get("terminalThemeTone").and_then(ThemeTone::parse).unwrap_or(d.terminal_theme_tone),
-            accent_color_id: get("accentColorId").map(str::to_string).unwrap_or(d.accent_color_id),
-            terminal_font_size: get("terminalFontSize").and_then(|s| s.parse().ok()).unwrap_or(d.terminal_font_size),
+            terminal_theme_id: get("terminalThemeId")
+                .map(str::to_string)
+                .unwrap_or(d.terminal_theme_id),
+            terminal_theme_tone: get("terminalThemeTone")
+                .and_then(ThemeTone::parse)
+                .unwrap_or(d.terminal_theme_tone),
+            accent_color_id: get("accentColorId")
+                .map(str::to_string)
+                .unwrap_or(d.accent_color_id),
+            terminal_font_size: get("terminalFontSize")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(d.terminal_font_size),
             terminal_font_family: normalize_terminal_font_family(get("terminalFontFamily")),
-            terminal_scrollback: get("terminalScrollback").and_then(|s| s.parse().ok()).unwrap_or(d.terminal_scrollback),
-            ui_scale: get("uiScale").map(|s| normalize_ui_scale(s, d.ui_scale)).unwrap_or(d.ui_scale),
+            terminal_scrollback: get("terminalScrollback")
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(d.terminal_scrollback),
+            ui_scale: get("uiScale")
+                .map(|s| normalize_ui_scale(s, d.ui_scale))
+                .unwrap_or(d.ui_scale),
             reduce_motion: get("reduceMotion") == Some("true"),
         }
     }
@@ -110,14 +128,37 @@ impl ThemeSettings {
     /// Keys/values written by `save_general_settings` (all stringly typed, as before).
     pub fn to_map(&self) -> HashMap<String, String> {
         let mut m = HashMap::new();
-        m.insert("themeMode".into(), if self.theme_mode == ThemeSettingsMode::System { "system" } else { "manual" }.into());
+        m.insert(
+            "themeMode".into(),
+            if self.theme_mode == ThemeSettingsMode::System {
+                "system"
+            } else {
+                "manual"
+            }
+            .into(),
+        );
         m.insert("terminalThemeId".into(), self.terminal_theme_id.clone());
-        m.insert("terminalThemeTone".into(), self.terminal_theme_tone.as_str().into());
+        m.insert(
+            "terminalThemeTone".into(),
+            self.terminal_theme_tone.as_str().into(),
+        );
         m.insert("accentColorId".into(), self.accent_color_id.clone());
-        m.insert("terminalFontSize".into(), self.terminal_font_size.to_string());
-        m.insert("terminalFontFamily".into(), self.terminal_font_family.clone());
-        m.insert("terminalScrollback".into(), self.terminal_scrollback.to_string());
-        m.insert("uiScale".into(), normalize_ui_scale(&self.ui_scale.to_string(), self.ui_scale).to_string());
+        m.insert(
+            "terminalFontSize".into(),
+            self.terminal_font_size.to_string(),
+        );
+        m.insert(
+            "terminalFontFamily".into(),
+            self.terminal_font_family.clone(),
+        );
+        m.insert(
+            "terminalScrollback".into(),
+            self.terminal_scrollback.to_string(),
+        );
+        m.insert(
+            "uiScale".into(),
+            normalize_ui_scale(&self.ui_scale.to_string(), self.ui_scale).to_string(),
+        );
         m.insert("reduceMotion".into(), self.reduce_motion.to_string());
         m
     }
@@ -142,15 +183,27 @@ impl ThemeSettings {
         let accent = accent_by_id(&self.accent_color_id).unwrap_or(&ACCENTS[0]);
         let (is_dark, theme) = match self.theme_mode {
             ThemeSettingsMode::System => {
-                let tone = if os_prefers_dark { ThemeTone::Dark } else { ThemeTone::Light };
-                (os_prefers_dark, resolve_theme_for_tone(tone, &self.terminal_theme_id))
+                let tone = if os_prefers_dark {
+                    ThemeTone::Dark
+                } else {
+                    ThemeTone::Light
+                };
+                (
+                    os_prefers_dark,
+                    resolve_theme_for_tone(tone, &self.terminal_theme_id),
+                )
             }
             ThemeSettingsMode::Manual => (
                 self.terminal_theme_tone == ThemeTone::Dark,
                 theme_by_id(&self.terminal_theme_id).unwrap_or(&THEMES[0]),
             ),
         };
-        ResolvedTheme { theme, accent, is_dark, text: ui_text_palette(is_dark) }
+        ResolvedTheme {
+            theme,
+            accent,
+            is_dark,
+            text: ui_text_palette(is_dark),
+        }
     }
 }
 
@@ -214,19 +267,42 @@ mod tests {
 
     #[test]
     fn font_family_normalisation() {
-        assert_eq!(normalize_terminal_font_family(None), DEFAULT_TERMINAL_FONT_FAMILY);
-        assert_eq!(normalize_terminal_font_family(Some("  ")), DEFAULT_TERMINAL_FONT_FAMILY);
-        assert_eq!(normalize_terminal_font_family(Some(LEGACY_TERMINAL_FONT_FAMILY)), DEFAULT_TERMINAL_FONT_FAMILY);
-        assert_eq!(normalize_terminal_font_family(Some("\"Consolai\", monospace")), "\"Consolas\", monospace");
-        assert_eq!(normalize_terminal_font_family(Some("consolai, 'Fira Code'")), "\"Consolas\", 'Fira Code'");
+        assert_eq!(
+            normalize_terminal_font_family(None),
+            DEFAULT_TERMINAL_FONT_FAMILY
+        );
+        assert_eq!(
+            normalize_terminal_font_family(Some("  ")),
+            DEFAULT_TERMINAL_FONT_FAMILY
+        );
+        assert_eq!(
+            normalize_terminal_font_family(Some(LEGACY_TERMINAL_FONT_FAMILY)),
+            DEFAULT_TERMINAL_FONT_FAMILY
+        );
+        assert_eq!(
+            normalize_terminal_font_family(Some("\"Consolai\", monospace")),
+            "\"Consolas\", monospace"
+        );
+        assert_eq!(
+            normalize_terminal_font_family(Some("consolai, 'Fira Code'")),
+            "\"Consolas\", 'Fira Code'"
+        );
         assert_eq!(normalize_terminal_font_family(Some("Menlo")), "Menlo");
     }
 
     #[test]
     fn resolution_manual_vs_system() {
-        let mut s = ThemeSettings { terminal_theme_id: "github-light".into(), terminal_theme_tone: ThemeTone::Light, ..Default::default() };
+        let mut s = ThemeSettings {
+            terminal_theme_id: "github-light".into(),
+            terminal_theme_tone: ThemeTone::Light,
+            ..Default::default()
+        };
         let r = s.resolve(true);
-        assert_eq!((r.theme.id, r.is_dark), ("github-light", false), "manual ignores the OS");
+        assert_eq!(
+            (r.theme.id, r.is_dark),
+            ("github-light", false),
+            "manual ignores the OS"
+        );
         s.theme_mode = ThemeSettingsMode::System;
         // OS dark + stored light theme -> first dark theme
         let r = s.resolve(true);
@@ -235,7 +311,11 @@ mod tests {
         let r = s.resolve(false);
         assert_eq!((r.theme.id, r.is_dark), ("github-light", false));
         // unknown ids fall back
-        let s = ThemeSettings { terminal_theme_id: "nope".into(), accent_color_id: "nope".into(), ..Default::default() };
+        let s = ThemeSettings {
+            terminal_theme_id: "nope".into(),
+            accent_color_id: "nope".into(),
+            ..Default::default()
+        };
         let r = s.resolve(false);
         assert_eq!((r.theme.id, r.accent.id), (THEMES[0].id, "blue"));
     }
@@ -252,8 +332,15 @@ mod tests {
     #[tokio::test]
     async fn persists_through_general_settings() {
         let core = Core::open_temp("theme-settings").unwrap();
-        assert_eq!(ThemeSettings::load(&core.db).await, ThemeSettings::default());
-        let s = ThemeSettings { accent_color_id: "rose".into(), ui_scale: 110, ..Default::default() };
+        assert_eq!(
+            ThemeSettings::load(&core.db).await,
+            ThemeSettings::default()
+        );
+        let s = ThemeSettings {
+            accent_color_id: "rose".into(),
+            ui_scale: 110,
+            ..Default::default()
+        };
         s.save(&core.db).await.unwrap();
         assert_eq!(ThemeSettings::load(&core.db).await, s);
     }

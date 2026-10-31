@@ -29,20 +29,36 @@ pub fn format_memory(used_mb: Option<u64>, total_mb: Option<u64>) -> String {
 
 /// Interfaces of a snapshot without duplicates (falls back to the single `network`).
 pub fn snapshot_networks(s: &HostMonitorSnapshot) -> Vec<&HostMonitorNetwork> {
-    let source: Vec<&HostMonitorNetwork> = if !s.networks.is_empty() { s.networks.iter().collect() } else { s.network.iter().collect() };
+    let source: Vec<&HostMonitorNetwork> = if !s.networks.is_empty() {
+        s.networks.iter().collect()
+    } else {
+        s.network.iter().collect()
+    };
     let mut seen = std::collections::HashSet::new();
-    source.into_iter().filter(|n| !n.interface.is_empty() && seen.insert(n.interface.clone())).collect()
+    source
+        .into_iter()
+        .filter(|n| !n.interface.is_empty() && seen.insert(n.interface.clone()))
+        .collect()
 }
 
-fn network_by_interface<'a>(s: Option<&'a HostMonitorSnapshot>, name: &str) -> Option<&'a HostMonitorNetwork> {
+fn network_by_interface<'a>(
+    s: Option<&'a HostMonitorSnapshot>,
+    name: &str,
+) -> Option<&'a HostMonitorNetwork> {
     if name.is_empty() {
         return None;
     }
-    snapshot_networks(s?).into_iter().find(|n| n.interface == name)
+    snapshot_networks(s?)
+        .into_iter()
+        .find(|n| n.interface == name)
 }
 
 /// Bytes per second received/sent between two samples of the same interface.
-pub fn network_rate(current: Option<&HostMonitorNetwork>, previous: Option<&HostMonitorNetwork>, elapsed_s: f64) -> (u64, u64) {
+pub fn network_rate(
+    current: Option<&HostMonitorNetwork>,
+    previous: Option<&HostMonitorNetwork>,
+    elapsed_s: f64,
+) -> (u64, u64) {
     match (current, previous) {
         (Some(c), Some(p)) if c.interface == p.interface && elapsed_s > 0.0 => (
             (c.rx_bytes.saturating_sub(p.rx_bytes) as f64 / elapsed_s).round() as u64,
@@ -95,7 +111,14 @@ impl MonitorModel {
     }
 
     pub fn interfaces(&self) -> Vec<String> {
-        self.latest().map(|s| snapshot_networks(s).into_iter().map(|n| n.interface.clone()).collect()).unwrap_or_default()
+        self.latest()
+            .map(|s| {
+                snapshot_networks(s)
+                    .into_iter()
+                    .map(|n| n.interface.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     pub fn select_interface(&mut self, name: &str) {
@@ -107,7 +130,11 @@ impl MonitorModel {
     /// The selected interface if it still exists, else the first one ("" when there is none).
     pub fn active_interface(&self) -> String {
         let all = self.interfaces();
-        all.iter().find(|i| **i == self.selected_interface).or_else(|| all.first()).cloned().unwrap_or_default()
+        all.iter()
+            .find(|i| **i == self.selected_interface)
+            .or_else(|| all.first())
+            .cloned()
+            .unwrap_or_default()
     }
 
     fn elapsed_s(a: &HostMonitorSnapshot, b: &HostMonitorSnapshot) -> f64 {
@@ -116,9 +143,15 @@ impl MonitorModel {
 
     /// (rx, tx) bytes/s of the active interface between the last two samples.
     pub fn current_rate(&self) -> (u64, u64) {
-        let (Some(cur), Some(prev)) = (self.latest(), self.previous()) else { return (0, 0) };
+        let (Some(cur), Some(prev)) = (self.latest(), self.previous()) else {
+            return (0, 0);
+        };
         let name = self.active_interface();
-        network_rate(network_by_interface(Some(cur), &name), network_by_interface(Some(prev), &name), Self::elapsed_s(prev, cur))
+        network_rate(
+            network_by_interface(Some(cur), &name),
+            network_by_interface(Some(prev), &name),
+            Self::elapsed_s(prev, cur),
+        )
     }
 
     pub fn cpu_percent(&self) -> Option<f64> {
@@ -127,9 +160,16 @@ impl MonitorModel {
             return clamp_percent(p);
         }
         let prev = self.previous()?;
-        let (cu, ct, pu, pt) = (cur.cpu_time_used?, cur.cpu_time_total?, prev.cpu_time_used?, prev.cpu_time_total?);
+        let (cu, ct, pu, pt) = (
+            cur.cpu_time_used?,
+            cur.cpu_time_total?,
+            prev.cpu_time_used?,
+            prev.cpu_time_total?,
+        );
         let d_total = ct as f64 - pt as f64;
-        (d_total > 0.0).then(|| clamp_percent((cu as f64 - pu as f64) / d_total * 100.0)).flatten()
+        (d_total > 0.0)
+            .then(|| clamp_percent((cu as f64 - pu as f64) / d_total * 100.0))
+            .flatten()
     }
 
     pub fn memory_percent(&self) -> Option<f64> {
@@ -154,20 +194,37 @@ impl MonitorModel {
         }
         let name = self.active_interface();
         let (cur, prev) = (&self.history[index], &self.history[index - 1]);
-        network_rate(network_by_interface(Some(cur), &name), network_by_interface(Some(prev), &name), Self::elapsed_s(prev, cur))
+        network_rate(
+            network_by_interface(Some(cur), &name),
+            network_by_interface(Some(prev), &name),
+            Self::elapsed_s(prev, cur),
+        )
     }
 
     /// Bar heights (percent of the chart) of the receive rate for every sample.
     pub fn network_bars(&self) -> Vec<f32> {
-        let max = (0..self.history.len()).map(|i| {
-            let (rx, tx) = self.rate_at(i);
-            rx.max(tx)
-        }).max().unwrap_or(0).max(1);
-        (0..self.history.len()).map(|i| (self.rate_at(i).0 as f32 / max as f32 * 100.0).clamp(6.0, 100.0)).collect()
+        let max = (0..self.history.len())
+            .map(|i| {
+                let (rx, tx) = self.rate_at(i);
+                rx.max(tx)
+            })
+            .max()
+            .unwrap_or(0)
+            .max(1);
+        (0..self.history.len())
+            .map(|i| (self.rate_at(i).0 as f32 / max as f32 * 100.0).clamp(6.0, 100.0))
+            .collect()
     }
 
     pub fn ping_bars(&self) -> Vec<f32> {
-        self.history.iter().map(|s| s.ping_ms.map(|p| (p as f32 * 3.0).clamp(3.0, 100.0)).unwrap_or(3.0)).collect()
+        self.history
+            .iter()
+            .map(|s| {
+                s.ping_ms
+                    .map(|p| (p as f32 * 3.0).clamp(3.0, 100.0))
+                    .unwrap_or(3.0)
+            })
+            .collect()
     }
 }
 
@@ -176,7 +233,11 @@ mod tests {
     use super::*;
 
     fn net(name: &str, rx: u64, tx: u64) -> HostMonitorNetwork {
-        HostMonitorNetwork { interface: name.into(), rx_bytes: rx, tx_bytes: tx }
+        HostMonitorNetwork {
+            interface: name.into(),
+            rx_bytes: rx,
+            tx_bytes: tx,
+        }
     }
 
     fn snap(ts: u64, networks: Vec<HostMonitorNetwork>) -> HostMonitorSnapshot {
@@ -205,7 +266,10 @@ mod tests {
     fn formatting_matches_the_original() {
         assert_eq!(format_bytes_per_second(512), "512B");
         assert_eq!(format_bytes_per_second(1536), "2K");
-        assert_eq!(format_bytes_per_second(5 * 1024 * 1024 + 300 * 1024), "5.3M");
+        assert_eq!(
+            format_bytes_per_second(5 * 1024 * 1024 + 300 * 1024),
+            "5.3M"
+        );
         assert_eq!(format_memory(Some(512), Some(2048)), "0.5G/2.0G");
         assert_eq!(format_memory(None, Some(2048)), "--");
         assert_eq!(clamp_percent(140.0), Some(100.0));
@@ -214,8 +278,22 @@ mod tests {
 
     #[test]
     fn networks_are_deduplicated_and_fall_back_to_single_network() {
-        let mut s = snap(0, vec![net("eth0", 1, 1), net("eth0", 2, 2), net("", 3, 3), net("wlan0", 4, 4)]);
-        assert_eq!(snapshot_networks(&s).iter().map(|n| n.interface.as_str()).collect::<Vec<_>>(), ["eth0", "wlan0"]);
+        let mut s = snap(
+            0,
+            vec![
+                net("eth0", 1, 1),
+                net("eth0", 2, 2),
+                net("", 3, 3),
+                net("wlan0", 4, 4),
+            ],
+        );
+        assert_eq!(
+            snapshot_networks(&s)
+                .iter()
+                .map(|n| n.interface.as_str())
+                .collect::<Vec<_>>(),
+            ["eth0", "wlan0"]
+        );
         s.networks.clear();
         s.network = Some(net("ens3", 1, 1));
         assert_eq!(snapshot_networks(&s).len(), 1);
@@ -275,7 +353,11 @@ mod tests {
         s.swap_total_mb = Some(1024);
         m.push(s);
         assert_eq!(m.memory_percent(), Some(25.0));
-        assert_eq!(m.swap_percent(), None, "zero swap use shows no bar, like the original");
+        assert_eq!(
+            m.swap_percent(),
+            None,
+            "zero swap use shows no bar, like the original"
+        );
     }
 
     #[test]

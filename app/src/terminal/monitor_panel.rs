@@ -3,14 +3,16 @@
 
 use std::time::Duration;
 
+use crate::scale::px;
 use gpui_kit::assets::IconName;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Disableable as _, Icon, Sizable as _};
 use gpui_kit::*;
-use crate::scale::px;
 use ops_i18n::t;
-use ops_terminal::monitor::{is_host_monitor_idle, should_poll_host_monitor, HostMonitorRefreshState};
+use ops_terminal::monitor::{
+    is_host_monitor_idle, should_poll_host_monitor, HostMonitorRefreshState,
+};
 
 use super::monitor_model::{format_bytes_per_second, format_memory, MonitorModel};
 
@@ -27,7 +29,14 @@ pub struct HostMonitorPanel {
 
 impl HostMonitorPanel {
     pub fn new(host_id: String, host_ip: String) -> Self {
-        Self { host_id, host_ip, model: MonitorModel::new(), error: None, realtime: false, _poll: None }
+        Self {
+            host_id,
+            host_ip,
+            model: MonitorModel::new(),
+            error: None,
+            realtime: false,
+            _poll: None,
+        }
     }
 
     pub fn host_id(&self) -> &str {
@@ -49,7 +58,10 @@ impl HostMonitorPanel {
             return;
         }
         self.realtime = true;
-        let state = HostMonitorRefreshState { realtime_enabled: true, has_snapshot: false };
+        let state = HostMonitorRefreshState {
+            realtime_enabled: true,
+            has_snapshot: false,
+        };
         if !should_poll_host_monitor(state) {
             return;
         }
@@ -57,9 +69,12 @@ impl HostMonitorPanel {
         let host_id = self.host_id.clone();
         self._poll = Some(cx.spawn(async move |this, cx| loop {
             let (c, id) = (ctx.clone(), host_id.clone());
-            let result = ops_core::rt::run(async move { ops_ssh::hosts::get_host_monitor_snapshot(c.core.clone(), c.registry.clone(), id).await })
-                .await
-                .and_then(|r| r);
+            let result = ops_core::rt::run(async move {
+                ops_ssh::hosts::get_host_monitor_snapshot(c.core.clone(), c.registry.clone(), id)
+                    .await
+            })
+            .await
+            .and_then(|r| r);
             let alive = this
                 .update(cx, |this, cx| {
                     match result {
@@ -81,7 +96,10 @@ impl HostMonitorPanel {
     }
 
     fn state(&self) -> HostMonitorRefreshState {
-        HostMonitorRefreshState { realtime_enabled: self.realtime, has_snapshot: !self.model.is_empty() }
+        HostMonitorRefreshState {
+            realtime_enabled: self.realtime,
+            has_snapshot: !self.model.is_empty(),
+        }
     }
 }
 
@@ -90,20 +108,41 @@ fn line(text: impl Into<SharedString>, color: Hsla) -> Div {
 }
 
 fn section(cx: &App) -> Div {
-    div().px_1p5().py_1().border_t_1().border_color(cx.theme().border).flex().flex_col().gap_0p5()
+    div()
+        .px_1p5()
+        .py_1()
+        .border_t_1()
+        .border_color(cx.theme().border)
+        .flex()
+        .flex_col()
+        .gap_0p5()
 }
 
 fn skeleton_line(width: Pixels, cx: &App) -> Div {
-    div().h(px(8.)).w(width).rounded(px(3.)).bg(cx.theme().border)
+    div()
+        .h(px(8.))
+        .w(width)
+        .rounded(px(3.))
+        .bg(cx.theme().border)
 }
 
-fn resource_bar(label: SharedString, value: Option<f64>, detail: String, cx: &App) -> impl IntoElement {
+fn resource_bar(
+    label: SharedString,
+    value: Option<f64>,
+    detail: String,
+    cx: &App,
+) -> impl IntoElement {
     let theme = cx.theme();
     h_flex()
         .gap_1()
         .items_center()
         .my(px(3.))
-        .child(div().w(px(36.)).text_color(theme.muted_foreground).child(label))
+        .child(
+            div()
+                .w(px(36.))
+                .text_color(theme.muted_foreground)
+                .child(label),
+        )
         .child(
             div()
                 .relative()
@@ -113,8 +152,26 @@ fn resource_bar(label: SharedString, value: Option<f64>, detail: String, cx: &Ap
                 .bg(theme.border)
                 .border_1()
                 .border_color(theme.border)
-                .child(div().absolute().top_0().left_0().bottom_0().w(relative((value.unwrap_or(0.) / 100.) as f32)).bg(Hsla { a: 0.35, ..theme.success }))
-                .child(div().relative().px_1().text_size(px(10.)).text_right().child(detail)),
+                .child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .bottom_0()
+                        .w(relative((value.unwrap_or(0.) / 100.) as f32))
+                        .bg(Hsla {
+                            a: 0.35,
+                            ..theme.success
+                        }),
+                )
+                .child(
+                    div()
+                        .relative()
+                        .px_1()
+                        .text_size(px(10.))
+                        .text_right()
+                        .child(detail),
+                ),
         )
 }
 
@@ -128,12 +185,30 @@ fn bars(heights: Vec<f32>, color: Hsla, cx: &App) -> impl IntoElement {
         .px_1p5()
         .py_1()
         .rounded(px(4.))
-        .bg(Hsla { a: 0.3, ..theme.border })
-        .children(heights.into_iter().map(move |h| div().flex_1().min_w(px(3.)).h(relative(h / 100.)).min_h(px(2.)).bg(color).rounded_t(px(1.))))
+        .bg(Hsla {
+            a: 0.3,
+            ..theme.border
+        })
+        .children(heights.into_iter().map(move |h| {
+            div()
+                .flex_1()
+                .min_w(px(3.))
+                .h(relative(h / 100.))
+                .min_h(px(2.))
+                .bg(color)
+                .rounded_t(px(1.))
+        }))
 }
 
 fn chart_note(text: SharedString, cx: &App) -> Div {
-    div().h(px(68.)).flex().items_center().justify_center().text_size(px(10.)).text_color(cx.theme().muted_foreground).child(text)
+    div()
+        .h(px(68.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size(px(10.))
+        .text_color(cx.theme().muted_foreground)
+        .child(text)
 }
 
 impl Render for HostMonitorPanel {
@@ -152,7 +227,14 @@ impl Render for HostMonitorPanel {
             .px_1p5()
             .py_1()
             .text_color(theme.primary)
-            .child(div().min_w_0().truncate().child(format!("IP {}", if self.host_ip.is_empty() { "--" } else { &self.host_ip })))
+            .child(div().min_w_0().truncate().child(format!(
+                "IP {}",
+                if self.host_ip.is_empty() {
+                    "--"
+                } else {
+                    &self.host_ip
+                }
+            )))
             .child({
                 let ip = self.host_ip.clone();
                 Button::new("monitor-copy-ip")
@@ -160,12 +242,17 @@ impl Render for HostMonitorPanel {
                     .xsmall()
                     .label(t!("terminal.copy"))
                     .disabled(self.host_ip.is_empty())
-                    .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(ip.clone())))
+                    .on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(ip.clone()))
+                    })
             });
 
         let system = {
             let mut s = section(cx).child(
-                div().text_color(theme.primary).font_weight(FontWeight::SEMIBOLD).child(format!("─ {} ─", t!("terminal.systemInfo"))),
+                div()
+                    .text_color(theme.primary)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(format!("─ {} ─", t!("terminal.systemInfo"))),
             );
             if idle {
                 s = s.child(
@@ -181,14 +268,54 @@ impl Render for HostMonitorPanel {
                         .child(line(t!("terminal.monitorIdleHint"), theme.muted_foreground)),
                 );
             } else if loading {
-                s = s.child(v_flex().gap_1().child(skeleton_line(px(160.), cx)).child(skeleton_line(px(110.), cx)).child(skeleton_line(px(220.), cx)).child(skeleton_line(px(90.), cx)));
+                s = s.child(
+                    v_flex()
+                        .gap_1()
+                        .child(skeleton_line(px(160.), cx))
+                        .child(skeleton_line(px(110.), cx))
+                        .child(skeleton_line(px(220.), cx))
+                        .child(skeleton_line(px(90.), cx)),
+                );
             } else {
                 let g = |o: &Option<String>| o.clone().unwrap_or_else(|| "--".into());
                 s = s
-                    .child(line(t!("terminal.uptime", value = snapshot.as_ref().map(|x| g(&x.uptime)).unwrap_or_else(|| "--".into())), theme.foreground))
-                    .child(line(t!("terminal.loadAverage", value = snapshot.as_ref().map(|x| g(&x.load_average)).unwrap_or_else(|| "--".into())), theme.foreground))
-                    .child(line(snapshot.as_ref().and_then(|x| x.os.clone()).unwrap_or_else(|| t!("common.noData")), theme.muted_foreground))
-                    .child(line(t!("terminal.kernel", value = snapshot.as_ref().map(|x| g(&x.kernel)).unwrap_or_else(|| "--".into())), theme.muted_foreground));
+                    .child(line(
+                        t!(
+                            "terminal.uptime",
+                            value = snapshot
+                                .as_ref()
+                                .map(|x| g(&x.uptime))
+                                .unwrap_or_else(|| "--".into())
+                        ),
+                        theme.foreground,
+                    ))
+                    .child(line(
+                        t!(
+                            "terminal.loadAverage",
+                            value = snapshot
+                                .as_ref()
+                                .map(|x| g(&x.load_average))
+                                .unwrap_or_else(|| "--".into())
+                        ),
+                        theme.foreground,
+                    ))
+                    .child(line(
+                        snapshot
+                            .as_ref()
+                            .and_then(|x| x.os.clone())
+                            .unwrap_or_else(|| t!("common.noData")),
+                        theme.muted_foreground,
+                    ))
+                    .child(line(
+                        t!(
+                            "terminal.kernel",
+                            value = snapshot
+                                .as_ref()
+                                .map(|x| g(&x.kernel))
+                                .unwrap_or_else(|| "--".into())
+                        ),
+                        theme.muted_foreground,
+                    ));
             }
             if let Some(e) = &self.error {
                 s = s.child(line(e.clone(), theme.danger));
@@ -204,30 +331,49 @@ impl Render for HostMonitorPanel {
                 s = s.children((0..3).map(|_| skeleton_line(px(240.), cx).my_1()));
             } else {
                 let cpu = self.model.cpu_percent();
-                let mem = snapshot.as_ref().map(|x| format_memory(x.memory_used_mb, x.memory_total_mb)).unwrap_or_else(|| "--".into());
-                let swap = snapshot.as_ref().map(|x| format_memory(x.swap_used_mb, x.swap_total_mb)).unwrap_or_else(|| "--".into());
+                let mem = snapshot
+                    .as_ref()
+                    .map(|x| format_memory(x.memory_used_mb, x.memory_total_mb))
+                    .unwrap_or_else(|| "--".into());
+                let swap = snapshot
+                    .as_ref()
+                    .map(|x| format_memory(x.swap_used_mb, x.swap_total_mb))
+                    .unwrap_or_else(|| "--".into());
                 s = s
-                    .child(resource_bar("CPU".into(), cpu, cpu.map(|c| format!("{:.0}%", c)).unwrap_or_else(|| "--".into()), cx))
-                    .child(resource_bar(t!("terminal.memory").into(), self.model.memory_percent(), mem, cx))
-                    .child(resource_bar(t!("terminal.swap").into(), self.model.swap_percent(), swap, cx));
+                    .child(resource_bar(
+                        "CPU".into(),
+                        cpu,
+                        cpu.map(|c| format!("{:.0}%", c))
+                            .unwrap_or_else(|| "--".into()),
+                        cx,
+                    ))
+                    .child(resource_bar(
+                        t!("terminal.memory").into(),
+                        self.model.memory_percent(),
+                        mem,
+                        cx,
+                    ))
+                    .child(resource_bar(
+                        t!("terminal.swap").into(),
+                        self.model.swap_percent(),
+                        swap,
+                        cx,
+                    ));
             }
             s
         };
 
         let processes = {
             let mut s = section(cx).child(
-                div()
-                    .grid()
-                    .grid_cols(1)
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .text_color(theme.primary)
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .child(div().w(px(56.)).child(t!("terminal.memory")))
-                            .child(div().w(px(40.)).child("CPU"))
-                            .child(div().flex_1().child(t!("terminal.processCommand"))),
-                    ),
+                div().grid().grid_cols(1).child(
+                    h_flex()
+                        .gap_1()
+                        .text_color(theme.primary)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(div().w(px(56.)).child(t!("terminal.memory")))
+                        .child(div().w(px(40.)).child("CPU"))
+                        .child(div().flex_1().child(t!("terminal.processCommand"))),
+                ),
             );
             if idle {
                 s = s.child(line(not_started.clone(), theme.muted_foreground));
@@ -260,7 +406,10 @@ impl Render for HostMonitorPanel {
             .px_1p5()
             .py_0p5()
             .rounded(px(4.))
-            .bg(Hsla { a: 0.07, ..theme.primary })
+            .bg(Hsla {
+                a: 0.07,
+                ..theme.primary
+            })
             .text_color(theme.primary)
             .font_weight(FontWeight::SEMIBOLD)
             .text_size(px(10.))
@@ -282,13 +431,17 @@ impl Render for HostMonitorPanel {
                         for name in items.iter().cloned() {
                             let weak = weak.clone();
                             let n = name.clone();
-                            menu = menu.item(PopupMenuItem::new(name.clone()).checked(name == active).on_click(move |_, _, cx| {
-                                let n = n.clone();
-                                let _ = weak.update(cx, |this, cx| {
-                                    this.model.select_interface(&n);
-                                    cx.notify();
-                                });
-                            }));
+                            menu = menu.item(
+                                PopupMenuItem::new(name.clone())
+                                    .checked(name == active)
+                                    .on_click(move |_, _, cx| {
+                                        let n = n.clone();
+                                        let _ = weak.update(cx, |this, cx| {
+                                            this.model.select_interface(&n);
+                                            cx.notify();
+                                        });
+                                    }),
+                            );
                         }
                         menu
                     })
@@ -299,9 +452,25 @@ impl Render for HostMonitorPanel {
             s = s.child(if idle {
                 chart_note(not_started.clone().into(), cx).into_any_element()
             } else if loading {
-                bars((0..18).map(|i| (18 + (i % 7) * 9) as f32).collect(), Hsla { a: 0.4, ..theme.border }, cx).into_any_element()
+                bars(
+                    (0..18).map(|i| (18 + (i % 7) * 9) as f32).collect(),
+                    Hsla {
+                        a: 0.4,
+                        ..theme.border
+                    },
+                    cx,
+                )
+                .into_any_element()
             } else if self.model.len() > 1 {
-                bars(self.model.network_bars(), Hsla { a: 0.56, ..theme.primary }, cx).into_any_element()
+                bars(
+                    self.model.network_bars(),
+                    Hsla {
+                        a: 0.56,
+                        ..theme.primary
+                    },
+                    cx,
+                )
+                .into_any_element()
             } else {
                 chart_note(t!("terminal.collecting").into(), cx).into_any_element()
             });
@@ -309,13 +478,20 @@ impl Render for HostMonitorPanel {
         };
 
         let ping = {
-            let label = snapshot.as_ref().and_then(|x| x.ping_ms).map(|p| format!("PING {p:.1}ms")).unwrap_or_else(|| "PING --".into());
+            let label = snapshot
+                .as_ref()
+                .and_then(|x| x.ping_ms)
+                .map(|p| format!("PING {p:.1}ms"))
+                .unwrap_or_else(|| "PING --".into());
             let mut s = section(cx).child(
                 div()
                     .px_1p5()
                     .py_0p5()
                     .rounded(px(4.))
-                    .bg(Hsla { a: 0.07, ..theme.primary })
+                    .bg(Hsla {
+                        a: 0.07,
+                        ..theme.primary
+                    })
                     .text_color(theme.primary)
                     .font_weight(FontWeight::SEMIBOLD)
                     .text_size(px(10.))
@@ -324,9 +500,25 @@ impl Render for HostMonitorPanel {
             s = s.child(if idle {
                 chart_note(not_started.clone().into(), cx).into_any_element()
             } else if loading {
-                bars((0..18).map(|i| (14 + (i % 5) * 10) as f32).collect(), Hsla { a: 0.4, ..theme.border }, cx).into_any_element()
+                bars(
+                    (0..18).map(|i| (14 + (i % 5) * 10) as f32).collect(),
+                    Hsla {
+                        a: 0.4,
+                        ..theme.border
+                    },
+                    cx,
+                )
+                .into_any_element()
             } else if !self.model.is_empty() {
-                bars(self.model.ping_bars(), Hsla { a: 0.64, ..theme.primary }, cx).into_any_element()
+                bars(
+                    self.model.ping_bars(),
+                    Hsla {
+                        a: 0.64,
+                        ..theme.primary
+                    },
+                    cx,
+                )
+                .into_any_element()
             } else {
                 chart_note(t!("terminal.collecting").into(), cx).into_any_element()
             });
@@ -358,7 +550,12 @@ impl Render for HostMonitorPanel {
                         .id(("monitor-fs", i))
                         .gap_2()
                         .child(div().flex_1().min_w_0().truncate().child(f.path.clone()))
-                        .child(div().w(px(90.)).truncate().child(format!("{}/{}", f.available, f.total)))
+                        .child(
+                            div()
+                                .w(px(90.))
+                                .truncate()
+                                .child(format!("{}/{}", f.available, f.total)),
+                        )
                 }));
             }
             s

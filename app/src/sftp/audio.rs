@@ -16,7 +16,11 @@ pub struct AudioInfo {
 /// Decode the header only: does rodio understand this file, and how long is it?
 pub fn probe(bytes: &[u8]) -> Result<AudioInfo, String> {
     let decoder = Decoder::new(Cursor::new(bytes.to_vec())).map_err(|e| e.to_string())?;
-    Ok(AudioInfo { duration: decoder.total_duration(), sample_rate: u32::from(decoder.sample_rate().get()), channels: decoder.channels().get() })
+    Ok(AudioInfo {
+        duration: decoder.total_duration(),
+        sample_rate: u32::from(decoder.sample_rate().get()),
+        channels: decoder.channels().get(),
+    })
 }
 
 pub struct AudioPlayback {
@@ -35,7 +39,11 @@ impl AudioPlayback {
         sink.log_on_drop(false);
         let player = Player::connect_new(sink.mixer());
         player.append(decoder);
-        Ok(Self { _sink: sink, player, info })
+        Ok(Self {
+            _sink: sink,
+            player,
+            info,
+        })
     }
 
     pub fn info(&self) -> &AudioInfo {
@@ -83,7 +91,8 @@ mod tests {
         let n = (rate as f32 * secs) as usize;
         let mut data = Vec::new();
         for i in 0..n {
-            let v = ((i as f32 * 440.0 * std::f32::consts::TAU / rate as f32).sin() * 8000.0) as i16;
+            let v =
+                ((i as f32 * 440.0 * std::f32::consts::TAU / rate as f32).sin() * 8000.0) as i16;
             data.extend_from_slice(&v.to_le_bytes());
         }
         let mut w = Vec::new();

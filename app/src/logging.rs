@@ -33,7 +33,10 @@ pub struct BridgeLogger {
 
 impl BridgeLogger {
     pub fn init(default_filter: &str) {
-        let inner = env_logger::Builder::from_env(env_logger::Env::default().default_filter_or(default_filter)).build();
+        let inner = env_logger::Builder::from_env(
+            env_logger::Env::default().default_filter_or(default_filter),
+        )
+        .build();
         let max = inner.filter();
         if log::set_boxed_logger(Box::new(Self { inner })).is_ok() {
             // warnings/errors must pass the level gate even if RUST_LOG is stricter than the bridge needs
@@ -44,7 +47,8 @@ impl BridgeLogger {
 
 impl log::Log for BridgeLogger {
     fn enabled(&self, metadata: &log::Metadata) -> bool {
-        self.inner.enabled(metadata) || (metadata.level() <= log::Level::Warn && is_own_target(metadata.target()))
+        self.inner.enabled(metadata)
+            || (metadata.level() <= log::Level::Warn && is_own_target(metadata.target()))
     }
 
     fn log(&self, record: &log::Record) {
@@ -54,7 +58,12 @@ impl log::Log for BridgeLogger {
         if record.level() <= log::Level::Warn && is_own_target(record.target()) {
             if let Some(core) = CORE.get() {
                 if !IN_BRIDGE.with(|f| f.replace(true)) {
-                    ops_core::log::emit_frontend_log(core, level_name(record.level()), record.target(), &record.args().to_string());
+                    ops_core::log::emit_frontend_log(
+                        core,
+                        level_name(record.level()),
+                        record.target(),
+                        &record.args().to_string(),
+                    );
                     IN_BRIDGE.with(|f| f.set(false));
                 }
             }
@@ -67,8 +76,15 @@ impl log::Log for BridgeLogger {
 }
 
 /// One line for a panic: message plus `file:line:col`.
-pub fn panic_message(payload: &(dyn std::any::Any + Send), location: Option<&std::panic::Location>) -> String {
-    let text = payload.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| payload.downcast_ref::<String>().cloned()).unwrap_or_else(|| "panic".to_string());
+pub fn panic_message(
+    payload: &(dyn std::any::Any + Send),
+    location: Option<&std::panic::Location>,
+) -> String {
+    let text = payload
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "panic".to_string());
     match location {
         Some(l) => format!("{text} ({}:{}:{})", l.file(), l.line(), l.column()),
         None => text,

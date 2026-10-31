@@ -321,12 +321,23 @@ pub fn decode_frame_payload(message: &[u8]) -> Result<DecodedFrame<'_>, String> 
         return Err("RDP frame header is incomplete".into());
     }
     let u16_at = |i: usize| u16::from_le_bytes([message[i], message[i + 1]]);
-    let rgba_len = u32::from_le_bytes([message[12], message[13], message[14], message[15]]) as usize;
+    let rgba_len =
+        u32::from_le_bytes([message[12], message[13], message[14], message[15]]) as usize;
     let (region_width, region_height) = (u16_at(8), u16_at(10));
-    if rgba_len != usize::from(region_width) * usize::from(region_height) * 4 || message.len() != FRAME_HEADER_LEN + rgba_len {
+    if rgba_len != usize::from(region_width) * usize::from(region_height) * 4
+        || message.len() != FRAME_HEADER_LEN + rgba_len
+    {
         return Err("RDP frame payload size is invalid".into());
     }
-    Ok(DecodedFrame { width: u16_at(0), height: u16_at(2), x: u16_at(4), y: u16_at(6), region_width, region_height, rgba: &message[FRAME_HEADER_LEN..] })
+    Ok(DecodedFrame {
+        width: u16_at(0),
+        height: u16_at(2),
+        x: u16_at(4),
+        y: u16_at(6),
+        region_width,
+        region_height,
+        rgba: &message[FRAME_HEADER_LEN..],
+    })
 }
 
 const BASE_FRAME_PAINT_BUDGET: usize = 8;
@@ -371,7 +382,10 @@ mod decode_tests {
         let body: Vec<u8> = (0..16).collect();
         let msg = message(100, 50, 3, 4, 2, 2, &body);
         let f = decode_frame_payload(&msg).unwrap();
-        assert_eq!((f.width, f.height, f.x, f.y, f.region_width, f.region_height), (100, 50, 3, 4, 2, 2));
+        assert_eq!(
+            (f.width, f.height, f.x, f.y, f.region_width, f.region_height),
+            (100, 50, 3, 4, 2, 2)
+        );
         assert_eq!(f.rgba, &body[..]);
         assert!(decode_frame_payload(&message(100, 50, 0, 0, 2, 2, &body[..12])).is_err());
         assert!(decode_frame_payload(&[0; 8]).is_err());
@@ -382,7 +396,10 @@ mod decode_tests {
 
     #[test]
     fn paint_budget_and_batches() {
-        assert_eq!([0, 3, 8, 9, 24, 25, 40, 100].map(frame_paint_budget), [0, 3, 8, 8, 8, 13, 20, 24]);
+        assert_eq!(
+            [0, 3, 8, 9, 24, 25, 40, 100].map(frame_paint_budget),
+            [0, 3, 8, 8, 8, 13, 20, 24]
+        );
         let mut q: std::collections::VecDeque<i32> = (1..=5).collect();
         assert_eq!(drain_frame_batch(&mut q, 2), vec![1, 2]);
         assert_eq!(q, [3, 4, 5]);

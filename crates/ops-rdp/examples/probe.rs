@@ -11,7 +11,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use ops_rdp::{RdpConnectRequest, RdpInputEvent, RdpManager, RdpMetricsPayload, RdpStatusPayload, RdpTransportMode};
+use ops_rdp::{
+    RdpConnectRequest, RdpInputEvent, RdpManager, RdpMetricsPayload, RdpStatusPayload,
+    RdpTransportMode,
+};
 
 #[derive(Default)]
 struct Stats {
@@ -27,7 +30,10 @@ struct Stats {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let (data_dir, host_id) = (args.get(1).expect("data dir"), args.get(2).expect("host id"));
+    let (data_dir, host_id) = (
+        args.get(1).expect("data dir"),
+        args.get(2).expect("host id"),
+    );
     let seconds: u64 = args.get(3).and_then(|s| s.parse().ok()).unwrap_or(40);
     let mode = match args.get(4).map(String::as_str) {
         Some("bitmap") => RdpTransportMode::LegacyBitmap,
@@ -69,7 +75,10 @@ fn main() {
                     let now = Instant::now();
                     let mut s = s2.lock().unwrap();
                     if frame.len() >= 16 {
-                        let (rw, rh) = (u16::from_le_bytes([frame[8], frame[9]]) as u64, u16::from_le_bytes([frame[10], frame[11]]) as u64);
+                        let (rw, rh) = (
+                            u16::from_le_bytes([frame[8], frame[9]]) as u64,
+                            u16::from_le_bytes([frame[10], frame[11]]) as u64,
+                        );
                         s.pixels += rw * rh;
                     }
                     s.frames += 1;
@@ -103,7 +112,14 @@ fn main() {
         }
     });
 
-    let request = RdpConnectRequest { host_id: host_id.clone(), session_id: Some(session_id.clone()), width: None, height: None, domain: None, transport_mode: Some(mode) };
+    let request = RdpConnectRequest {
+        host_id: host_id.clone(),
+        session_id: Some(session_id.clone()),
+        width: None,
+        height: None,
+        domain: None,
+        transport_mode: Some(mode),
+    };
     println!("connecting ({mode:?}) ...");
     let t0 = Instant::now();
     let result = ops_core::rt::block_on(manager.connect_host(&core, request, frame_tx));
@@ -111,14 +127,25 @@ fn main() {
     let response = match result {
         Ok(r) => r,
         Err(e) => {
-            println!("CONNECT FAILED after {:.1}s: {e}", connect_time.as_secs_f32());
+            println!(
+                "CONNECT FAILED after {:.1}s: {e}",
+                connect_time.as_secs_f32()
+            );
             while let Ok(ev) = status_rx.try_recv() {
-                println!("status: {:?}", ev.parse::<RdpStatusPayload>().map(|s| (s.state, s.message)));
+                println!(
+                    "status: {:?}",
+                    ev.parse::<RdpStatusPayload>().map(|s| (s.state, s.message))
+                );
             }
             return;
         }
     };
-    println!("connected in {:.1}s ({}x{})", connect_time.as_secs_f32(), response.width, response.height);
+    println!(
+        "connected in {:.1}s ({}x{})",
+        connect_time.as_secs_f32(),
+        response.width,
+        response.height
+    );
 
     // light interaction: sweeps of the mouse and Start menu open / close cycles
     let send = |event: RdpInputEvent| {
@@ -131,32 +158,71 @@ fn main() {
         let t = begin.elapsed().as_secs_f32();
         if t > 4.0 {
             let phase = (t * 1.5).sin() * 0.5 + 0.5;
-            send(RdpInputEvent::MouseMove { x: (phase * (w as f32 - 40.0)) as u16 + 20, y: ((1.0 - phase) * (h as f32 - 80.0)) as u16 + 20 });
+            send(RdpInputEvent::MouseMove {
+                x: (phase * (w as f32 - 40.0)) as u16 + 20,
+                y: ((1.0 - phase) * (h as f32 - 80.0)) as u16 + 20,
+            });
         }
         if t > 4.0 && tick % 80 == 0 {
             // Start menu: Win down/up, later Esc
-            send(RdpInputEvent::KeyScancode { code: 0x5B, extended: true, down: true });
-            send(RdpInputEvent::KeyScancode { code: 0x5B, extended: true, down: false });
+            send(RdpInputEvent::KeyScancode {
+                code: 0x5B,
+                extended: true,
+                down: true,
+            });
+            send(RdpInputEvent::KeyScancode {
+                code: 0x5B,
+                extended: true,
+                down: false,
+            });
         }
         if t > 4.0 && tick % 80 == 40 {
-            send(RdpInputEvent::KeyScancode { code: 0x01, extended: false, down: true });
-            send(RdpInputEvent::KeyScancode { code: 0x01, extended: false, down: false });
+            send(RdpInputEvent::KeyScancode {
+                code: 0x01,
+                extended: false,
+                down: true,
+            });
+            send(RdpInputEvent::KeyScancode {
+                code: 0x01,
+                extended: false,
+                down: false,
+            });
         }
         tick += 1;
         while let Ok(ev) = status_rx.try_recv() {
             if let Some(s) = ev.parse::<RdpStatusPayload>() {
-                println!("[{:>5.1}s] status {} {}", begin.elapsed().as_secs_f32(), s.state, s.message.unwrap_or_default());
+                println!(
+                    "[{:>5.1}s] status {} {}",
+                    begin.elapsed().as_secs_f32(),
+                    s.state,
+                    s.message.unwrap_or_default()
+                );
             }
         }
         while let Ok(ev) = metrics_rx.try_recv() {
             if let Some(m) = ev.parse::<RdpMetricsPayload>() {
-                println!("[{:>5.1}s] server {}/s sent {}/s coalesced {}/s {:.2} MB/s", begin.elapsed().as_secs_f32(), m.server_updates_per_second, m.sent_frames_per_second, m.coalesced_updates_per_second, m.sent_mbytes_per_second);
+                println!(
+                    "[{:>5.1}s] server {}/s sent {}/s coalesced {}/s {:.2} MB/s",
+                    begin.elapsed().as_secs_f32(),
+                    m.server_updates_per_second,
+                    m.sent_frames_per_second,
+                    m.coalesced_updates_per_second,
+                    m.sent_mbytes_per_second
+                );
             }
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    send(RdpInputEvent::KeyScancode { code: 0x01, extended: false, down: true });
-    send(RdpInputEvent::KeyScancode { code: 0x01, extended: false, down: false });
+    send(RdpInputEvent::KeyScancode {
+        code: 0x01,
+        extended: false,
+        down: true,
+    });
+    send(RdpInputEvent::KeyScancode {
+        code: 0x01,
+        extended: false,
+        down: false,
+    });
     let alive = manager.has_session(&session_id);
     let _ = manager.disconnect(&session_id);
     stop.store(true, Ordering::Relaxed);
@@ -171,8 +237,19 @@ fn main() {
     println!("--- summary ({mode:?}) ---");
     println!("session still alive at the end: {alive}");
     println!("first frame after {:?}", s.first_frame);
-    println!("frames {} | {:.1} MB | {:.1} Mpixels", s.frames, s.bytes as f64 / 1e6, s.pixels as f64 / 1e6);
+    println!(
+        "frames {} | {:.1} MB | {:.1} Mpixels",
+        s.frames,
+        s.bytes as f64 / 1e6,
+        s.pixels as f64 / 1e6
+    );
     println!("frames/s per second: {:?}", s.per_second);
-    println!("active seconds {} | avg fps while active {:.1} | max gap {:?} | gaps > 250ms: {}", active.len(), active.iter().sum::<u32>() as f32 / active.len().max(1) as f32, s.max_gap, s.gaps_over_250ms);
+    println!(
+        "active seconds {} | avg fps while active {:.1} | max gap {:?} | gaps > 250ms: {}",
+        active.len(),
+        active.iter().sum::<u32>() as f32 / active.len().max(1) as f32,
+        s.max_gap,
+        s.gaps_over_250ms
+    );
     let _ = std::fs::remove_dir_all(&tmp);
 }

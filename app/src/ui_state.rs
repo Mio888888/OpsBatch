@@ -14,5 +14,9 @@ impl Global for UiState {}
 
 pub fn init(cx: &mut App) {
     let assets = cx.new(|_| crate::stores::assets::AssetsStore::new());
-    cx.set_global(UiState { mode: Mode::Terminal, asset_panel_visible: false, assets });
+    cx.set_global(UiState {
+        mode: Mode::Terminal,
+        asset_panel_visible: false,
+        assets,
+    });
 }

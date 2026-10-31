@@ -84,7 +84,10 @@ pub fn ard_server_decrypt(
     encrypted: &[u8],
 ) -> (String, String) {
     let p = BigUint::from_bytes_be(prime);
-    let shared = pad_be(&BigUint::from_bytes_be(client_public).modpow(private, &p), prime.len());
+    let shared = pad_be(
+        &BigUint::from_bytes_be(client_public).modpow(private, &p),
+        prime.len(),
+    );
     let aes_key: [u8; 16] = Md5::digest(&shared).into();
     let cipher = aes::Aes128::new(GenericArray::from_slice(&aes_key));
     let mut buf = encrypted.to_vec();
@@ -118,7 +121,10 @@ mod tests {
     #[test]
     fn vnc_password_longer_than_8_is_truncated() {
         let ch = [3u8; 16];
-        assert_eq!(vnc_auth_response("12345678", &ch), vnc_auth_response("12345678XYZ", &ch));
+        assert_eq!(
+            vnc_auth_response("12345678", &ch),
+            vnc_auth_response("12345678XYZ", &ch)
+        );
     }
 
     #[test]
@@ -129,8 +135,15 @@ mod tests {
         );
         let g = 2u16;
         let server_priv = BigUint::from_bytes_be(&[0x42; 128]);
-        let server_pub = pad_be(&BigUint::from(g).modpow(&server_priv, &BigUint::from_bytes_be(&prime)), 128);
-        let hello = ArdServerHello { generator: g, prime: prime.clone(), server_public: server_pub };
+        let server_pub = pad_be(
+            &BigUint::from(g).modpow(&server_priv, &BigUint::from_bytes_be(&prime)),
+            128,
+        );
+        let hello = ArdServerHello {
+            generator: g,
+            prime: prime.clone(),
+            server_public: server_pub,
+        };
         let (enc, client_pub) = ard_client_response(&hello, "alice", "p@ssw0rd").unwrap();
         assert_eq!(enc.len(), 128);
         assert_eq!(client_pub.len(), 128);
@@ -139,6 +152,9 @@ mod tests {
     }
 
     fn hex(s: &str) -> Vec<u8> {
-        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
     }
 }

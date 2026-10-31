@@ -68,7 +68,10 @@ impl McpActivity {
 
     /// Records waiting for a decision, oldest first.
     pub fn pending(&self) -> Vec<&Record> {
-        self.records.iter().filter(|r| r.status == Status::Pending).collect()
+        self.records
+            .iter()
+            .filter(|r| r.status == Status::Pending)
+            .collect()
     }
 
     /// The server the latest call worked on.
@@ -81,12 +84,26 @@ impl McpActivity {
     }
 
     /// Starts a record (running) and returns its id.
-    pub fn begin(&mut self, tool: &str, summary: String, target: Option<Target>, cx: &mut Context<Self>) -> String {
+    pub fn begin(
+        &mut self,
+        tool: &str,
+        summary: String,
+        target: Option<Target>,
+        cx: &mut Context<Self>,
+    ) -> String {
         let id = uuid::Uuid::new_v4().to_string();
         if target.is_some() {
             self.target = target.clone();
         }
-        self.records.push(Record { id: id.clone(), time: chrono::Local::now().format("%H:%M:%S").to_string(), tool: tool.to_string(), summary, target, status: Status::Running, detail: String::new() });
+        self.records.push(Record {
+            id: id.clone(),
+            time: chrono::Local::now().format("%H:%M:%S").to_string(),
+            tool: tool.to_string(),
+            summary,
+            target,
+            status: Status::Running,
+            detail: String::new(),
+        });
         if self.records.len() > MAX_RECORDS {
             let over = self.records.len() - MAX_RECORDS;
             // only finished records are dropped
@@ -122,7 +139,11 @@ impl McpActivity {
     }
 
     /// Marks the record as waiting and returns the receiver of the user's decision.
-    pub fn request_approval(&mut self, id: &str, cx: &mut Context<Self>) -> oneshot::Receiver<Decision> {
+    pub fn request_approval(
+        &mut self,
+        id: &str,
+        cx: &mut Context<Self>,
+    ) -> oneshot::Receiver<Decision> {
         let (tx, rx) = oneshot::channel();
         if let Some(r) = self.records.iter_mut().find(|r| r.id == id) {
             r.status = Status::Pending;
@@ -135,7 +156,9 @@ impl McpActivity {
 
     /// The user's answer; the waiting call continues (an unknown or already answered id does nothing).
     pub fn decide(&mut self, id: &str, decision: Decision, cx: &mut Context<Self>) -> bool {
-        let Some(tx) = self.approvals.remove(id) else { return false };
+        let Some(tx) = self.approvals.remove(id) else {
+            return false;
+        };
         if let Some(r) = self.records.iter_mut().find(|r| r.id == id) {
             r.status = Status::Running;
         }
@@ -145,7 +168,8 @@ impl McpActivity {
     }
 
     pub fn clear_finished(&mut self, cx: &mut Context<Self>) {
-        self.records.retain(|r| matches!(r.status, Status::Running | Status::Pending));
+        self.records
+            .retain(|r| matches!(r.status, Status::Running | Status::Pending));
         cx.notify();
     }
 }

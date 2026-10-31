@@ -32,7 +32,6 @@ impl VncAuthMethod {
     }
 }
 
-
 impl<'de> Deserialize<'de> for VncAuthMethod {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
@@ -86,4 +85,3 @@ pub fn vnc_port_from_settings(value: &str, _fallback: i32) -> u16 {
         .filter(|port| *port > 0)
         .unwrap_or(DEFAULT_VNC_PORT)
 }
-

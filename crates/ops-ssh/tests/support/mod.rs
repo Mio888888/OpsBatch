@@ -27,15 +27,25 @@ impl Drop for Sshd {
 }
 
 fn free_port() -> u16 {
-    std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port()
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
 }
 
 impl Sshd {
     pub fn start() -> Option<Self> {
-        let sshd = ["/usr/sbin/sshd", "/usr/bin/sshd"].into_iter().find(|p| std::path::Path::new(p).exists())?;
-        let sftp = ["/usr/libexec/sftp-server", "/usr/lib/openssh/sftp-server", "/usr/lib/ssh/sftp-server"]
+        let sshd = ["/usr/sbin/sshd", "/usr/bin/sshd"]
             .into_iter()
             .find(|p| std::path::Path::new(p).exists())?;
+        let sftp = [
+            "/usr/libexec/sftp-server",
+            "/usr/lib/openssh/sftp-server",
+            "/usr/lib/ssh/sftp-server",
+        ]
+        .into_iter()
+        .find(|p| std::path::Path::new(p).exists())?;
         let dir = std::env::temp_dir().join(format!("opsbatch-sshd-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).ok()?;
         for name in ["key", "hostkey"] {
@@ -67,7 +77,12 @@ impl Sshd {
             .spawn()
             .ok()?;
         let private_key = std::fs::read_to_string(dir.join("key")).ok()?;
-        let this = Self { dir, port, private_key, child };
+        let this = Self {
+            dir,
+            port,
+            private_key,
+            child,
+        };
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
             if std::net::TcpStream::connect(("127.0.0.1", port)).is_ok() {
@@ -118,5 +133,10 @@ pub async fn fixture(label: &str) -> Option<Fixture> {
     .expect("add_host");
     let work = std::env::temp_dir().join(format!("opsbatch-work-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&work).unwrap();
-    Some(Fixture { ctx, host_id: host.id, sshd, work })
+    Some(Fixture {
+        ctx,
+        host_id: host.id,
+        sshd,
+        work,
+    })
 }

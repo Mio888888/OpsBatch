@@ -2,7 +2,9 @@
 //! dangerous-command confirmation (press Enter twice). Port of the `onData` handler in TerminalView.tsx.
 
 use ops_terminal::background::parse_opsbatch_background_command;
-use ops_terminal::danger::{check_dangerous_command, default_compiled_danger_rules, CompiledDangerRule};
+use ops_terminal::danger::{
+    check_dangerous_command, default_compiled_danger_rules, CompiledDangerRule,
+};
 use ops_terminal::input_line::process_terminal_input;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,7 +32,11 @@ impl Default for InputGuard {
 impl InputGuard {
     /// Starts with the built-in rules so a terminal is protected before the stored rules are loaded.
     pub fn new() -> Self {
-        Self { rules: default_compiled_danger_rules(), line: String::new(), pending_confirm: None }
+        Self {
+            rules: default_compiled_danger_rules(),
+            line: String::new(),
+            pending_confirm: None,
+        }
     }
 
     pub fn set_rules(&mut self, rules: Vec<CompiledDangerRule>) {
@@ -82,7 +88,10 @@ mod tests {
 
     fn type_text(g: &mut InputGuard, text: &str, screen: &str) {
         for c in text.chars() {
-            assert_eq!(g.process(&c.to_string(), || screen.to_string()), GuardAction::Forward);
+            assert_eq!(
+                g.process(&c.to_string(), || screen.to_string()),
+                GuardAction::Forward
+            );
         }
     }
 
@@ -98,21 +107,36 @@ mod tests {
         let mut g = InputGuard::new();
         type_text(&mut g, "rm -rf /", "$ rm -rf /");
         let first = g.process("\r", || "$ rm -rf /".into());
-        assert!(matches!(first, GuardAction::Blocked(ref names) if !names.is_empty()), "{first:?}");
+        assert!(
+            matches!(first, GuardAction::Blocked(ref names) if !names.is_empty()),
+            "{first:?}"
+        );
         // The shell never saw the first Enter; the second one on the same line is let through.
-        assert_eq!(g.process("\r", || "$ rm -rf /".into()), GuardAction::Forward);
+        assert_eq!(
+            g.process("\r", || "$ rm -rf /".into()),
+            GuardAction::Forward
+        );
         // ... and only once.
         type_text(&mut g, "rm -rf /", "$ rm -rf /");
-        assert!(matches!(g.process("\r", || "$ rm -rf /".into()), GuardAction::Blocked(_)));
+        assert!(matches!(
+            g.process("\r", || "$ rm -rf /".into()),
+            GuardAction::Blocked(_)
+        ));
     }
 
     #[test]
     fn editing_the_line_cancels_the_confirmation() {
         let mut g = InputGuard::new();
         type_text(&mut g, "rm -rf /", "$ rm -rf /");
-        assert!(matches!(g.process("\r", || "$ rm -rf /".into()), GuardAction::Blocked(_)));
+        assert!(matches!(
+            g.process("\r", || "$ rm -rf /".into()),
+            GuardAction::Blocked(_)
+        ));
         // User edits (backspace) then submits a harmless line.
-        assert_eq!(g.process("\x7f", || "$ rm -rf ".into()), GuardAction::Forward);
+        assert_eq!(
+            g.process("\x7f", || "$ rm -rf ".into()),
+            GuardAction::Forward
+        );
         assert_eq!(g.process("\r", || "$ rm -rf".into()), GuardAction::Forward);
     }
 
@@ -120,22 +144,37 @@ mod tests {
     fn history_recall_is_checked_through_the_screen_line() {
         let mut g = InputGuard::new();
         // Arrow keys do not touch the local buffer, so the command only exists on screen.
-        assert_eq!(g.process("\x1b[A", || "$ rm -rf /".into()), GuardAction::Forward);
-        assert!(matches!(g.process("\r", || "$ rm -rf /".into()), GuardAction::Blocked(_)));
+        assert_eq!(
+            g.process("\x1b[A", || "$ rm -rf /".into()),
+            GuardAction::Forward
+        );
+        assert!(matches!(
+            g.process("\r", || "$ rm -rf /".into()),
+            GuardAction::Blocked(_)
+        ));
     }
 
     #[test]
     fn background_command_is_intercepted() {
         let mut g = InputGuard::new();
         type_text(&mut g, "opsbatch bg sleep 100", "$ opsbatch bg sleep 100");
-        assert_eq!(g.process("\r", || "$ opsbatch bg sleep 100".into()), GuardAction::Background("sleep 100".into()));
+        assert_eq!(
+            g.process("\r", || "$ opsbatch bg sleep 100".into()),
+            GuardAction::Background("sleep 100".into())
+        );
     }
 
     #[test]
     fn pasted_multi_char_chunks_are_tracked() {
         let mut g = InputGuard::new();
-        assert_eq!(g.process("rm -rf /tmp/x", || "$ rm -rf /tmp/x".into()), GuardAction::Forward);
-        assert!(matches!(g.process("\r", || "$ rm -rf /tmp/x".into()), GuardAction::Blocked(_)));
+        assert_eq!(
+            g.process("rm -rf /tmp/x", || "$ rm -rf /tmp/x".into()),
+            GuardAction::Forward
+        );
+        assert!(matches!(
+            g.process("\r", || "$ rm -rf /tmp/x".into()),
+            GuardAction::Blocked(_)
+        ));
     }
 
     #[test]

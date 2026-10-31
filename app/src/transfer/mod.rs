@@ -20,7 +20,10 @@ pub struct HostResult {
 }
 
 /// Insert or replace results by host id, keeping first-seen order.
-pub fn merge_results(current: &mut Vec<HostResult>, incoming: impl IntoIterator<Item = HostResult>) {
+pub fn merge_results(
+    current: &mut Vec<HostResult>,
+    incoming: impl IntoIterator<Item = HostResult>,
+) {
     for r in incoming {
         match current.iter_mut().find(|c| c.host_id == r.host_id) {
             Some(slot) => *slot = r,
@@ -35,7 +38,11 @@ pub fn summarize(results: &[HostResult], total: usize) -> (usize, usize, usize, 
     let failed = results.len() - ok;
     let done = ok + failed;
     let pending = total.saturating_sub(done);
-    let percent = if total > 0 { done as f32 / total as f32 * 100.0 } else { 0.0 };
+    let percent = if total > 0 {
+        done as f32 / total as f32 * 100.0
+    } else {
+        0.0
+    };
     (ok, failed, pending, percent)
 }
 
@@ -68,7 +75,14 @@ mod tests {
     use super::*;
 
     fn r(id: &str, ok: bool) -> HostResult {
-        HostResult { host_id: id.into(), host_name: id.into(), success: ok, file_size: 10, duration: 5, error: (!ok).then(|| "boom".into()) }
+        HostResult {
+            host_id: id.into(),
+            host_name: id.into(),
+            success: ok,
+            file_size: 10,
+            duration: 5,
+            error: (!ok).then(|| "boom".into()),
+        }
     }
 
     #[test]
@@ -76,7 +90,10 @@ mod tests {
         let mut v = Vec::new();
         merge_results(&mut v, [r("a", true), r("b", false)]);
         merge_results(&mut v, [r("b", true), r("c", true)]);
-        assert_eq!(v.iter().map(|x| x.host_id.as_str()).collect::<Vec<_>>(), ["a", "b", "c"]);
+        assert_eq!(
+            v.iter().map(|x| x.host_id.as_str()).collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
         assert!(v[1].success, "later result replaces the earlier one");
     }
 
@@ -94,7 +111,10 @@ mod tests {
     fn payload_deserializes_camel_case() {
         let j = serde_json::json!({"hostId":"h","hostName":"web","success":true,"fileSize":2048,"duration":12,"error":null});
         let x: HostResult = serde_json::from_value(j).unwrap();
-        assert_eq!((x.host_name.as_str(), x.file_size, x.duration), ("web", 2048, 12));
+        assert_eq!(
+            (x.host_name.as_str(), x.file_size, x.duration),
+            ("web", 2048, 12)
+        );
         assert_eq!(format_size(x.file_size), "2.0 KB");
         assert_eq!(format_size(0), "-");
         assert_eq!(format_size(500), "500 B");

@@ -6,12 +6,17 @@ mod ssh_support;
 
 use gpui_kit::test::TestWindowExt;
 use gpui_kit::{AppContext as _, Entity, TestAppContext, WindowHandle};
-use opsbatch_app::editor::window::EditorWindow;
 use ops_ssh::hosts::NewHost;
+use opsbatch_app::editor::window::EditorWindow;
 
 use common::{serial, wait_until};
 
-fn open_editor(cx: &mut TestAppContext, host: &str, dir: bool, path: &str) -> (WindowHandle<gpui_kit::base::Root>, Entity<EditorWindow>) {
+fn open_editor(
+    cx: &mut TestAppContext,
+    host: &str,
+    dir: bool,
+    path: &str,
+) -> (WindowHandle<gpui_kit::base::Root>, Entity<EditorWindow>) {
     let (host, path) = (host.to_string(), path.to_string());
     cx.update(|cx| {
         let (w, v) = gpui_kit::open_window(
@@ -73,16 +78,26 @@ fn editing_and_saving_a_remote_file_and_browsing_a_directory(cx: &mut TestAppCon
     // ---- file mode ----
     let (handle, ed) = open_editor(cx, &host_id, false, &file);
     cx.update(|cx| assert!(ed.read(cx).is_loading() || ed.read(cx).current_path().is_some()));
-    wait_until(cx, "file loaded", |cx| cx.update(|cx| ed.read(cx).current_path().is_some()));
+    wait_until(cx, "file loaded", |cx| {
+        cx.update(|cx| ed.read(cx).current_path().is_some())
+    });
     cx.update(|cx| {
-        assert_eq!(ed.read(cx).text(cx), "port=80\n中文注释\n", "UTF-8 content intact");
+        assert_eq!(
+            ed.read(cx).text(cx),
+            "port=80\n中文注释\n",
+            "UTF-8 content intact"
+        );
         assert!(!ed.read(cx).is_dirty());
     });
     let state_id = cx.update(|cx| ed.read(cx).editor_state().unwrap().entity_id());
     cx.update_window(handle.into(), |_, w, cx| {
         w.render_frame(cx);
         assert!(w.try_find("editor-window").is_some());
-        assert_eq!(w.find("editor-save").disabled(), Some(true), "nothing to save yet");
+        assert_eq!(
+            w.find("editor-save").disabled(),
+            Some(true),
+            "nothing to save yet"
+        );
         w.click(("input", state_id), cx);
         w.input("# edited\n", cx);
     })
@@ -95,17 +110,36 @@ fn editing_and_saving_a_remote_file_and_browsing_a_directory(cx: &mut TestAppCon
         w.render_frame(cx);
         assert!(w.try_find("editor-dirty-dot").is_some());
         assert_ne!(w.find("editor-save").disabled(), Some(true));
-        w.press(if cfg!(target_os = "macos") { "cmd-s" } else { "ctrl-s" }, cx);
+        w.press(
+            if cfg!(target_os = "macos") {
+                "cmd-s"
+            } else {
+                "ctrl-s"
+            },
+            cx,
+        );
     })
     .unwrap();
-    wait_until(cx, "saved", |cx| cx.update(|cx| !ed.read(cx).is_saving() && !ed.read(cx).is_dirty()));
+    wait_until(cx, "saved", |cx| {
+        cx.update(|cx| !ed.read(cx).is_saving() && !ed.read(cx).is_dirty())
+    });
     let on_disk = std::fs::read_to_string(work.join("app.conf")).unwrap();
-    assert!(on_disk.contains("# edited") && on_disk.contains("中文注释"), "{on_disk:?}");
+    assert!(
+        on_disk.contains("# edited") && on_disk.contains("中文注释"),
+        "{on_disk:?}"
+    );
     cx.update(|cx| assert!(ed.read(cx).error().is_none()));
 
     // Missing file: error bar, no editor.
-    let (h2, missing) = open_editor(cx, &host_id, false, &work.join("nope.txt").to_string_lossy());
-    wait_until(cx, "error shown", |cx| cx.update(|cx| missing.read(cx).error().is_some()));
+    let (h2, missing) = open_editor(
+        cx,
+        &host_id,
+        false,
+        &work.join("nope.txt").to_string_lossy(),
+    );
+    wait_until(cx, "error shown", |cx| {
+        cx.update(|cx| missing.read(cx).error().is_some())
+    });
     cx.update_window(h2.into(), |_, w, cx| {
         w.render_frame(cx);
         assert!(w.try_find("editor-error").is_some());
@@ -114,7 +148,9 @@ fn editing_and_saving_a_remote_file_and_browsing_a_directory(cx: &mut TestAppCon
 
     // ---- directory mode ----
     let (h3, dir) = open_editor(cx, &host_id, true, &work.to_string_lossy());
-    wait_until(cx, "tree loaded", |cx| cx.update(|cx| dir.read(cx).tree().is_some()));
+    wait_until(cx, "tree loaded", |cx| {
+        cx.update(|cx| dir.read(cx).tree().is_some())
+    });
     cx.update_window(h3.into(), |_, w, cx| {
         w.render_frame(cx);
         assert!(w.try_find("editor-sidebar").is_some());
@@ -128,7 +164,13 @@ fn editing_and_saving_a_remote_file_and_browsing_a_directory(cx: &mut TestAppCon
         w.click(("editor-tree-row", 1usize), cx);
     })
     .unwrap();
-    wait_until(cx, "file from tree loaded", |cx| cx.update(|cx| dir.read(cx).current_path().is_some_and(|p| p.ends_with("app.conf"))));
+    wait_until(cx, "file from tree loaded", |cx| {
+        cx.update(|cx| {
+            dir.read(cx)
+                .current_path()
+                .is_some_and(|p| p.ends_with("app.conf"))
+        })
+    });
     cx.update(|cx| assert!(dir.read(cx).text(cx).contains("# edited")));
 
     let _ = std::fs::remove_dir_all(&work);

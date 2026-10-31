@@ -70,10 +70,7 @@ pub struct NewCommand {
     pub url: Option<String>,
 }
 
-pub async fn add_command(
-    db: &Database,
-    command: NewCommand,
-) -> Result<String, String> {
+pub async fn add_command(db: &Database, command: NewCommand) -> Result<String, String> {
     let pool = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let id = uuid::Uuid::new_v4().to_string();
@@ -99,10 +96,7 @@ pub async fn add_command(
     .map_err(|e| e.to_string())?
 }
 
-pub async fn update_command(
-    db: &Database,
-    command: CustomCommand,
-) -> Result<(), String> {
+pub async fn update_command(db: &Database, command: CustomCommand) -> Result<(), String> {
     let pool = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let conn = pool.get().map_err(|e| e.to_string())?;
@@ -217,10 +211,7 @@ pub struct NewScript {
     pub platform: Option<String>,
 }
 
-pub async fn add_script(
-    db: &Database,
-    script: NewScript,
-) -> Result<String, String> {
+pub async fn add_script(db: &Database, script: NewScript) -> Result<String, String> {
     let pool = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let id = uuid::Uuid::new_v4().to_string();
@@ -247,10 +238,7 @@ pub async fn add_script(
     .map_err(|e| e.to_string())?
 }
 
-pub async fn update_script(
-    db: &Database,
-    script: CustomScript,
-) -> Result<(), String> {
+pub async fn update_script(db: &Database, script: CustomScript) -> Result<(), String> {
     let pool = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let conn = pool.get().map_err(|e| e.to_string())?;

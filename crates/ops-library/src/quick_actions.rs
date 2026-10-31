@@ -20,9 +20,7 @@ pub struct QuickAction {
     pub last_status: String,
 }
 
-pub async fn list_quick_actions(
-    db: &Database,
-) -> Result<Vec<QuickAction>, String> {
+pub async fn list_quick_actions(db: &Database) -> Result<Vec<QuickAction>, String> {
     let pool = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let conn = pool.get().map_err(|e| e.to_string())?;
@@ -67,10 +65,7 @@ pub struct NewQuickAction {
     pub language: Option<String>,
 }
 
-pub async fn add_quick_action(
-    db: &Database,
-    action: NewQuickAction,
-) -> Result<String, String> {
+pub async fn add_quick_action(db: &Database, action: NewQuickAction) -> Result<String, String> {
     let pool = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let id = uuid::Uuid::new_v4().to_string();
@@ -95,10 +90,7 @@ pub async fn add_quick_action(
     .map_err(|e| e.to_string())?
 }
 
-pub async fn update_quick_action(
-    db: &Database,
-    action: QuickAction,
-) -> Result<(), String> {
+pub async fn update_quick_action(db: &Database, action: QuickAction) -> Result<(), String> {
     let pool = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let conn = pool.get().map_err(|e| e.to_string())?;
@@ -124,10 +116,7 @@ pub async fn delete_quick_action(db: &Database, id: String) -> Result<(), String
     .map_err(|e| e.to_string())?
 }
 
-pub async fn reorder_quick_actions(
-    db: &Database,
-    ids: Vec<String>,
-) -> Result<(), String> {
+pub async fn reorder_quick_actions(db: &Database, ids: Vec<String>) -> Result<(), String> {
     let pool = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let conn = pool.get().map_err(|e| e.to_string())?;
@@ -144,10 +133,7 @@ pub async fn reorder_quick_actions(
     .map_err(|e| e.to_string())?
 }
 
-pub async fn toggle_star_quick_action(
-    db: &Database,
-    id: String,
-) -> Result<(), String> {
+pub async fn toggle_star_quick_action(db: &Database, id: String) -> Result<(), String> {
     let pool = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let conn = pool.get().map_err(|e| e.to_string())?;

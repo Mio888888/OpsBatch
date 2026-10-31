@@ -22,10 +22,20 @@ pub struct Settle {
 }
 
 /// The final wait after a plan, before the next step (or the next screenshot for the model) starts.
-pub const PLAN_SETTLE: Settle = Settle { min: Duration::from_millis(800), quiet: Duration::from_millis(800), grace: Duration::from_millis(1500), max: Duration::from_secs(10) };
+pub const PLAN_SETTLE: Settle = Settle {
+    min: Duration::from_millis(800),
+    quiet: Duration::from_millis(800),
+    grace: Duration::from_millis(1500),
+    max: Duration::from_secs(10),
+};
 
 const fn settle(min: u64, quiet: u64, grace: u64, max: u64) -> Settle {
-    Settle { min: Duration::from_millis(min), quiet: Duration::from_millis(quiet), grace: Duration::from_millis(grace), max: Duration::from_millis(max) }
+    Settle {
+        min: Duration::from_millis(min),
+        quiet: Duration::from_millis(quiet),
+        grace: Duration::from_millis(grace),
+        max: Duration::from_millis(max),
+    }
 }
 
 /// What to wait for after `op` has been sent completely.
@@ -94,32 +104,56 @@ fn resolve_scancode(key: &str) -> Option<Scancode> {
     if let Some(m) = modifier_scancode(key) {
         return Some(m);
     }
-    let code = if key.chars().count() == 1 { format!("Key{}", key.to_uppercase()) } else { key.to_string() };
+    let code = if key.chars().count() == 1 {
+        format!("Key{}", key.to_uppercase())
+    } else {
+        key.to_string()
+    };
     scancode_for_key(key, &code)
 }
 
 fn key_event(s: Scancode, down: bool) -> RdpInputEvent {
-    RdpInputEvent::KeyScancode { code: s.code, extended: s.extended, down }
+    RdpInputEvent::KeyScancode {
+        code: s.code,
+        extended: s.extended,
+        down,
+    }
 }
 
 fn unicode_events(c: &str) -> Vec<RdpInputEvent> {
-    vec![RdpInputEvent::Unicode { character: c.to_string(), down: true }, RdpInputEvent::Unicode { character: c.to_string(), down: false }]
+    vec![
+        RdpInputEvent::Unicode {
+            character: c.to_string(),
+            down: true,
+        },
+        RdpInputEvent::Unicode {
+            character: c.to_string(),
+            down: false,
+        },
+    ]
 }
 
 fn combo_events(keys: &[String]) -> Vec<RdpInputEvent> {
-    let mapped: Vec<(&String, Option<Scancode>)> = keys.iter().map(|k| (k, resolve_scancode(k))).collect();
+    let mapped: Vec<(&String, Option<Scancode>)> =
+        keys.iter().map(|k| (k, resolve_scancode(k))).collect();
     let mut events = Vec::new();
     for (key, sc) in &mapped {
         match sc {
             Some(s) => events.push(key_event(*s, true)),
-            None if key.chars().count() == 1 => events.push(RdpInputEvent::Unicode { character: (*key).clone(), down: true }),
+            None if key.chars().count() == 1 => events.push(RdpInputEvent::Unicode {
+                character: (*key).clone(),
+                down: true,
+            }),
             None => {}
         }
     }
     for (key, sc) in mapped.iter().rev() {
         match sc {
             Some(s) => events.push(key_event(*s, false)),
-            None if key.chars().count() == 1 => events.push(RdpInputEvent::Unicode { character: (*key).clone(), down: false }),
+            None if key.chars().count() == 1 => events.push(RdpInputEvent::Unicode {
+                character: (*key).clone(),
+                down: false,
+            }),
             None => {}
         }
     }
@@ -140,7 +174,12 @@ pub fn operations_to_input_events(ops: &[RdpOperation]) -> Vec<Vec<RdpInputEvent
     for op in ops {
         match op {
             RdpOperation::Move { x, y } => batches.push(mouse_move(*x, *y)),
-            RdpOperation::Click { x, y, button, double_click } => {
+            RdpOperation::Click {
+                x,
+                y,
+                button,
+                double_click,
+            } => {
                 batches.push(mouse_move(*x, *y));
                 // Remote Windows does not reliably register an instantaneous down/up pair.
                 batches.push(mouse_button(*x, *y, *button, true));
@@ -150,23 +189,45 @@ pub fn operations_to_input_events(ops: &[RdpOperation]) -> Vec<Vec<RdpInputEvent
                     batches.push(mouse_button(*x, *y, *button, false));
                 }
             }
-            RdpOperation::Drag { from_x, from_y, to_x, to_y, button } => {
+            RdpOperation::Drag {
+                from_x,
+                from_y,
+                to_x,
+                to_y,
+                button,
+            } => {
                 batches.push(mouse_move(*from_x, *from_y));
                 batches.push(mouse_button(*from_x, *from_y, *button, true));
                 let steps = 4i32;
                 for step in 1..steps {
-                    let px = (f64::from(*from_x) + f64::from(i32::from(*to_x) - i32::from(*from_x)) * f64::from(step) / f64::from(steps)).round() as u16;
-                    let py = (f64::from(*from_y) + f64::from(i32::from(*to_y) - i32::from(*from_y)) * f64::from(step) / f64::from(steps)).round() as u16;
+                    let px = (f64::from(*from_x)
+                        + f64::from(i32::from(*to_x) - i32::from(*from_x)) * f64::from(step)
+                            / f64::from(steps))
+                    .round() as u16;
+                    let py = (f64::from(*from_y)
+                        + f64::from(i32::from(*to_y) - i32::from(*from_y)) * f64::from(step)
+                            / f64::from(steps))
+                    .round() as u16;
                     batches.push(mouse_move(px, py));
                 }
                 batches.push(mouse_move(*to_x, *to_y));
                 batches.push(mouse_button(*to_x, *to_y, *button, false));
             }
-            RdpOperation::Scroll { x, y, delta, vertical } => {
+            RdpOperation::Scroll {
+                x,
+                y,
+                delta,
+                vertical,
+            } => {
                 batches.push(mouse_move(*x, *y));
                 // WHEEL_DELTA is 120 per notch; positive scrolls up.
                 let units = (delta * 120).clamp(i32::from(i16::MIN), i32::from(i16::MAX)) as i16;
-                batches.push(vec![RdpInputEvent::Wheel { x: *x, y: *y, delta: units, vertical: *vertical }]);
+                batches.push(vec![RdpInputEvent::Wheel {
+                    x: *x,
+                    y: *y,
+                    delta: units,
+                    vertical: *vertical,
+                }]);
             }
             RdpOperation::Type { text } => {
                 for ch in text.chars() {
@@ -198,13 +259,25 @@ enum BatchKind {
 }
 
 fn classify(batch: &[RdpInputEvent]) -> BatchKind {
-    if batch.iter().any(|e| matches!(e, RdpInputEvent::KeyScancode { .. })) {
+    if batch
+        .iter()
+        .any(|e| matches!(e, RdpInputEvent::KeyScancode { .. }))
+    {
         BatchKind::Key
-    } else if batch.iter().any(|e| matches!(e, RdpInputEvent::Unicode { .. })) {
+    } else if batch
+        .iter()
+        .any(|e| matches!(e, RdpInputEvent::Unicode { .. }))
+    {
         BatchKind::Type
-    } else if batch.iter().any(|e| matches!(e, RdpInputEvent::MouseButton { .. })) {
+    } else if batch
+        .iter()
+        .any(|e| matches!(e, RdpInputEvent::MouseButton { .. }))
+    {
         BatchKind::Click
-    } else if batch.iter().any(|e| matches!(e, RdpInputEvent::Wheel { .. })) {
+    } else if batch
+        .iter()
+        .any(|e| matches!(e, RdpInputEvent::Wheel { .. }))
+    {
         BatchKind::Scroll
     } else {
         BatchKind::Move
@@ -224,10 +297,17 @@ fn delay_for_kind(kind: BatchKind) -> Duration {
 }
 
 fn is_button_down(batch: &[RdpInputEvent]) -> bool {
-    batch.iter().any(|e| matches!(e, RdpInputEvent::MouseButton { down: true, .. }))
+    batch
+        .iter()
+        .any(|e| matches!(e, RdpInputEvent::MouseButton { down: true, .. }))
 }
 
-fn delay_after_batch(op: &RdpOperation, kind: BatchKind, index: usize, batch: &[RdpInputEvent]) -> Duration {
+fn delay_after_batch(
+    op: &RdpOperation,
+    kind: BatchKind,
+    index: usize,
+    batch: &[RdpInputEvent],
+) -> Duration {
     if let RdpOperation::Click { double_click, .. } = op {
         if kind == BatchKind::Click {
             if is_button_down(batch) {
@@ -244,7 +324,12 @@ fn delay_after_batch(op: &RdpOperation, kind: BatchKind, index: usize, batch: &[
 /// Play `ops` through `send`: short pauses between the input events of one operation (`sleep`), and after each
 /// operation a wait for the screen to settle (`settled`) before the next one starts, so a step never runs on top of
 /// the previous one's still-loading window.
-pub async fn execute_operations<S, W, T>(ops: &[RdpOperation], mut send: S, sleep: W, settled: T) -> Result<(), String>
+pub async fn execute_operations<S, W, T>(
+    ops: &[RdpOperation],
+    mut send: S,
+    sleep: W,
+    settled: T,
+) -> Result<(), String>
 where
     S: FnMut(RdpInputEvent) -> Result<(), String>,
     W: Fn(Duration) -> BoxFuture<'static, ()>,
@@ -280,7 +365,12 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     fn click(x: u16, y: u16, double: bool) -> RdpOperation {
-        RdpOperation::Click { x, y, button: 0, double_click: double }
+        RdpOperation::Click {
+            x,
+            y,
+            button: 0,
+            double_click: double,
+        }
     }
 
     #[test]
@@ -290,10 +380,30 @@ mod tests {
             batches,
             vec![
                 vec![RdpInputEvent::MouseMove { x: 25, y: 225 }],
-                vec![RdpInputEvent::MouseButton { x: 25, y: 225, button: 0, down: true }],
-                vec![RdpInputEvent::MouseButton { x: 25, y: 225, button: 0, down: false }],
-                vec![RdpInputEvent::MouseButton { x: 25, y: 225, button: 0, down: true }],
-                vec![RdpInputEvent::MouseButton { x: 25, y: 225, button: 0, down: false }],
+                vec![RdpInputEvent::MouseButton {
+                    x: 25,
+                    y: 225,
+                    button: 0,
+                    down: true
+                }],
+                vec![RdpInputEvent::MouseButton {
+                    x: 25,
+                    y: 225,
+                    button: 0,
+                    down: false
+                }],
+                vec![RdpInputEvent::MouseButton {
+                    x: 25,
+                    y: 225,
+                    button: 0,
+                    down: true
+                }],
+                vec![RdpInputEvent::MouseButton {
+                    x: 25,
+                    y: 225,
+                    button: 0,
+                    down: false
+                }],
             ]
         );
     }
@@ -302,46 +412,132 @@ mod tests {
     fn single_click_is_move_down_up() {
         let batches = operations_to_input_events(&[click(640, 400, false)]);
         assert_eq!(batches.len(), 3);
-        assert_eq!(batches[2], vec![RdpInputEvent::MouseButton { x: 640, y: 400, button: 0, down: false }]);
+        assert_eq!(
+            batches[2],
+            vec![RdpInputEvent::MouseButton {
+                x: 640,
+                y: 400,
+                button: 0,
+                down: false
+            }]
+        );
     }
 
     #[test]
     fn drags_interpolate_and_scrolls_use_wheel_units() {
-        let drag = operations_to_input_events(&[RdpOperation::Drag { from_x: 0, from_y: 100, to_x: 40, to_y: 0, button: 0 }]);
-        let moves: Vec<_> = drag.iter().filter_map(|b| if let [RdpInputEvent::MouseMove { x, y }] = b.as_slice() { Some((*x, *y)) } else { None }).collect();
+        let drag = operations_to_input_events(&[RdpOperation::Drag {
+            from_x: 0,
+            from_y: 100,
+            to_x: 40,
+            to_y: 0,
+            button: 0,
+        }]);
+        let moves: Vec<_> = drag
+            .iter()
+            .filter_map(|b| {
+                if let [RdpInputEvent::MouseMove { x, y }] = b.as_slice() {
+                    Some((*x, *y))
+                } else {
+                    None
+                }
+            })
+            .collect();
         assert_eq!(moves, vec![(0, 100), (10, 75), (20, 50), (30, 25), (40, 0)]);
         assert_eq!(drag.len(), 7);
-        let scroll = operations_to_input_events(&[RdpOperation::Scroll { x: 5, y: 6, delta: -3, vertical: true }]);
-        assert_eq!(scroll[1], vec![RdpInputEvent::Wheel { x: 5, y: 6, delta: -360, vertical: true }]);
+        let scroll = operations_to_input_events(&[RdpOperation::Scroll {
+            x: 5,
+            y: 6,
+            delta: -3,
+            vertical: true,
+        }]);
+        assert_eq!(
+            scroll[1],
+            vec![RdpInputEvent::Wheel {
+                x: 5,
+                y: 6,
+                delta: -360,
+                vertical: true
+            }]
+        );
     }
 
     #[test]
     fn typing_is_one_unicode_pair_per_character() {
-        let batches = operations_to_input_events(&[RdpOperation::Type { text: "a中".into() }]);
+        let batches = operations_to_input_events(&[RdpOperation::Type {
+            text: "a中".into()
+        }]);
         assert_eq!(batches.len(), 2);
-        assert_eq!(batches[1][0], RdpInputEvent::Unicode { character: "中".into(), down: true });
-        assert_eq!(batches[1][1], RdpInputEvent::Unicode { character: "中".into(), down: false });
+        assert_eq!(
+            batches[1][0],
+            RdpInputEvent::Unicode {
+                character: "中".into(),
+                down: true
+            }
+        );
+        assert_eq!(
+            batches[1][1],
+            RdpInputEvent::Unicode {
+                character: "中".into(),
+                down: false
+            }
+        );
     }
 
     #[test]
     fn keys_and_combos() {
-        let keys = |names: &[&str]| RdpOperation::Key { keys: names.iter().map(|s| s.to_string()).collect() };
+        let keys = |names: &[&str]| RdpOperation::Key {
+            keys: names.iter().map(|s| s.to_string()).collect(),
+        };
         // Windows key alone.
         assert_eq!(
             operations_to_input_events(&[keys(&["Meta"])]),
-            vec![vec![RdpInputEvent::KeyScancode { code: 0x5b, extended: true, down: true }, RdpInputEvent::KeyScancode { code: 0x5b, extended: true, down: false }]]
+            vec![vec![
+                RdpInputEvent::KeyScancode {
+                    code: 0x5b,
+                    extended: true,
+                    down: true
+                },
+                RdpInputEvent::KeyScancode {
+                    code: 0x5b,
+                    extended: true,
+                    down: false
+                }
+            ]]
         );
         // Ctrl+C: both down in order, released in reverse.
         let combo = &operations_to_input_events(&[keys(&["Control", "c"])])[0];
         assert_eq!(combo.len(), 4);
-        assert_eq!(combo[1], RdpInputEvent::KeyScancode { code: 0x2e, extended: false, down: true });
-        assert_eq!(combo[2], RdpInputEvent::KeyScancode { code: 0x2e, extended: false, down: false });
-        assert_eq!(combo[3], RdpInputEvent::KeyScancode { code: 0x1d, extended: false, down: false });
+        assert_eq!(
+            combo[1],
+            RdpInputEvent::KeyScancode {
+                code: 0x2e,
+                extended: false,
+                down: true
+            }
+        );
+        assert_eq!(
+            combo[2],
+            RdpInputEvent::KeyScancode {
+                code: 0x2e,
+                extended: false,
+                down: false
+            }
+        );
+        assert_eq!(
+            combo[3],
+            RdpInputEvent::KeyScancode {
+                code: 0x1d,
+                extended: false,
+                down: false
+            }
+        );
         // Unknown single digit keys yield nothing (the original resolves single characters through `KeyX` codes).
         assert!(operations_to_input_events(&[keys(&["1"])]).is_empty());
         // ...but inside a combination an unmapped single character falls back to Unicode.
         let combo = &operations_to_input_events(&[keys(&["Control", "1"])])[0];
-        assert!(combo.iter().any(|e| matches!(e, RdpInputEvent::Unicode { character, down: true } if character == "1")));
+        assert!(combo.iter().any(
+            |e| matches!(e, RdpInputEvent::Unicode { character, down: true } if character == "1")
+        ));
         assert!(operations_to_input_events(&[RdpOperation::Wait { ms: 500 }]).is_empty());
     }
 
@@ -349,11 +545,20 @@ mod tests {
     fn pacing_depends_on_the_kind_of_batch() {
         let op = click(1, 1, true);
         let batches = operations_to_input_events(std::slice::from_ref(&op));
-        let delays: Vec<u64> = batches.iter().enumerate().map(|(i, b)| delay_after_batch(&op, classify(b), i, b).as_millis() as u64).collect();
+        let delays: Vec<u64> = batches
+            .iter()
+            .enumerate()
+            .map(|(i, b)| delay_after_batch(&op, classify(b), i, b).as_millis() as u64)
+            .collect();
         assert_eq!(delays, vec![80, 70, 140, 70, 350]);
-        let key = RdpOperation::Key { keys: vec!["Enter".into()] };
+        let key = RdpOperation::Key {
+            keys: vec!["Enter".into()],
+        };
         let b = &operations_to_input_events(std::slice::from_ref(&key))[0];
-        assert_eq!(delay_after_batch(&key, classify(b), 0, b), Duration::from_millis(500));
+        assert_eq!(
+            delay_after_batch(&key, classify(b), 0, b),
+            Duration::from_millis(500)
+        );
     }
 
     #[test]
@@ -361,7 +566,11 @@ mod tests {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let log = Arc::new(Mutex::new(Vec::new()));
         let (s2, l2, l3) = (sent.clone(), log.clone(), log.clone());
-        let ops = [RdpOperation::Wait { ms: 1000 }, click(3, 4, false), RdpOperation::Type { text: "x".into() }];
+        let ops = [
+            RdpOperation::Wait { ms: 1000 },
+            click(3, 4, false),
+            RdpOperation::Type { text: "x".into() },
+        ];
         futures::executor::block_on(execute_operations(
             &ops,
             move |e| {
@@ -373,7 +582,11 @@ mod tests {
                 Box::pin(async {})
             },
             move |s| {
-                l3.lock().unwrap().push(format!("settle min={} quiet={}", s.min.as_millis(), s.quiet.as_millis()));
+                l3.lock().unwrap().push(format!(
+                    "settle min={} quiet={}",
+                    s.min.as_millis(),
+                    s.quiet.as_millis()
+                ));
                 Box::pin(async {})
             },
         ))
@@ -383,13 +596,25 @@ mod tests {
         // character is one batch followed by its settle; and the plan ends with its own settle
         assert_eq!(
             *log.lock().unwrap(),
-            vec!["sleep 1000", "sleep 80", "sleep 70", "settle min=350 quiet=500", "settle min=150 quiet=300", "settle min=800 quiet=800"]
+            vec![
+                "sleep 1000",
+                "sleep 80",
+                "sleep 70",
+                "settle min=350 quiet=500",
+                "settle min=150 quiet=300",
+                "settle min=800 quiet=800"
+            ]
         );
     }
 
     #[test]
     fn a_failing_send_stops_the_plan() {
-        let result = futures::executor::block_on(execute_operations(&[click(1, 1, false)], |_| Err("session closed".into()), |_| Box::pin(async {}), |_| Box::pin(async {})));
+        let result = futures::executor::block_on(execute_operations(
+            &[click(1, 1, false)],
+            |_| Err("session closed".into()),
+            |_| Box::pin(async {}),
+            |_| Box::pin(async {}),
+        ));
         assert_eq!(result, Err("session closed".to_string()));
     }
 
@@ -403,7 +628,14 @@ mod tests {
         futures::executor::block_on(wait_for_settle(
             policy,
             move || c1.get(),
-            move || changes.iter().copied().filter(|t| *t <= c2.get()).max().unwrap_or(0),
+            move || {
+                changes
+                    .iter()
+                    .copied()
+                    .filter(|t| *t <= c2.get())
+                    .max()
+                    .unwrap_or(0)
+            },
             move |d| {
                 c3.set(c3.get() + d.as_millis() as u64);
                 Box::pin(async {})

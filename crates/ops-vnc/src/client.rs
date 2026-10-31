@@ -3,7 +3,9 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use flate2::{Decompress, FlushDecompress};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, ReadHalf, WriteHalf};
+use tokio::io::{
+    AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, ReadHalf, WriteHalf,
+};
 
 use crate::auth::{ard_client_response, vnc_auth_response, ArdServerHello};
 
@@ -31,8 +33,14 @@ pub fn choose_security(offered: &[u8], has_username: bool, has_password: bool) -
 }
 
 /// Why [`choose_security`] found nothing, in terms of what to fill in.
-pub fn no_usable_security(server_version: &str, offered: &[u8], has_username: bool, has_password: bool) -> String {
-    let ard_only = offered.contains(&SEC_ARD) && !offered.contains(&SEC_VNC) && !offered.contains(&SEC_NONE);
+pub fn no_usable_security(
+    server_version: &str,
+    offered: &[u8],
+    has_username: bool,
+    has_password: bool,
+) -> String {
+    let ard_only =
+        offered.contains(&SEC_ARD) && !offered.contains(&SEC_VNC) && !offered.contains(&SEC_NONE);
     if ard_only && !has_username {
         format!("服务器 {server_version} 未开启 VNC 密码认证, 只支持 Apple ARD(提供 {offered:?}): 请在「VNC 用户名」中填写远程 Mac 的登录账户名, 密码填写该账户的登录密码")
     } else if !has_password && (offered.contains(&SEC_VNC) || offered.contains(&SEC_ARD)) {
@@ -63,7 +71,10 @@ pub struct Rect {
 pub enum ServerEvent {
     Update(Vec<Rect>),
     /// DesktopSize pseudo-encoding: the framebuffer was replaced by an empty one of this size.
-    Resized { width: u16, height: u16 },
+    Resized {
+        width: u16,
+        height: u16,
+    },
     Bell,
     CutText(String),
     ColorMap,
@@ -78,7 +89,11 @@ pub struct Framebuffer {
 
 impl Framebuffer {
     pub fn new(width: u16, height: u16) -> Self {
-        Self { width, height, data: vec![0; width as usize * height as usize * 4] }
+        Self {
+            width,
+            height,
+            data: vec![0; width as usize * height as usize * 4],
+        }
     }
 }
 
@@ -135,7 +150,8 @@ pub async fn connect<S: AsyncRead + AsyncWrite + Unpin>(
     // --- version ---
     let mut ver = [0u8; 12];
     s.read_exact(&mut ver).await.context("握手第 1 步: 读取服务器 RFB 版本时连接被对端关闭(服务器接受了 TCP 连接但没有发出 VNC 欢迎信息; 请检查本机代理/VPN 是否接管了该地址, 以及服务器是否限制了来源 IP; 如果刚才多次认证失败, 服务器(如 macOS)可能临时拒绝本机连接, 请等几分钟再试)")?;
-    let text = std::str::from_utf8(&ver).map_err(|_| anyhow!("握手第 1 步: 对端发来的不是 RFB 版本串 {ver:?}"))?;
+    let text = std::str::from_utf8(&ver)
+        .map_err(|_| anyhow!("握手第 1 步: 对端发来的不是 RFB 版本串 {ver:?}"))?;
     if !text.starts_with("RFB ") || ver[11] != b'\n' {
         bail!("not an RFB server: {text:?}");
     }
@@ -149,42 +165,67 @@ pub async fn connect<S: AsyncRead + AsyncWrite + Unpin>(
         _ => (3, 3),
     };
     let server_version = text.trim_end().to_string();
-    s.write_all(format!("RFB {cm:03}.{cn:03}\n").as_bytes()).await?;
+    s.write_all(format!("RFB {cm:03}.{cn:03}\n").as_bytes())
+        .await?;
 
     // --- security ---
     let has_pw = opts.password.as_deref().is_some_and(|p| !p.is_empty());
     let username = opts.username.as_deref().map(str::trim).unwrap_or("");
     let (sec, offered) = if cn == 3 {
-        let t = s.read_u32().await.with_context(|| format!("握手第 2 步: 读取安全类型时连接被对端关闭(服务器 {server_version})"))?;
+        let t = s.read_u32().await.with_context(|| {
+            format!("握手第 2 步: 读取安全类型时连接被对端关闭(服务器 {server_version})")
+        })?;
         if t == 0 {
             bail!("server refused: {}", read_reason(&mut s).await?);
         }
         (t as u8, vec![t as u8])
     } else {
-        let n = read_u8(&mut s).await.with_context(|| format!("握手第 2 步: 读取安全类型时连接被对端关闭(服务器 {server_version})"))? as usize;
+        let n = read_u8(&mut s).await.with_context(|| {
+            format!("握手第 2 步: 读取安全类型时连接被对端关闭(服务器 {server_version})")
+        })? as usize;
         if n == 0 {
             bail!("server refused: {}", read_reason(&mut s).await?);
         }
         let mut types = vec![0u8; n];
-        s.read_exact(&mut types).await.with_context(|| format!("握手第 2 步: 读取安全类型列表时连接被对端关闭(服务器 {server_version})"))?;
-        let chosen = choose_security(&types, !username.is_empty(), has_pw)
-            .ok_or_else(|| anyhow!(no_usable_security(&server_version, &types, !username.is_empty(), has_pw)))?;
+        s.read_exact(&mut types).await.with_context(|| {
+            format!("握手第 2 步: 读取安全类型列表时连接被对端关闭(服务器 {server_version})")
+        })?;
+        let chosen = choose_security(&types, !username.is_empty(), has_pw).ok_or_else(|| {
+            anyhow!(no_usable_security(
+                &server_version,
+                &types,
+                !username.is_empty(),
+                has_pw
+            ))
+        })?;
         s.write_all(&[chosen]).await?;
         (chosen, types)
     };
     // An RFB 3.3 server picks the type itself; ARD with an empty account name can only fail, so stop before sending it.
     if sec == SEC_ARD && username.is_empty() {
-        bail!(no_usable_security(&server_version, &[SEC_ARD], false, has_pw));
+        bail!(no_usable_security(
+            &server_version,
+            &[SEC_ARD],
+            false,
+            has_pw
+        ));
     }
 
-    let auth_stage = || format!("握手第 3 步: 认证({}, 服务器 {server_version})时连接被对端关闭", security_name(sec));
+    let auth_stage = || {
+        format!(
+            "握手第 3 步: 认证({}, 服务器 {server_version})时连接被对端关闭",
+            security_name(sec)
+        )
+    };
     match sec {
         SEC_NONE => {}
         SEC_VNC => {
             let mut ch = [0u8; 16];
             s.read_exact(&mut ch).await.with_context(auth_stage)?;
             let pw = opts.password.clone().unwrap_or_default();
-            s.write_all(&vnc_auth_response(&pw, &ch)).await.with_context(auth_stage)?;
+            s.write_all(&vnc_auth_response(&pw, &ch))
+                .await
+                .with_context(auth_stage)?;
         }
         SEC_ARD => {
             let generator = s.read_u16().await.with_context(auth_stage)?;
@@ -195,9 +236,15 @@ pub async fn connect<S: AsyncRead + AsyncWrite + Unpin>(
             let mut prime = vec![0; key_len];
             s.read_exact(&mut prime).await.with_context(auth_stage)?;
             let mut server_public = vec![0; key_len];
-            s.read_exact(&mut server_public).await.with_context(auth_stage)?;
+            s.read_exact(&mut server_public)
+                .await
+                .with_context(auth_stage)?;
             let (enc, cpub) = ard_client_response(
-                &ArdServerHello { generator, prime, server_public },
+                &ArdServerHello {
+                    generator,
+                    prime,
+                    server_public,
+                },
                 username,
                 opts.password.as_deref().unwrap_or(""),
             )?;
@@ -210,8 +257,16 @@ pub async fn connect<S: AsyncRead + AsyncWrite + Unpin>(
     if cn == 8 || sec != SEC_NONE {
         let result = s.read_u32().await.with_context(|| format!("握手第 4 步: 等待认证结果时连接被对端关闭(服务器 {server_version}; 认证方式 {sec}; 常见原因: 密码不对而服务器直接断开, 或失败次数过多被临时封锁)"))?;
         if result != 0 {
-            let reason = if cn == 8 { read_reason(&mut s).await.unwrap_or_default() } else { String::new() };
-            let check = if sec == SEC_ARD { "请检查账户名和登录密码" } else { "请检查 VNC 密码" };
+            let reason = if cn == 8 {
+                read_reason(&mut s).await.unwrap_or_default()
+            } else {
+                String::new()
+            };
+            let check = if sec == SEC_ARD {
+                "请检查账户名和登录密码"
+            } else {
+                "请检查 VNC 密码"
+            };
             bail!(
                 "authentication failed{}: 认证失败(认证方式 {}, 服务器 {server_version} 提供 {offered:?}), {check}; 多次失败后服务器可能临时拒绝连接",
                 if reason.is_empty() { String::new() } else { format!(" ({reason})") },
@@ -221,8 +276,12 @@ pub async fn connect<S: AsyncRead + AsyncWrite + Unpin>(
     }
 
     // --- init ---
-    let init_stage = || format!("握手第 5 步: 读取桌面信息时连接被对端关闭(服务器 {server_version}; 认证已通过, 可能是服务器拒绝共享连接或当前没有可用桌面)");
-    s.write_all(&[opts.shared as u8]).await.with_context(init_stage)?;
+    let init_stage = || {
+        format!("握手第 5 步: 读取桌面信息时连接被对端关闭(服务器 {server_version}; 认证已通过, 可能是服务器拒绝共享连接或当前没有可用桌面)")
+    };
+    s.write_all(&[opts.shared as u8])
+        .await
+        .with_context(init_stage)?;
     let width = s.read_u16().await.with_context(init_stage)?;
     let height = s.read_u16().await.with_context(init_stage)?;
     let mut _pf = [0u8; 16];
@@ -242,9 +301,24 @@ pub async fn connect<S: AsyncRead + AsyncWrite + Unpin>(
     s.write_all(&writer_msg).await?;
     let (r, w) = tokio::io::split(s);
     Ok((
-        RfbInfo { name, version: (cm, cn), apple: server_version.starts_with("RFB 003.889"), width, height },
-        RfbReader { stream: BufReader::with_capacity(READ_BUFFER, r), fb: Framebuffer::new(width, height), zrle: Decompress::new(true), update_started: None },
-        RfbWriter { stream: w, width, height },
+        RfbInfo {
+            name,
+            version: (cm, cn),
+            apple: server_version.starts_with("RFB 003.889"),
+            width,
+            height,
+        },
+        RfbReader {
+            stream: BufReader::with_capacity(READ_BUFFER, r),
+            fb: Framebuffer::new(width, height),
+            zrle: Decompress::new(true),
+            update_started: None,
+        },
+        RfbWriter {
+            stream: w,
+            width,
+            height,
+        },
     ))
 }
 
@@ -316,7 +390,10 @@ pub fn pointer_message(x: u16, y: u16, buttons: u8) -> [u8; 6] {
 
 pub fn cut_text_message(text: &str) -> Vec<u8> {
     // Latin-1 only per RFC 6143; characters outside it become '?'.
-    let bytes: Vec<u8> = text.chars().map(|c| if (c as u32) < 256 { c as u8 } else { b'?' }).collect();
+    let bytes: Vec<u8> = text
+        .chars()
+        .map(|c| if (c as u32) < 256 { c as u8 } else { b'?' })
+        .collect();
     let mut m = vec![6u8, 0, 0, 0];
     m.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
     m.extend_from_slice(&bytes);
@@ -392,8 +469,14 @@ impl<R: AsyncRead + Unpin> RfbReader<R> {
     }
 
     fn clip(&self, r: Rect) -> Result<()> {
-        if r.x as u32 + r.w as u32 > self.fb.width as u32 || r.y as u32 + r.h as u32 > self.fb.height as u32 {
-            bail!("rect {r:?} outside {}x{} framebuffer", self.fb.width, self.fb.height);
+        if r.x as u32 + r.w as u32 > self.fb.width as u32
+            || r.y as u32 + r.h as u32 > self.fb.height as u32
+        {
+            bail!(
+                "rect {r:?} outside {}x{} framebuffer",
+                self.fb.width,
+                self.fb.height
+            );
         }
         Ok(())
     }
@@ -415,7 +498,12 @@ impl<R: AsyncRead + Unpin> RfbReader<R> {
         self.clip(r)?;
         let sx = self.stream.read_u16().await? as usize;
         let sy = self.stream.read_u16().await? as usize;
-        let src = Rect { x: sx as u16, y: sy as u16, w: r.w, h: r.h };
+        let src = Rect {
+            x: sx as u16,
+            y: sy as u16,
+            w: r.w,
+            h: r.h,
+        };
         self.clip(src)?;
         let stride = self.fb.width as usize * 4;
         let row_len = r.w as usize * 4;
@@ -447,17 +535,21 @@ impl<R: AsyncRead + Unpin> RfbReader<R> {
             while tx < r.w {
                 let tw = (r.w - tx).min(16) as usize;
                 let sub = self.stream.read_u8().await?;
-                let origin = (r.y as usize + ty as usize) * stride + (r.x as usize + tx as usize) * 4;
+                let origin =
+                    (r.y as usize + ty as usize) * stride + (r.x as usize + tx as usize) * 4;
                 // fills the part of a tile's sub-rectangle that lies inside the tile
-                let put = |fb: &mut Framebuffer, x: usize, y: usize, w: usize, h: usize, c: [u8; 4]| {
-                    if x >= tw {
-                        return;
-                    }
-                    for yy in y..(y + h).min(th) {
-                        let o = origin + yy * stride + x * 4;
-                        fb.data[o..o + ((x + w).min(tw) - x) * 4].chunks_exact_mut(4).for_each(|px| px.copy_from_slice(&c));
-                    }
-                };
+                let put =
+                    |fb: &mut Framebuffer, x: usize, y: usize, w: usize, h: usize, c: [u8; 4]| {
+                        if x >= tw {
+                            return;
+                        }
+                        for yy in y..(y + h).min(th) {
+                            let o = origin + yy * stride + x * 4;
+                            fb.data[o..o + ((x + w).min(tw) - x) * 4]
+                                .chunks_exact_mut(4)
+                                .for_each(|px| px.copy_from_slice(&c));
+                        }
+                    };
                 if sub & 1 != 0 {
                     // raw tile: one read, then row copies
                     let bytes = &mut tile[..tw * th * 4];
@@ -575,7 +667,8 @@ fn decode_zrle_tiles(data: &[u8], r: Rect, fb: &mut Framebuffer) -> Result<()> {
                 }
                 (false, 2..=16) => {
                     need(p, pal_size * 3)?;
-                    let pal: Vec<[u8; 4]> = (0..pal_size).map(|i| cpix(&data[p + i * 3..])).collect();
+                    let pal: Vec<[u8; 4]> =
+                        (0..pal_size).map(|i| cpix(&data[p + i * 3..])).collect();
                     p += pal_size * 3;
                     let bits = match pal_size {
                         2 => 1,
@@ -588,8 +681,10 @@ fn decode_zrle_tiles(data: &[u8], r: Rect, fb: &mut Framebuffer) -> Result<()> {
                         for x in 0..tw {
                             let bit = x * bits;
                             let byte = data[p + y * row_bytes + bit / 8];
-                            let idx = ((byte >> (8 - bits - (bit % 8))) & ((1 << bits) - 1)) as usize;
-                            pixels[y * tw + x] = *pal.get(idx).ok_or_else(|| anyhow!("bad palette index"))?;
+                            let idx =
+                                ((byte >> (8 - bits - (bit % 8))) & ((1 << bits) - 1)) as usize;
+                            pixels[y * tw + x] =
+                                *pal.get(idx).ok_or_else(|| anyhow!("bad palette index"))?;
                         }
                     }
                     p += row_bytes * th;
@@ -610,7 +705,8 @@ fn decode_zrle_tiles(data: &[u8], r: Rect, fb: &mut Framebuffer) -> Result<()> {
                 }
                 (true, 2..=127) => {
                     need(p, pal_size * 3)?;
-                    let pal: Vec<[u8; 4]> = (0..pal_size).map(|i| cpix(&data[p + i * 3..])).collect();
+                    let pal: Vec<[u8; 4]> =
+                        (0..pal_size).map(|i| cpix(&data[p + i * 3..])).collect();
                     p += pal_size * 3;
                     let mut i = 0;
                     while i < pixels.len() {
@@ -619,7 +715,11 @@ fn decode_zrle_tiles(data: &[u8], r: Rect, fb: &mut Framebuffer) -> Result<()> {
                         p += 1;
                         let idx = (b & 0x7f) as usize;
                         let c = *pal.get(idx).ok_or_else(|| anyhow!("bad palette index"))?;
-                        let run = if b & 0x80 != 0 { read_run(data, &mut p)? } else { 1 };
+                        let run = if b & 0x80 != 0 {
+                            read_run(data, &mut p)?
+                        } else {
+                            1
+                        };
                         if i + run > pixels.len() {
                             bail!("RLE overrun");
                         }
@@ -630,7 +730,8 @@ fn decode_zrle_tiles(data: &[u8], r: Rect, fb: &mut Framebuffer) -> Result<()> {
                 _ => bail!("invalid ZRLE subencoding {sub}"),
             }
             for y in 0..th {
-                let o = (r.y as usize + ty as usize + y) * stride + (r.x as usize + tx as usize) * 4;
+                let o =
+                    (r.y as usize + ty as usize + y) * stride + (r.x as usize + tx as usize) * 4;
                 fb.data[o..o + tw * 4].copy_from_slice(pixels[y * tw..(y + 1) * tw].as_flattened());
             }
             tx += 64;

@@ -55,26 +55,48 @@ mod tests {
 
     fn cols(text: &str) -> Vec<usize> {
         let mut c = 0;
-        text.chars().map(|ch| { let at = c; c += if ch.len_utf8() > 2 { 2 } else { 1 }; at }).collect()
+        text.chars()
+            .map(|ch| {
+                let at = c;
+                c += if ch.len_utf8() > 2 { 2 } else { 1 };
+                at
+            })
+            .collect()
     }
 
     #[test]
     fn finds_the_url_under_the_cell() {
         let t = "see https://example.com/a?b=1, then";
         let c = cols(t);
-        assert_eq!(url_at(t, &c, 6).as_deref(), Some("https://example.com/a?b=1"));
-        assert_eq!(url_at(t, &c, 4 + "https://example.com/a?b=1".len() - 1).as_deref(), Some("https://example.com/a?b=1"));
+        assert_eq!(
+            url_at(t, &c, 6).as_deref(),
+            Some("https://example.com/a?b=1")
+        );
+        assert_eq!(
+            url_at(t, &c, 4 + "https://example.com/a?b=1".len() - 1).as_deref(),
+            Some("https://example.com/a?b=1")
+        );
         assert_eq!(url_at(t, &c, 1), None, "outside the url");
-        assert_eq!(url_at(t, &c, 4 + "https://example.com/a?b=1".len()), None, "the trailing comma is not part of it");
+        assert_eq!(
+            url_at(t, &c, 4 + "https://example.com/a?b=1".len()),
+            None,
+            "the trailing comma is not part of it"
+        );
     }
 
     #[test]
     fn keeps_balanced_brackets_and_trims_prose_punctuation() {
         let wiki = "(https://en.wikipedia.org/wiki/Rust_(language)).";
         let c = cols(wiki);
-        assert_eq!(url_at(wiki, &c, 10).as_deref(), Some("https://en.wikipedia.org/wiki/Rust_(language)"));
+        assert_eq!(
+            url_at(wiki, &c, 10).as_deref(),
+            Some("https://en.wikipedia.org/wiki/Rust_(language)")
+        );
         let q = "go to http://localhost:8080/path!";
-        assert_eq!(url_at(q, &cols(q), 12).as_deref(), Some("http://localhost:8080/path"));
+        assert_eq!(
+            url_at(q, &cols(q), 12).as_deref(),
+            Some("http://localhost:8080/path")
+        );
         assert_eq!(url_at("ftp://nope", &cols("ftp://nope"), 3), None);
     }
 

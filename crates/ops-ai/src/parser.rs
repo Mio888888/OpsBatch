@@ -28,13 +28,38 @@ pub enum ActionSource {
 /// One remote-desktop operation proposed by the AI (coordinates are desktop pixels).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RdpOperation {
-    Click { x: u16, y: u16, button: u8, double_click: bool },
-    Move { x: u16, y: u16 },
-    Drag { from_x: u16, from_y: u16, to_x: u16, to_y: u16, button: u8 },
-    Scroll { x: u16, y: u16, delta: i32, vertical: bool },
-    Type { text: String },
-    Key { keys: Vec<String> },
-    Wait { ms: u32 },
+    Click {
+        x: u16,
+        y: u16,
+        button: u8,
+        double_click: bool,
+    },
+    Move {
+        x: u16,
+        y: u16,
+    },
+    Drag {
+        from_x: u16,
+        from_y: u16,
+        to_x: u16,
+        to_y: u16,
+        button: u8,
+    },
+    Scroll {
+        x: u16,
+        y: u16,
+        delta: i32,
+        vertical: bool,
+    },
+    Type {
+        text: String,
+    },
+    Key {
+        keys: Vec<String>,
+    },
+    Wait {
+        ms: u32,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -95,12 +120,72 @@ const SHELL_SCRIPT_FENCE_LANGUAGES: &[&str] = &["bash", "sh", "shell", "zsh"];
 const TERMINAL_FENCE_LANGUAGES: &[&str] = &["console", "terminal"];
 
 const COMMON_SHELL_COMMANDS: &[&str] = &[
-    "apt", "apt-get", "awk", "bash", "cat", "cd", "chmod", "chown", "cp", "curl", "df", "dnf",
-    "docker", "du", "echo", "export", "find", "free", "git", "grep", "head", "helm", "id",
-    "journalctl", "kubectl", "less", "ls", "mkdir", "mv", "netstat", "nginx", "node", "npm",
-    "ping", "pip", "pip3", "pnpm", "printf", "ps", "psql", "pwd", "python", "python3",
-    "redis-cli", "rm", "rsync", "scp", "sed", "sh", "ss", "sudo", "systemctl", "tail", "tar",
-    "top", "touch", "uname", "unzip", "vim", "vi", "wget", "whoami", "yum", "yarn", "zip", "zsh",
+    "apt",
+    "apt-get",
+    "awk",
+    "bash",
+    "cat",
+    "cd",
+    "chmod",
+    "chown",
+    "cp",
+    "curl",
+    "df",
+    "dnf",
+    "docker",
+    "du",
+    "echo",
+    "export",
+    "find",
+    "free",
+    "git",
+    "grep",
+    "head",
+    "helm",
+    "id",
+    "journalctl",
+    "kubectl",
+    "less",
+    "ls",
+    "mkdir",
+    "mv",
+    "netstat",
+    "nginx",
+    "node",
+    "npm",
+    "ping",
+    "pip",
+    "pip3",
+    "pnpm",
+    "printf",
+    "ps",
+    "psql",
+    "pwd",
+    "python",
+    "python3",
+    "redis-cli",
+    "rm",
+    "rsync",
+    "scp",
+    "sed",
+    "sh",
+    "ss",
+    "sudo",
+    "systemctl",
+    "tail",
+    "tar",
+    "top",
+    "touch",
+    "uname",
+    "unzip",
+    "vim",
+    "vi",
+    "wget",
+    "whoami",
+    "yum",
+    "yarn",
+    "zip",
+    "zsh",
 ];
 
 pub(crate) struct FenceBlock {
@@ -211,7 +296,11 @@ pub fn parse_ai_pending_actions_with_plan(
 }
 
 /// Entry point used by the chat store: in a remote-desktop session an `<RDP_PLAN>` is tried first.
-pub fn parse_ai_pending_actions_for(content: &str, rdp_desktop: Option<(u32, u32)>, single_command: bool) -> ParsedAiActionsResult {
+pub fn parse_ai_pending_actions_for(
+    content: &str,
+    rdp_desktop: Option<(u32, u32)>,
+    single_command: bool,
+) -> ParsedAiActionsResult {
     if let Some(size) = rdp_desktop {
         if let Some(r) = crate::rdp_parser::parse_rdp_actions(content, size) {
             return ParsedAiActionsResult {
@@ -246,7 +335,13 @@ pub fn parse_ai_pending_actions(content: &str) -> ParsedAiActionsResult {
             Some(i) if body.is_empty() => tag[i + 1..].trim(),
             _ => body,
         };
-        add_command_action(&mut actions, &mut seen, description, raw_command, ActionSource::ActionBlock);
+        add_command_action(
+            &mut actions,
+            &mut seen,
+            description,
+            raw_command,
+            ActionSource::ActionBlock,
+        );
     }
 
     let display_content = ACTION_RE.replace_all(content, "").trim().to_string();
@@ -257,10 +352,22 @@ pub fn parse_ai_pending_actions(content: &str) -> ParsedAiActionsResult {
             continue;
         }
         let description = extract_description_before_fence(&display_content, block.start_index);
-        add_command_action(&mut actions, &mut seen, &description, &command, ActionSource::Fence);
+        add_command_action(
+            &mut actions,
+            &mut seen,
+            &description,
+            &command,
+            ActionSource::Fence,
+        );
     }
 
-    ParsedAiActionsResult { display_content, actions, command_plan_notice: None, rdp_parse_error: None, rdp_parse_diagnostic: None }
+    ParsedAiActionsResult {
+        display_content,
+        actions,
+        command_plan_notice: None,
+        rdp_parse_error: None,
+        rdp_parse_diagnostic: None,
+    }
 }
 
 fn constrain(mut result: ParsedAiActionsResult, single_command: bool) -> ParsedAiActionsResult {
@@ -274,7 +381,9 @@ pub fn extract_empty_command_plan_notice(content: &str) -> Option<ParsedAiAction
     let candidate = extract_command_plan_candidate(content)?;
     let notice = parse_empty_command_plan_notice(&candidate.raw_plan)?;
     Some(ParsedAiActionsResult {
-        display_content: remove_command_plan_from_display(content, &candidate).trim().to_string(),
+        display_content: remove_command_plan_from_display(content, &candidate)
+            .trim()
+            .to_string(),
         actions: Vec::new(),
         command_plan_notice: Some(notice),
         ..Default::default()
@@ -300,7 +409,11 @@ fn add_command_action(
     if command.is_empty() || key.is_empty() || !seen.insert(key) {
         return;
     }
-    let description = if description.is_empty() { DEFAULT_DESCRIPTION } else { description };
+    let description = if description.is_empty() {
+        DEFAULT_DESCRIPTION
+    } else {
+        description
+    };
     actions.push(ParsedPendingAction::command(
         uuid::Uuid::new_v4().to_string(),
         description.to_string(),
@@ -366,7 +479,11 @@ pub(crate) fn find_fence_end(content: &str, fence_start: usize) -> usize {
 
 fn remove_command_plan_from_display(content: &str, candidate: &CommandPlanCandidate) -> String {
     let after = &content[candidate.end_index..];
-    let end = if TRAILING_PUNCT_RE.is_match(after) { content.len() } else { candidate.end_index };
+    let end = if TRAILING_PUNCT_RE.is_match(after) {
+        content.len()
+    } else {
+        candidate.end_index
+    };
     format!("{}{}", &content[..candidate.start_index], &content[end..])
 }
 
@@ -383,7 +500,10 @@ fn parse_empty_command_plan_notice(raw: &str) -> Option<CommandPlanNotice> {
     if summary.is_empty() || summary.encode_utf16().count() > 200 {
         return None;
     }
-    Some(CommandPlanNotice { version: 1, summary: summary.to_string() })
+    Some(CommandPlanNotice {
+        version: 1,
+        summary: summary.to_string(),
+    })
 }
 
 /// First balanced JSON object at/after `start` (tolerates streaming truncation by repairing it).
@@ -430,7 +550,10 @@ pub(crate) fn slice_balanced_json(content: &str, start: usize) -> Option<(String
 
     if let Some(fb) = first_brace {
         if !open_stack.is_empty() {
-            return Some((repair_truncated_json(&content[fb..], &open_stack), content.len()));
+            return Some((
+                repair_truncated_json(&content[fb..], &open_stack),
+                content.len(),
+            ));
         }
     }
     None
@@ -552,7 +675,9 @@ fn try_fence_at(content: &str, m: usize) -> Option<(FenceBlock, usize)> {
                 while k < bytes.len() && (bytes[k] == b' ' || bytes[k] == b'\t') {
                     k += 1;
                 }
-                let ok = k == bytes.len() || bytes[k..].starts_with(b"\n") || bytes[k..].starts_with(b"\r\n");
+                let ok = k == bytes.len()
+                    || bytes[k..].starts_with(b"\n")
+                    || bytes[k..].starts_with(b"\r\n");
                 if ok {
                     return Some((
                         FenceBlock {
@@ -598,12 +723,20 @@ fn shell_command_from_fence(language: &str, code: &str) -> String {
         if !prompted.is_empty() {
             return prompted.join("\n");
         }
-        return if looks_like_shell_commands(code) { code.to_string() } else { String::new() };
+        return if looks_like_shell_commands(code) {
+            code.to_string()
+        } else {
+            String::new()
+        };
     }
     if !language.is_empty() {
         return String::new();
     }
-    if looks_like_shell_commands(code) { code.to_string() } else { String::new() }
+    if looks_like_shell_commands(code) {
+        code.to_string()
+    } else {
+        String::new()
+    }
 }
 
 fn normalize_newlines(s: &str) -> String {
@@ -619,10 +752,14 @@ fn extract_terminal_transcript_commands(command: &str) -> Vec<String> {
 
 pub fn sanitize_shell_command(command: &str) -> String {
     let normalized = normalize_newlines(command);
-    let raw_lines: Vec<&str> =
-        normalized.split('\n').map(|l| l.trim_end_matches([' ', '\t'])).collect();
-    let prompted: Vec<String> =
-        raw_lines.iter().filter_map(|l| extract_shell_prompt_command(l)).collect();
+    let raw_lines: Vec<&str> = normalized
+        .split('\n')
+        .map(|l| l.trim_end_matches([' ', '\t']))
+        .collect();
+    let prompted: Vec<String> = raw_lines
+        .iter()
+        .filter_map(|l| extract_shell_prompt_command(l))
+        .collect();
     let lines: Vec<String> = if prompted.is_empty() {
         raw_lines
             .iter()
@@ -655,8 +792,11 @@ fn extract_shell_prompt_command(line: &str) -> Option<String> {
 
 fn looks_like_shell_commands(code: &str) -> bool {
     let sanitized = sanitize_shell_command(code);
-    let lines: Vec<&str> =
-        sanitized.split('\n').map(str::trim).filter(|l| !l.is_empty()).collect();
+    let lines: Vec<&str> = sanitized
+        .split('\n')
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
     if lines.is_empty() {
         return false;
     }
@@ -679,7 +819,10 @@ fn is_likely_shell_line(line: &str) -> bool {
 }
 
 fn normalize_command_for_dedupe(command: &str) -> String {
-    WHITESPACE_RE.replace_all(&sanitize_shell_command(command), " ").trim().to_string()
+    WHITESPACE_RE
+        .replace_all(&sanitize_shell_command(command), " ")
+        .trim()
+        .to_string()
 }
 
 fn extract_description_before_fence(content: &str, fence_start: usize) -> String {
@@ -717,7 +860,10 @@ mod tests {
         assert_eq!(result.display_content, "");
         assert_eq!(
             result.command_plan_notice,
-            Some(CommandPlanNotice { version: 1, summary: "当前只需要观察目录，不需要后续操作".into() })
+            Some(CommandPlanNotice {
+                version: 1,
+                summary: "当前只需要观察目录，不需要后续操作".into()
+            })
         );
     }
 
@@ -731,7 +877,10 @@ mod tests {
 
     #[test]
     fn strip_handles_streaming_partial_plan() {
-        assert_eq!(strip_command_plan_block("好的\n<COMMAND_PLAN>\n{\"ver"), "好的");
+        assert_eq!(
+            strip_command_plan_block("好的\n<COMMAND_PLAN>\n{\"ver"),
+            "好的"
+        );
         assert_eq!(strip_command_plan_block("结果\n</COMMAND"), "结果");
     }
 
@@ -741,7 +890,10 @@ mod tests {
             "\n[ACTION:检查服务]\nsystemctl status nginx\n[/ACTION]\n[ACTION:读取日志]\njournalctl -u nginx -n 50\n[/ACTION]\n",
         );
         assert_eq!(result.actions.len(), 1);
-        assert_eq!(result.actions[0].command.as_deref(), Some("systemctl status nginx"));
+        assert_eq!(
+            result.actions[0].command.as_deref(),
+            Some("systemctl status nginx")
+        );
         assert_eq!(result.actions[0].description, "检查服务");
         assert_eq!(result.display_content, "");
     }
@@ -766,7 +918,10 @@ mod tests {
         assert_eq!(all.display_content, "说明");
         let one = parse_ai_pending_actions_with_plan(content, true);
         assert_eq!(one.actions.len(), 1);
-        assert_eq!(one.actions[0].command.as_deref(), Some("systemctl status nginx"));
+        assert_eq!(
+            one.actions[0].command.as_deref(),
+            Some("systemctl status nginx")
+        );
         assert_eq!(one.actions[0].source, Some(ActionSource::CommandPlan));
         assert_eq!(one.actions[0].expected_outcome.as_deref(), Some("状态"));
     }
@@ -820,7 +975,10 @@ mod tests {
         let content = "```console\nroot@host:~# ls /etc\nfile1\n$ uname -a\n```\n```bash\n# just a comment\n```";
         let result = parse_ai_pending_actions(content);
         assert_eq!(result.actions.len(), 1);
-        assert_eq!(result.actions[0].command.as_deref(), Some("ls /etc\nuname -a"));
+        assert_eq!(
+            result.actions[0].command.as_deref(),
+            Some("ls /etc\nuname -a")
+        );
     }
 
     #[test]

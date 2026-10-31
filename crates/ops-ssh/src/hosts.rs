@@ -1,12 +1,12 @@
-use std::sync::Arc;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use std::net::{TcpStream, ToSocketAddrs};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::ssh::{self, SshConnectionRegistry};
 use ops_core::db::Database;
 use ops_core::security::SECRET_PLACEHOLDER;
-use crate::ssh::{self, SshConnectionRegistry};
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -96,7 +96,6 @@ pub struct HostMonitorSnapshot {
     pub filesystems: Vec<HostMonitorFilesystem>,
 }
 
-
 struct HostConnectionInfo {
     config: ssh::SshConfig,
     os: String,
@@ -172,15 +171,15 @@ pub fn resolve_host_proxy_settings(
         None => return Ok(None),
     };
     if settings.password.as_deref() == Some(SECRET_PLACEHOLDER) {
-        settings.password = Some(ops_core::keychain::get_host_proxy_password(host_id).map_err(
-            |error| match error {
+        settings.password = Some(
+            ops_core::keychain::get_host_proxy_password(host_id).map_err(|error| match error {
                 ops_core::keychain::SecretError::Missing => format!(
                     "主机 {} 的代理密码未在本地加密存储中找到，请重新编辑主机并保存代理密码。",
                     host_id
                 ),
                 other => other.to_string(),
-            },
-        )?);
+            })?,
+        );
     }
     Ok(Some(settings))
 }

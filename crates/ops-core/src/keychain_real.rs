@@ -44,7 +44,13 @@ static SERVICE_NAME_RESOLVED: OnceLock<String> = OnceLock::new();
 
 /// The keychain service every item lives under (`com.opsbatch.app` unless overridden for a verification run).
 pub fn system_keychain_service() -> &'static str {
-    SERVICE_NAME_RESOLVED.get_or_init(|| std::env::var(SERVICE_OVERRIDE_ENV).ok().map(|v| v.trim().to_string()).filter(|v| !v.is_empty()).unwrap_or_else(|| SERVICE_NAME.to_string()))
+    SERVICE_NAME_RESOLVED.get_or_init(|| {
+        std::env::var(SERVICE_OVERRIDE_ENV)
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| SERVICE_NAME.to_string())
+    })
 }
 static VAULT_FILE_LOCK: Mutex<()> = Mutex::new(());
 static VAULT_MASTER_KEY: Mutex<Option<[u8; 32]>> = Mutex::new(None);
@@ -276,11 +282,9 @@ pub fn is_locked_error_message(message: &str) -> bool {
     message == SecretError::Locked.to_string()
 }
 
-
 pub fn is_local_vault_unlocked_command() -> bool {
     is_local_vault_unlocked()
 }
-
 
 pub fn unlock_local_vault(master_key: Option<String>) -> Result<(), String> {
     if is_local_vault_unlocked() {
@@ -291,15 +295,24 @@ pub fn unlock_local_vault(master_key: Option<String>) -> Result<(), String> {
         Ok(Some(system_key)) if !system_key.needs_user_setup => {
             unlock_with_existing_or_provided_key(system_key.key, master_key.as_deref())
         }
-        Ok(Some(system_key)) => unlock_with_setup_required_key(system_key.key, master_key.as_deref()),
-        Ok(None) => unlock_with_passphrase(master_key.as_deref(), "本地加密密钥不存在，请输入新的解锁密钥。"),
+        Ok(Some(system_key)) => {
+            unlock_with_setup_required_key(system_key.key, master_key.as_deref())
+        }
+        Ok(None) => unlock_with_passphrase(
+            master_key.as_deref(),
+            "本地加密密钥不存在，请输入新的解锁密钥。",
+        ),
         Err(KeyringProblem::Unavailable(detail)) => unlock_with_passphrase(
             master_key.as_deref(),
-            &format!("{KEYCHAIN_UNAVAILABLE}，请输入启动密钥解锁，本次不会保存到钥匙串。详情: {detail}"),
+            &format!(
+                "{KEYCHAIN_UNAVAILABLE}，请输入启动密钥解锁，本次不会保存到钥匙串。详情: {detail}"
+            ),
         ),
         Err(KeyringProblem::BadItem(detail)) => unlock_with_passphrase(
             master_key.as_deref(),
-            &format!("系统钥匙串中的本地加密密钥无法解开现有 vault，请输入启动密钥。详情: {detail}"),
+            &format!(
+                "系统钥匙串中的本地加密密钥无法解开现有 vault，请输入启动密钥。详情: {detail}"
+            ),
         ),
         Err(KeyringProblem::Failed(message)) => Err(message),
     }
@@ -587,8 +600,8 @@ fn write_system_vault_master_key(key: &[u8; 32]) -> Result<(), String> {
     #[cfg(not(test))]
     {
         let account = secret_account(KEY_LOCAL_VAULT_MASTER_KEY, "default");
-        let entry =
-            Entry::new(system_keychain_service(), &account).map_err(|e| format!("keyring 创建失败: {}", e))?;
+        let entry = Entry::new(system_keychain_service(), &account)
+            .map_err(|e| format!("keyring 创建失败: {}", e))?;
         entry
             .set_password(&encode_system_vault_master_key(key))
             .map_err(|e| format!("系统钥匙串保存失败: {}", e))
@@ -667,14 +680,19 @@ fn test_system_keyring_get() -> Result<Option<SystemVaultMasterKey>, KeyringProb
         .map_err(|_| KeyringProblem::Failed("测试系统钥匙串锁已损坏".to_string()))?
         .clone();
     if let Some(value) = value {
-        return decode_system_vault_master_key(&value).map(Some).map_err(KeyringProblem::BadItem);
+        return decode_system_vault_master_key(&value)
+            .map(Some)
+            .map_err(KeyringProblem::BadItem);
     }
     read_legacy_system_vault_master_key().map_err(KeyringProblem::Failed)
 }
 
 #[cfg(test)]
 fn test_keyring_mode() -> TestKeyringMode {
-    TEST_SYSTEM_KEYRING_MODE.lock().map(|m| m.clone()).unwrap_or(TestKeyringMode::Working)
+    TEST_SYSTEM_KEYRING_MODE
+        .lock()
+        .map(|m| m.clone())
+        .unwrap_or(TestKeyringMode::Working)
 }
 
 #[cfg(test)]
@@ -809,14 +827,16 @@ fn macos_keychain() -> Result<SecKeychain, String> {
 fn macos_get_secret(account: &str) -> Result<String, SecretError> {
     let keychain = macos_keychain().map_err(SecretError::Backend)?;
     let (password, _) =
-        find_generic_password(Some(&[keychain]), system_keychain_service(), account).map_err(|e| {
-            let text = e.to_string();
-            if text.contains("-25300") || text.contains("could not be found") {
-                SecretError::Missing
-            } else {
-                SecretError::Backend(format!("macOS keychain 读取失败: {}", text))
-            }
-        })?;
+        find_generic_password(Some(&[keychain]), system_keychain_service(), account).map_err(
+            |e| {
+                let text = e.to_string();
+                if text.contains("-25300") || text.contains("could not be found") {
+                    SecretError::Missing
+                } else {
+                    SecretError::Backend(format!("macOS keychain 读取失败: {}", text))
+                }
+            },
+        )?;
     String::from_utf8(password.to_vec())
         .map_err(|e| SecretError::Backend(format!("macOS keychain UTF-8 解码失败: {}", e)))
 }
@@ -1265,7 +1285,9 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("vault dir");
         set_test_vault_dir_for_tests(Some(dir.clone()));
         unlock_local_vault_for_tests(derive_master_key_from_passphrase(passphrase));
-        default_vault().store("host_password", "host-a", "secret").expect("store");
+        default_vault()
+            .store("host_password", "host-a", "secret")
+            .expect("store");
         clear_cached_vault_key_for_tests();
         set_test_vault_dir_for_tests(Some(dir.clone()));
         dir
@@ -1285,7 +1307,10 @@ mod tests {
 
         // asked for the password, with the reason (the dialog turns this into the password form)
         let error = unlock_local_vault(None).unwrap_err();
-        assert!(error.contains(KEYCHAIN_UNAVAILABLE) && error.contains("no Secret Service"), "{error}");
+        assert!(
+            error.contains(KEYCHAIN_UNAVAILABLE) && error.contains("no Secret Service"),
+            "{error}"
+        );
         assert!(!is_local_vault_unlocked());
         // a wrong password does not open the vault
         let error = unlock_local_vault(Some("wrong".to_string())).unwrap_err();
@@ -1294,13 +1319,22 @@ mod tests {
         // the right one does, although nothing can be stored in the keychain
         unlock_local_vault(Some("startup-secret".to_string())).expect("unlock without a keychain");
         assert!(is_local_vault_unlocked());
-        assert_eq!("secret", get_secret("host_password", "host-a").expect("the vault opens"));
-        assert_eq!(None, raw_test_system_keyring_get().unwrap(), "nothing was written to the keychain");
+        assert_eq!(
+            "secret",
+            get_secret("host_password", "host-a").expect("the vault opens")
+        );
+        assert_eq!(
+            None,
+            raw_test_system_keyring_get().unwrap(),
+            "nothing was written to the keychain"
+        );
         // and the next start asks again
         clear_cached_vault_key_for_tests();
         set_test_vault_dir_for_tests(Some(dir.clone()));
         set_test_keyring_mode_for_tests(TestKeyringMode::Down("no Secret Service".to_string()));
-        assert!(unlock_local_vault(None).unwrap_err().contains(KEYCHAIN_UNAVAILABLE));
+        assert!(unlock_local_vault(None)
+            .unwrap_err()
+            .contains(KEYCHAIN_UNAVAILABLE));
 
         remove_vault_dir(dir);
     }
@@ -1337,8 +1371,11 @@ mod tests {
         set_test_vault_dir_for_tests(Some(dir.clone()));
         set_test_keyring_mode_for_tests(TestKeyringMode::ReadOnly);
 
-        assert!(unlock_local_vault(None).unwrap_err().contains("本地加密密钥不存在"));
-        unlock_local_vault(Some("pw".to_string())).expect("unlock although the key cannot be remembered");
+        assert!(unlock_local_vault(None)
+            .unwrap_err()
+            .contains("本地加密密钥不存在"));
+        unlock_local_vault(Some("pw".to_string()))
+            .expect("unlock although the key cannot be remembered");
         assert!(is_local_vault_unlocked());
         assert_eq!(None, raw_test_system_keyring_get().unwrap());
 
@@ -1356,7 +1393,9 @@ mod tests {
         // ... and the start after that needs no password
         clear_cached_vault_key_for_tests();
         set_test_vault_dir_for_tests(Some(dir.clone()));
-        store_mock_system_keyring_key_for_tests(derive_master_key_from_passphrase("startup-secret"));
+        store_mock_system_keyring_key_for_tests(derive_master_key_from_passphrase(
+            "startup-secret",
+        ));
         unlock_local_vault(None).expect("unlock by itself");
         assert_eq!("secret", get_secret("host_password", "host-a").unwrap());
 
@@ -1371,11 +1410,17 @@ mod tests {
         test_system_keyring_set("not a key at all").expect("plant a bad item");
 
         let error = unlock_local_vault(None).unwrap_err();
-        assert!(error.contains("系统钥匙串中的本地加密密钥无法解开现有 vault"), "{error}");
+        assert!(
+            error.contains("系统钥匙串中的本地加密密钥无法解开现有 vault"),
+            "{error}"
+        );
         unlock_local_vault(Some("startup-secret".to_string())).expect("recover");
         assert_eq!("secret", get_secret("host_password", "host-a").unwrap());
         let stored = raw_test_system_keyring_get().unwrap().unwrap();
-        assert!(stored.starts_with(SYSTEM_VAULT_MASTER_KEY_PREFIX), "the bad item was overwritten: {stored}");
+        assert!(
+            stored.starts_with(SYSTEM_VAULT_MASTER_KEY_PREFIX),
+            "the bad item was overwritten: {stored}"
+        );
 
         remove_vault_dir(dir);
     }
@@ -1432,7 +1477,9 @@ pub mod verification {
     pub fn replace_system_master_key_with_random() -> Result<(), String> {
         guard()?;
         let mut key = [0u8; 32];
-        key.iter_mut().zip(new_nonce().iter().cycle()).for_each(|(k, n)| *k = *n);
+        key.iter_mut()
+            .zip(new_nonce().iter().cycle())
+            .for_each(|(k, n)| *k = *n);
         key[31] ^= 0x5a;
         write_system_vault_master_key(&key)
     }

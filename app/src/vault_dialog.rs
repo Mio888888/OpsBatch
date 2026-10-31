@@ -4,6 +4,7 @@
 //! vault, it asks for the startup password (Enter submits). After the unlock plaintext secrets are migrated into the
 //! vault. The dialog cannot be dismissed; the app is not usable without its credentials.
 
+use crate::scale::px;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
@@ -12,7 +13,6 @@ use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Icon, Sizable as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use crate::scale::px;
 use ops_i18n::t;
 
 /// Messages of the vault that mean "ask the user for the startup password" (`KeychainNoticeModal.tsx`).
@@ -37,18 +37,36 @@ impl VaultDialog {
     pub fn open(window: &mut Window, cx: &mut App) -> Entity<Self> {
         let view = cx.new(|cx| Self::new(window, cx));
         let shown = view.clone();
-        window.open_dialog(cx, move |d, _, _| d.title(t!("keychainNotice.title")).w(px(520.)).close_button(false).overlay_closable(false).keyboard(false).child(shown.clone()));
+        window.open_dialog(cx, move |d, _, _| {
+            d.title(t!("keychainNotice.title"))
+                .w(px(520.))
+                .close_button(false)
+                .overlay_closable(false)
+                .keyboard(false)
+                .child(shown.clone())
+        });
         view
     }
 
     fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let input = cx.new(|cx| InputState::new(window, cx).placeholder(t!("keychainNotice.inputPlaceholder")).masked(true));
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("keychainNotice.inputPlaceholder"))
+                .masked(true)
+        });
         let sub = cx.subscribe_in(&input, window, |this, _, ev: &InputEvent, window, cx| {
             if matches!(ev, InputEvent::PressEnter { .. }) {
                 this.submit(window, cx);
             }
         });
-        let mut this = Self { input, loading: false, pending_input: false, failed: false, error: String::new(), _sub: sub };
+        let mut this = Self {
+            input,
+            loading: false,
+            pending_input: false,
+            failed: false,
+            error: String::new(),
+            _sub: sub,
+        };
         this.try_unlock(None, window, cx);
         this
     }
@@ -106,16 +124,27 @@ impl VaultDialog {
                     }
                     Err(message) if message.contains(KEYCHAIN_UNAVAILABLE) => {
                         this.pending_input = true;
-                        let detail = message.split_once("详情: ").map(|(_, d)| d.trim()).filter(|d| !d.is_empty());
+                        let detail = message
+                            .split_once("详情: ")
+                            .map(|(_, d)| d.trim())
+                            .filter(|d| !d.is_empty());
                         this.error = match detail {
-                            Some(detail) => format!("{} ({detail})", t!("keychainNotice.keychainUnavailable")),
+                            Some(detail) => {
+                                format!("{} ({detail})", t!("keychainNotice.keychainUnavailable"))
+                            }
                             None => t!("keychainNotice.keychainUnavailable"),
                         };
                         this.input.update(cx, |s, cx| s.focus(window, cx));
                     }
-                    Err(message) if message.contains(MISSING_KEY) || message.contains(STALE_KEY) => {
+                    Err(message)
+                        if message.contains(MISSING_KEY) || message.contains(STALE_KEY) =>
+                    {
                         this.pending_input = true;
-                        this.error = if message.contains(STALE_KEY) { t!("keychainNotice.staleMasterKey") } else { t!("keychainNotice.needMasterKey") };
+                        this.error = if message.contains(STALE_KEY) {
+                            t!("keychainNotice.staleMasterKey")
+                        } else {
+                            t!("keychainNotice.needMasterKey")
+                        };
                         this.input.update(cx, |s, cx| s.focus(window, cx));
                     }
                     Err(message) => {
@@ -134,13 +163,25 @@ impl Render for VaultDialog {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let ui = crate::theme::ui(cx);
-        let muted = |text: String| div().text_size(px(12.)).line_height(relative(1.5)).text_color(ui.text_muted).child(text);
+        let muted = |text: String| {
+            div()
+                .text_size(px(12.))
+                .line_height(relative(1.5))
+                .text_color(ui.text_muted)
+                .child(text)
+        };
         v_flex()
             .id("vault-dialog")
             .test_support()
             .gap(px(12.))
             .pt(px(8.))
-            .child(div().text_size(px(13.)).line_height(relative(1.6)).text_color(ui.text_secondary).child(t!("keychainNotice.body")))
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .line_height(relative(1.6))
+                    .text_color(ui.text_secondary)
+                    .child(t!("keychainNotice.body")),
+            )
             .child(
                 h_flex()
                     .gap(px(8.))
@@ -151,8 +192,17 @@ impl Render for VaultDialog {
                     .border_1()
                     .border_color(ui.border)
                     .bg(ui.input_bg)
-                    .child(Icon::new(IconName::ShieldCheck).size_4().text_color(theme.primary))
-                    .child(div().text_size(px(13.)).text_color(ui.text).child(t!("keychainNotice.status"))),
+                    .child(
+                        Icon::new(IconName::ShieldCheck)
+                            .size_4()
+                            .text_color(theme.primary),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(13.))
+                            .text_color(ui.text)
+                            .child(t!("keychainNotice.status")),
+                    ),
             )
             .child(if self.pending_input {
                 h_flex()
@@ -161,16 +211,62 @@ impl Render for VaultDialog {
                     .gap(px(8.))
                     .items_center()
                     .child(div().flex_1().child(Input::new(&self.input).mask_toggle()))
-                    .child(Button::new("vault-unlock").primary().icon(Icon::new(IconName::KeyRound)).label(if self.loading { t!("keychainNotice.unlocking") } else { t!("keychainNotice.unlock") }).loading(self.loading).on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))))
+                    .child(
+                        Button::new("vault-unlock")
+                            .primary()
+                            .icon(Icon::new(IconName::KeyRound))
+                            .label(if self.loading {
+                                t!("keychainNotice.unlocking")
+                            } else {
+                                t!("keychainNotice.unlock")
+                            })
+                            .loading(self.loading)
+                            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
+                    )
                     .into_any_element()
             } else {
-                v_flex().id("vault-hints").test_support().gap(px(6.)).child(muted(t!("keychainNotice.autoUnlock"))).child(muted(t!("keychainNotice.lockedHint"))).into_any_element()
+                v_flex()
+                    .id("vault-hints")
+                    .test_support()
+                    .gap(px(6.))
+                    .child(muted(t!("keychainNotice.autoUnlock")))
+                    .child(muted(t!("keychainNotice.lockedHint")))
+                    .into_any_element()
             })
-            .when(!self.error.is_empty(), |d| d.child(div().id("vault-error").test_support().text_size(px(12.)).line_height(relative(1.5)).text_color(theme.danger).child(self.error.clone())))
+            .when(!self.error.is_empty(), |d| {
+                d.child(
+                    div()
+                        .id("vault-error")
+                        .test_support()
+                        .text_size(px(12.))
+                        .line_height(relative(1.5))
+                        .text_color(theme.danger)
+                        .child(self.error.clone()),
+                )
+            })
             // nothing a password can fix: offer another go (the keychain may be unlocked or allowed by now)
             .when(self.failed && !self.pending_input && !self.loading, |d| {
-                d.child(h_flex().child(Button::new("vault-retry").icon(Icon::new(IconName::RefreshCw)).label(t!("keychainNotice.retry")).on_click(cx.listener(|this, _, window, cx| this.try_unlock(None, window, cx)))))
+                d.child(
+                    h_flex().child(
+                        Button::new("vault-retry")
+                            .icon(Icon::new(IconName::RefreshCw))
+                            .label(t!("keychainNotice.retry"))
+                            .on_click(
+                                cx.listener(|this, _, window, cx| {
+                                    this.try_unlock(None, window, cx)
+                                }),
+                            ),
+                    ),
+                )
             })
-            .when(self.loading, |d| d.child(h_flex().gap(px(8.)).items_center().child(Spinner::new().small()).child(muted(t!("keychainNotice.waiting")))))
+            .when(self.loading, |d| {
+                d.child(
+                    h_flex()
+                        .gap(px(8.))
+                        .items_center()
+                        .child(Spinner::new().small())
+                        .child(muted(t!("keychainNotice.waiting"))),
+                )
+            })
     }
 }

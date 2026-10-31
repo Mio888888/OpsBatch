@@ -3,6 +3,7 @@
 
 use std::collections::HashMap;
 
+use crate::scale::px;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::checkbox::Checkbox;
@@ -11,7 +12,6 @@ use gpui_kit::component::select::Select;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use crate::scale::px;
 use ops_i18n::t;
 use ops_ssh::hosts::Host;
 
@@ -70,11 +70,23 @@ pub struct HostDialog {
     _subs: Vec<Subscription>,
 }
 
-fn text_input(window: &mut Window, cx: &mut Context<HostDialog>, placeholder: String, value: &str, masked: bool) -> Entity<InputState> {
+fn text_input(
+    window: &mut Window,
+    cx: &mut Context<HostDialog>,
+    placeholder: String,
+    value: &str,
+    masked: bool,
+) -> Entity<InputState> {
     let value = value.to_string();
     cx.new(|cx| {
-        let s = InputState::new(window, cx).placeholder(placeholder).default_value(value);
-        if masked { s.masked(true) } else { s }
+        let s = InputState::new(window, cx)
+            .placeholder(placeholder)
+            .default_value(value);
+        if masked {
+            s.masked(true)
+        } else {
+            s
+        }
     })
 }
 
@@ -96,11 +108,13 @@ fn auth_choices(os: OsKind) -> Vec<Choice> {
 
 impl HostDialog {
     /// Open the dialog on the current window. `editing = None` adds a host (optionally into `initial_group`).
-    pub fn open(store: Entity<AssetsStore>,
+    pub fn open(
+        store: Entity<AssetsStore>,
         editing: Option<Host>,
         initial_group: Option<String>,
         window: &mut Window,
-        cx: &mut App,) {
+        cx: &mut App,
+    ) {
         let _ = Self::open_with_handle(store, editing, initial_group, window, cx);
     }
 
@@ -111,10 +125,17 @@ impl HostDialog {
         window: &mut Window,
         cx: &mut App,
     ) -> Entity<HostDialog> {
-        let title: SharedString = if editing.is_some() { t!("assets.editHost") } else { t!("assets.addHost") }.into();
+        let title: SharedString = if editing.is_some() {
+            t!("assets.editHost")
+        } else {
+            t!("assets.addHost")
+        }
+        .into();
         let view = cx.new(|cx| HostDialog::new(store, editing, initial_group, window, cx));
         let shown = view.clone();
-        window.open_dialog(cx, move |dialog, _, _| dialog.title(title.clone()).w(px(520.)).child(shown.clone()));
+        window.open_dialog(cx, move |dialog, _, _| {
+            dialog.title(title.clone()).w(px(520.)).child(shown.clone())
+        });
         let first = view.read(cx).inputs.name.clone();
         first.update(cx, |s, cx| s.focus(window, cx));
         view
@@ -133,7 +154,11 @@ impl HostDialog {
         };
         let (groups, hosts, default_name) = {
             let s = store.read(cx);
-            let name = if s.default_group_name.trim().is_empty() { t!("assets.defaultGroup") } else { s.default_group_name.clone() };
+            let name = if s.default_group_name.trim().is_empty() {
+                t!("assets.defaultGroup")
+            } else {
+                s.default_group_name.clone()
+            };
             (s.groups.clone(), s.hosts.clone(), name)
         };
         let group_options: Vec<Choice> = group_choices(&groups, None)
@@ -142,7 +167,11 @@ impl HostDialog {
                 let name = if id == DEFAULT_GROUP_ID {
                     default_name.clone()
                 } else {
-                    groups.iter().find(|g| g.id == id).map(|g| g.name.clone()).unwrap_or_default()
+                    groups
+                        .iter()
+                        .find(|g| g.id == id)
+                        .map(|g| g.name.clone())
+                        .unwrap_or_default()
                 };
                 let indent = "　".repeat(depth);
                 Choice::new(id, format!("{indent}{name}"))
@@ -150,44 +179,131 @@ impl HostDialog {
             .collect();
         let jump_candidates: Vec<(String, String)> = hosts
             .iter()
-            .filter(|h| h.os == "linux" && HostKind::of(h) == HostKind::Linux && Some(&h.id) != editing.as_ref().map(|e| &e.id))
+            .filter(|h| {
+                h.os == "linux"
+                    && HostKind::of(h) == HostKind::Linux
+                    && Some(&h.id) != editing.as_ref().map(|e| &e.id)
+            })
             .map(|h| (h.id.clone(), format!("{} ({})", h.name, h.ip)))
             .collect();
 
         let inputs = Inputs {
-            name: text_input(window, cx, t!("assets.hostNamePlaceholder"), &values.name, false),
-            ip: text_input(window, cx, t!("assets.hostAddressPlaceholder"), &values.ip, false),
+            name: text_input(
+                window,
+                cx,
+                t!("assets.hostNamePlaceholder"),
+                &values.name,
+                false,
+            ),
+            ip: text_input(
+                window,
+                cx,
+                t!("assets.hostAddressPlaceholder"),
+                &values.ip,
+                false,
+            ),
             port: text_input(window, cx, "22".into(), &values.port, false),
             username: text_input(window, cx, "root".into(), &values.username, false),
             password: text_input(
                 window,
                 cx,
-                if editing.is_some() { t!("assets.passwordKeepPlaceholder") } else { t!("assets.passwordPlaceholder") },
+                if editing.is_some() {
+                    t!("assets.passwordKeepPlaceholder")
+                } else {
+                    t!("assets.passwordPlaceholder")
+                },
                 "",
                 true,
             ),
-            private_key: cx.new(|cx| TextareaState::new(window, cx).placeholder(t!("assets.pastePrivateKey")).auto_grow(2, 6)),
-            remark: text_input(window, cx, t!("assets.remarkPlaceholder"), &values.remark, false),
-            rdp_domain: text_input(window, cx, t!("assets.rdpDomainPlaceholder"), &values.rdp_domain, false),
+            private_key: cx.new(|cx| {
+                TextareaState::new(window, cx)
+                    .placeholder(t!("assets.pastePrivateKey"))
+                    .auto_grow(2, 6)
+            }),
+            remark: text_input(
+                window,
+                cx,
+                t!("assets.remarkPlaceholder"),
+                &values.remark,
+                false,
+            ),
+            rdp_domain: text_input(
+                window,
+                cx,
+                t!("assets.rdpDomainPlaceholder"),
+                &values.rdp_domain,
+                false,
+            ),
             rdp_width: text_input(window, cx, "1280".into(), &values.rdp_width, false),
             rdp_height: text_input(window, cx, "720".into(), &values.rdp_height, false),
-            rdp_disk_path: text_input(window, cx, t!("assets.rdpDiskPathPlaceholder"), &values.rdp_disk_path, false),
+            rdp_disk_path: text_input(
+                window,
+                cx,
+                t!("assets.rdpDiskPathPlaceholder"),
+                &values.rdp_disk_path,
+                false,
+            ),
             vnc_port: text_input(window, cx, "5900".into(), &values.vnc_port, false),
-            vnc_username: text_input(window, cx, t!("assets.vncUsernameAuto"), &values.vnc_username, false),
-            vnc_password: text_input(window, cx, t!("assets.vncPasswordPlaceholder"), &values.vnc_password, true),
-            proxy_host: text_input(window, cx, t!("assets.proxyHostPlaceholder"), &values.proxy_host, false),
+            vnc_username: text_input(
+                window,
+                cx,
+                t!("assets.vncUsernameAuto"),
+                &values.vnc_username,
+                false,
+            ),
+            vnc_password: text_input(
+                window,
+                cx,
+                t!("assets.vncPasswordPlaceholder"),
+                &values.vnc_password,
+                true,
+            ),
+            proxy_host: text_input(
+                window,
+                cx,
+                t!("assets.proxyHostPlaceholder"),
+                &values.proxy_host,
+                false,
+            ),
             proxy_port: text_input(window, cx, "1080".into(), &values.proxy_port, false),
-            proxy_username: text_input(window, cx, t!("assets.proxyUsernamePlaceholder"), &values.proxy_username, false),
-            proxy_password: text_input(window, cx, t!("assets.proxyPasswordPlaceholder"), &values.proxy_password, true),
+            proxy_username: text_input(
+                window,
+                cx,
+                t!("assets.proxyUsernamePlaceholder"),
+                &values.proxy_username,
+                false,
+            ),
+            proxy_password: text_input(
+                window,
+                cx,
+                t!("assets.proxyPasswordPlaceholder"),
+                &values.proxy_password,
+                true,
+            ),
         };
         let selects = Selects {
             os: cx.new(|cx| new_select(os_choices(), values.os.as_str(), window, cx)),
-            auth: cx.new(|cx| new_select(auth_choices(values.os), if values.auth == AuthKind::Key { "key" } else { "password" }, window, cx)),
+            auth: cx.new(|cx| {
+                new_select(
+                    auth_choices(values.os),
+                    if values.auth == AuthKind::Key {
+                        "key"
+                    } else {
+                        "password"
+                    },
+                    window,
+                    cx,
+                )
+            }),
             group: cx.new(|cx| new_select(group_options, &values.group_id, window, cx)),
             proxy_type: cx.new(|cx| {
                 new_select(
                     vec![Choice::new("socks5", "SOCKS5"), Choice::new("http", "HTTP")],
-                    if values.proxy_type == ProxyKind::Http { "http" } else { "socks5" },
+                    if values.proxy_type == ProxyKind::Http {
+                        "http"
+                    } else {
+                        "socks5"
+                    },
                     window,
                     cx,
                 )
@@ -202,7 +318,11 @@ impl HostDialog {
             }),
             cx.subscribe_in(&selects.auth, window, |this, _, ev, _, cx| {
                 if let Some(v) = confirmed_value(ev) {
-                    this.values.auth = if v == "key" { AuthKind::Key } else { AuthKind::Password };
+                    this.values.auth = if v == "key" {
+                        AuthKind::Key
+                    } else {
+                        AuthKind::Password
+                    };
                     cx.notify();
                 }
             }),
@@ -214,17 +334,35 @@ impl HostDialog {
             }),
             cx.subscribe_in(&selects.proxy_type, window, |this, _, ev, window, cx| {
                 if let Some(v) = confirmed_value(ev) {
-                    let kind = if v == "http" { ProxyKind::Http } else { ProxyKind::Socks5 };
+                    let kind = if v == "http" {
+                        ProxyKind::Http
+                    } else {
+                        ProxyKind::Socks5
+                    };
                     this.values.proxy_port = this.inputs.proxy_port.read(cx).value().to_string();
                     this.values.change_proxy_type(kind);
                     let port = this.values.proxy_port.clone();
-                    this.inputs.proxy_port.update(cx, |s, cx| s.set_value(port, window, cx));
+                    this.inputs
+                        .proxy_port
+                        .update(cx, |s, cx| s.set_value(port, window, cx));
                 }
                 cx.notify();
             }),
         ];
 
-        Self { store, editing, values, jump_candidates, tab: Tab::Basic, inputs, selects, errors: Vec::new(), saving: false, error: None, _subs: subs }
+        Self {
+            store,
+            editing,
+            values,
+            jump_candidates,
+            tab: Tab::Basic,
+            inputs,
+            selects,
+            errors: Vec::new(),
+            saving: false,
+            error: None,
+            _subs: subs,
+        }
     }
 
     /// Current values: toggles/selects from `self.values`, text from the input widgets.
@@ -253,7 +391,12 @@ impl HostDialog {
         v
     }
 
-    fn set_text(entity: &Entity<InputState>, value: &str, window: &mut Window, cx: &mut Context<Self>) {
+    fn set_text(
+        entity: &Entity<InputState>,
+        value: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let value = value.to_string();
         entity.update(cx, |s, cx| s.set_value(value, window, cx));
     }
@@ -273,10 +416,16 @@ impl HostDialog {
             Self::set_text(&self.inputs.password, "", window, cx);
         }
         if os != OsKind::Linux {
-            self.inputs.private_key.update(cx, |s, cx| s.set_value("", window, cx));
+            self.inputs
+                .private_key
+                .update(cx, |s, cx| s.set_value("", window, cx));
         }
         // Authentication choices depend on the system (Windows/VNC only allow a password).
-        let auth_value = if v.auth == AuthKind::Key { "key" } else { "password" };
+        let auth_value = if v.auth == AuthKind::Key {
+            "key"
+        } else {
+            "password"
+        };
         self.selects.auth.update(cx, |s, cx| {
             s.set_items(auth_choices(os), window, cx);
             s.set_selected_value(&auth_value.to_string(), window, cx);
@@ -289,7 +438,9 @@ impl HostDialog {
     }
 
     fn error_for(&self, f: Field) -> Option<SharedString> {
-        self.errors.contains(&f).then(|| t!("common.required").into())
+        self.errors
+            .contains(&f)
+            .then(|| t!("common.required").into())
     }
 
     pub fn is_saving(&self) -> bool {
@@ -344,7 +495,15 @@ impl HostDialog {
                 this.saving = false;
                 match result {
                     Ok(()) => {
-                        toast::success(window, cx, if editing { t!("assets.hostUpdated") } else { t!("assets.hostAdded") });
+                        toast::success(
+                            window,
+                            cx,
+                            if editing {
+                                t!("assets.hostUpdated")
+                            } else {
+                                t!("assets.hostAdded")
+                            },
+                        );
                         window.close_dialog(cx);
                     }
                     Err(e) => {
@@ -360,7 +519,13 @@ impl HostDialog {
     // ---- rendering ----
 
     /// `.ui-tabs-trigger`: 34px high, 6/12 padding, 2px underline in the primary colour when active.
-    fn tab_button(&self, id: &'static str, label: String, tab: Tab, cx: &mut Context<Self>) -> impl IntoElement {
+    fn tab_button(
+        &self,
+        id: &'static str,
+        label: String,
+        tab: Tab,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
         let ui = crate::theme::ui(cx);
         let active = self.tab == tab;
         div()
@@ -373,9 +538,19 @@ impl HostDialog {
             .cursor_pointer()
             .text_size(px(13.))
             .border_b_2()
-            .border_color(if active { ui.primary } else { gpui_kit::transparent_black() })
-            .text_color(if active { ui.primary } else { ui.text_secondary })
-            .when(!active, |d| d.hover(move |d| d.text_color(ui.text).bg(ui.text.opacity(0.06))))
+            .border_color(if active {
+                ui.primary
+            } else {
+                gpui_kit::transparent_black()
+            })
+            .text_color(if active {
+                ui.primary
+            } else {
+                ui.text_secondary
+            })
+            .when(!active, |d| {
+                d.hover(move |d| d.text_color(ui.text).bg(ui.text.opacity(0.06)))
+            })
             .on_click(cx.listener(move |this, _, _, cx| {
                 this.tab = tab;
                 cx.notify();
@@ -392,10 +567,28 @@ impl HostDialog {
             h_flex()
                 .gap(px(10.))
                 .items_start()
-                .child(field(t!("assets.auth"), Select::new(&self.selects.auth), None, cx).w(px(88.)).flex_none())
-                .child(field(t!("assets.username"), Input::new(&i.username), self.error_for(Field::Username), cx).flex_1())
+                .child(
+                    field(t!("assets.auth"), Select::new(&self.selects.auth), None, cx)
+                        .w(px(88.))
+                        .flex_none(),
+                )
+                .child(
+                    field(
+                        t!("assets.username"),
+                        Input::new(&i.username),
+                        self.error_for(Field::Username),
+                        cx,
+                    )
+                    .flex_1(),
+                )
                 .child(if key_auth {
-                    field(t!("assets.sshPrivateKey"), Textarea::new(&i.private_key), None, cx).flex_1()
+                    field(
+                        t!("assets.sshPrivateKey"),
+                        Textarea::new(&i.private_key),
+                        None,
+                        cx,
+                    )
+                    .flex_1()
                 } else {
                     field(t!("assets.password"), Input::new(&i.password), None, cx).flex_1()
                 })
@@ -403,14 +596,50 @@ impl HostDialog {
         let vnc = (os == OsKind::Vnc).then(|| {
             v_flex()
                 .gap_2()
-                .child(section(t!("assets.vncSettings"), t!("assets.vncSettingsExtra"), cx))
+                .child(section(
+                    t!("assets.vncSettings"),
+                    t!("assets.vncSettingsExtra"),
+                    cx,
+                ))
                 .child(
                     h_flex()
                         .gap(px(10.))
                         .items_start()
-                        .child(field(t!("assets.vncPort"), crate::widgets::form::spin(Input::new(&i.vnc_port), "host-vnc-port", &i.vnc_port, 1, Some(65535), crate::theme::ui(cx)), None, cx).w(px(96.)).flex_none())
-                        .child(field(t!("assets.vncUsername"), Input::new(&i.vnc_username), None, cx).flex_1())
-                        .child(field(t!("assets.vncPassword"), Input::new(&i.vnc_password), None, cx).flex_1()),
+                        .child(
+                            field(
+                                t!("assets.vncPort"),
+                                crate::widgets::form::spin(
+                                    Input::new(&i.vnc_port),
+                                    "host-vnc-port",
+                                    &i.vnc_port,
+                                    1,
+                                    Some(65535),
+                                    crate::theme::ui(cx),
+                                ),
+                                None,
+                                cx,
+                            )
+                            .w(px(96.))
+                            .flex_none(),
+                        )
+                        .child(
+                            field(
+                                t!("assets.vncUsername"),
+                                Input::new(&i.vnc_username),
+                                None,
+                                cx,
+                            )
+                            .flex_1(),
+                        )
+                        .child(
+                            field(
+                                t!("assets.vncPassword"),
+                                Input::new(&i.vnc_password),
+                                None,
+                                cx,
+                            )
+                            .flex_1(),
+                        ),
                 )
                 .child(
                     h_flex()
@@ -439,22 +668,68 @@ impl HostDialog {
                 h_flex()
                     .gap(px(10.))
                     .items_start()
-                    .child(field(t!("assets.hostName"), Input::new(&i.name), self.error_for(Field::Name), cx).flex_1())
-                    .child(field(t!("assets.system"), Select::new(&self.selects.os), None, cx).w(px(132.)).flex_none()),
+                    .child(
+                        field(
+                            t!("assets.hostName"),
+                            Input::new(&i.name),
+                            self.error_for(Field::Name),
+                            cx,
+                        )
+                        .flex_1(),
+                    )
+                    .child(
+                        field(t!("assets.system"), Select::new(&self.selects.os), None, cx)
+                            .w(px(132.))
+                            .flex_none(),
+                    ),
             )
             .child(
                 h_flex()
                     .gap(px(10.))
                     .items_start()
-                    .child(field(t!("assets.hostAddress"), Input::new(&i.ip), self.error_for(Field::Ip), cx).flex_1())
-                    .child(field(t!("assets.port"), crate::widgets::form::spin(Input::new(&i.port), "host-port", &i.port, 1, Some(65535), crate::theme::ui(cx)), self.error_for(Field::Port), cx).w(px(78.)).flex_none()),
+                    .child(
+                        field(
+                            t!("assets.hostAddress"),
+                            Input::new(&i.ip),
+                            self.error_for(Field::Ip),
+                            cx,
+                        )
+                        .flex_1(),
+                    )
+                    .child(
+                        field(
+                            t!("assets.port"),
+                            crate::widgets::form::spin(
+                                Input::new(&i.port),
+                                "host-port",
+                                &i.port,
+                                1,
+                                Some(65535),
+                                crate::theme::ui(cx),
+                            ),
+                            self.error_for(Field::Port),
+                            cx,
+                        )
+                        .w(px(78.))
+                        .flex_none(),
+                    ),
             )
             .children(auth_row)
             .child(
                 h_flex()
                     .gap(px(10.))
                     .items_start()
-                    .child(field(t!("assets.group"), Select::new(&self.selects.group).icon(gpui_kit::component::Icon::new(gpui_kit::assets::IconName::ChevronDown)), None, cx).flex_1())
+                    .child(
+                        field(
+                            t!("assets.group"),
+                            Select::new(&self.selects.group).icon(gpui_kit::component::Icon::new(
+                                gpui_kit::assets::IconName::ChevronDown,
+                            )),
+                            None,
+                            cx,
+                        )
+                        .flex_1(),
+                    )
                     .child(field(t!("assets.remark"), Input::new(&i.remark), None, cx).flex_1()),
             )
             .children(vnc)
@@ -464,7 +739,11 @@ impl HostDialog {
         let i = &self.inputs;
         v_flex()
             .gap_2()
-            .child(section(t!("assets.proxySettings"), t!("assets.proxySettingsExtra"), cx))
+            .child(section(
+                t!("assets.proxySettings"),
+                t!("assets.proxySettingsExtra"),
+                cx,
+            ))
             .child(switch_row(
                 "proxy-enabled",
                 self.values.proxy_enabled,
@@ -478,16 +757,60 @@ impl HostDialog {
                     h_flex()
                         .gap(px(10.))
                         .items_start()
-                        .child(field(t!("assets.proxyType"), Select::new(&self.selects.proxy_type), None, cx).w(px(128.)).flex_none())
-                        .child(field(t!("assets.proxyHost"), Input::new(&i.proxy_host), None, cx).flex_1())
-                        .child(field(t!("assets.proxyPort"), crate::widgets::form::spin(Input::new(&i.proxy_port), "host-proxy-port", &i.proxy_port, 1, Some(65535), crate::theme::ui(cx)), None, cx).w(px(96.)).flex_none()),
+                        .child(
+                            field(
+                                t!("assets.proxyType"),
+                                Select::new(&self.selects.proxy_type),
+                                None,
+                                cx,
+                            )
+                            .w(px(128.))
+                            .flex_none(),
+                        )
+                        .child(
+                            field(t!("assets.proxyHost"), Input::new(&i.proxy_host), None, cx)
+                                .flex_1(),
+                        )
+                        .child(
+                            field(
+                                t!("assets.proxyPort"),
+                                crate::widgets::form::spin(
+                                    Input::new(&i.proxy_port),
+                                    "host-proxy-port",
+                                    &i.proxy_port,
+                                    1,
+                                    Some(65535),
+                                    crate::theme::ui(cx),
+                                ),
+                                None,
+                                cx,
+                            )
+                            .w(px(96.))
+                            .flex_none(),
+                        ),
                 )
                 .child(
                     h_flex()
                         .gap(px(10.))
                         .items_start()
-                        .child(field(t!("assets.proxyUsername"), Input::new(&i.proxy_username), None, cx).flex_1())
-                        .child(field(t!("assets.proxyPassword"), Input::new(&i.proxy_password), None, cx).flex_1()),
+                        .child(
+                            field(
+                                t!("assets.proxyUsername"),
+                                Input::new(&i.proxy_username),
+                                None,
+                                cx,
+                            )
+                            .flex_1(),
+                        )
+                        .child(
+                            field(
+                                t!("assets.proxyPassword"),
+                                Input::new(&i.proxy_password),
+                                None,
+                                cx,
+                            )
+                            .flex_1(),
+                        ),
                 )
             })
     }
@@ -519,7 +842,12 @@ impl HostDialog {
                     .gap_3()
                     .child(field(
                         t!("assets.jumpChain"),
-                        v_flex().gap_1().when(boxes.is_empty(), |d| d.child(div().text_size(px(12.)).child(t!("assets.directNoJump")))).children(boxes),
+                        v_flex()
+                            .gap_1()
+                            .when(boxes.is_empty(), |d| {
+                                d.child(div().text_size(px(12.)).child(t!("assets.directNoJump")))
+                            })
+                            .children(boxes),
                         None,
                         cx,
                     ))
@@ -528,14 +856,51 @@ impl HostDialog {
             }
             OsKind::Windows => v_flex()
                 .gap_3()
-                .child(section(t!("assets.rdpAdvanced"), t!("assets.rdpAdvancedExtra"), cx))
+                .child(section(
+                    t!("assets.rdpAdvanced"),
+                    t!("assets.rdpAdvancedExtra"),
+                    cx,
+                ))
                 .child(
                     h_flex()
                         .gap_2()
                         .items_start()
-                        .child(field(t!("assets.rdpDomain"), Input::new(&i.rdp_domain), None, cx).flex_1())
-                        .child(field(t!("assets.rdpDesktopWidth"), crate::widgets::form::spin(Input::new(&i.rdp_width), "host-rdp-width", &i.rdp_width, 640, Some(3840), crate::theme::ui(cx)), None, cx).w(px(110.)))
-                        .child(field(t!("assets.rdpDesktopHeight"), crate::widgets::form::spin(Input::new(&i.rdp_height), "host-rdp-height", &i.rdp_height, 480, Some(2160), crate::theme::ui(cx)), None, cx).w(px(110.))),
+                        .child(
+                            field(t!("assets.rdpDomain"), Input::new(&i.rdp_domain), None, cx)
+                                .flex_1(),
+                        )
+                        .child(
+                            field(
+                                t!("assets.rdpDesktopWidth"),
+                                crate::widgets::form::spin(
+                                    Input::new(&i.rdp_width),
+                                    "host-rdp-width",
+                                    &i.rdp_width,
+                                    640,
+                                    Some(3840),
+                                    crate::theme::ui(cx),
+                                ),
+                                None,
+                                cx,
+                            )
+                            .w(px(110.)),
+                        )
+                        .child(
+                            field(
+                                t!("assets.rdpDesktopHeight"),
+                                crate::widgets::form::spin(
+                                    Input::new(&i.rdp_height),
+                                    "host-rdp-height",
+                                    &i.rdp_height,
+                                    480,
+                                    Some(2160),
+                                    crate::theme::ui(cx),
+                                ),
+                                None,
+                                cx,
+                            )
+                            .w(px(110.)),
+                        ),
                 )
                 .child(switch_row(
                     "rdp-clipboard",
@@ -561,7 +926,14 @@ impl HostDialog {
                     cx.listener_for_bool(|this, v| this.values.rdp_map_disk = v),
                     cx,
                 ))
-                .when(self.values.rdp_map_disk, |d| d.child(field(t!("assets.rdpDiskPath"), Input::new(&i.rdp_disk_path), None, cx)))
+                .when(self.values.rdp_map_disk, |d| {
+                    d.child(field(
+                        t!("assets.rdpDiskPath"),
+                        Input::new(&i.rdp_disk_path),
+                        None,
+                        cx,
+                    ))
+                })
                 .child(self.proxy_block(cx))
                 .into_any_element(),
             OsKind::Vnc => self.proxy_block(cx).into_any_element(),
@@ -571,11 +943,17 @@ impl HostDialog {
 
 /// `cx.listener`-style adapter for boolean controls: updates `this` then repaints.
 trait ListenerForBool {
-    fn listener_for_bool(&self, f: impl Fn(&mut HostDialog, bool) + 'static) -> Box<dyn Fn(bool, &mut Window, &mut App)>;
+    fn listener_for_bool(
+        &self,
+        f: impl Fn(&mut HostDialog, bool) + 'static,
+    ) -> Box<dyn Fn(bool, &mut Window, &mut App)>;
 }
 
 impl ListenerForBool for Context<'_, HostDialog> {
-    fn listener_for_bool(&self, f: impl Fn(&mut HostDialog, bool) + 'static) -> Box<dyn Fn(bool, &mut Window, &mut App)> {
+    fn listener_for_bool(
+        &self,
+        f: impl Fn(&mut HostDialog, bool) + 'static,
+    ) -> Box<dyn Fn(bool, &mut Window, &mut App)> {
         let weak = self.entity().downgrade();
         Box::new(move |value, _, cx| {
             let _ = weak.update(cx, |this, cx| {
@@ -609,11 +987,25 @@ impl Render for HostDialog {
                     .items_end()
                     .border_b_1()
                     .border_color(crate::theme::ui(cx).border)
-                    .child(self.tab_button("host-tab-basic", t!("assets.hostBasicInfo"), Tab::Basic, cx))
+                    .child(self.tab_button(
+                        "host-tab-basic",
+                        t!("assets.hostBasicInfo"),
+                        Tab::Basic,
+                        cx,
+                    ))
                     .child(self.tab_button("host-tab-advanced", advanced_label, Tab::Advanced, cx)),
             )
-            .child(div().id("host-dialog-body").max_h(px(460.)).overflow_y_scroll().pr_1().child(body))
-            .when_some(self.error.clone(), |d, e| d.child(div().text_size(px(12.)).text_color(theme.danger).child(e)))
+            .child(
+                div()
+                    .id("host-dialog-body")
+                    .max_h(px(460.))
+                    .overflow_y_scroll()
+                    .pr_1()
+                    .child(body),
+            )
+            .when_some(self.error.clone(), |d, e| {
+                d.child(div().text_size(px(12.)).text_color(theme.danger).child(e))
+            })
             .child(
                 h_flex()
                     .gap_2()

@@ -32,7 +32,12 @@ pub fn guess_language(file_name: Option<&str>) -> &'static str {
 
 /// Last path component, ignoring a trailing slash.
 pub fn base_name(path: &str) -> String {
-    path.trim_end_matches('/').rsplit('/').next().filter(|s| !s.is_empty()).unwrap_or(path).to_string()
+    path.trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(path)
+        .to_string()
 }
 
 /// Stable window label per (host, mode, path) so the same target reuses its window.
@@ -68,8 +73,17 @@ mod tests {
         assert_eq!(base_name("/etc/nginx/"), "nginx");
         assert_eq!(base_name("/etc/hosts"), "hosts");
         assert_eq!(base_name("/"), "/");
-        assert_eq!(window_label("h1", false, "/a"), window_label("h1", false, "/a"));
-        assert_ne!(window_label("h1", false, "/a"), window_label("h1", true, "/a"));
-        assert_ne!(window_label("h1", false, "/a"), window_label("h2", false, "/a"));
+        assert_eq!(
+            window_label("h1", false, "/a"),
+            window_label("h1", false, "/a")
+        );
+        assert_ne!(
+            window_label("h1", false, "/a"),
+            window_label("h1", true, "/a")
+        );
+        assert_ne!(
+            window_label("h1", false, "/a"),
+            window_label("h2", false, "/a")
+        );
     }
 }

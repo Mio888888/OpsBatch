@@ -32,7 +32,10 @@ pub fn start(asset: String) -> Mirror {
                 let len = stream.read(&mut buf).unwrap_or(0);
                 let request = String::from_utf8_lossy(&buf[..len]).to_string();
                 let path = request.split_whitespace().nth(1).unwrap_or("/").to_string();
-                let reply = |status: &str, headers: &str, body: &[u8], stream: &mut std::net::TcpStream| {
+                let reply = |status: &str,
+                             headers: &str,
+                             body: &[u8],
+                             stream: &mut std::net::TcpStream| {
                     let _ = stream.write_all(format!("HTTP/1.1 {status}\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes());
                     for chunk in body.chunks(32 * 1024) {
                         let _ = stream.write_all(chunk);
@@ -41,8 +44,15 @@ pub fn start(asset: String) -> Mirror {
                 };
                 let good = payload();
                 match path.as_str() {
-                    "/releases/latest" => reply("302 Found", &format!("Location: {b}/releases/tag/{TAG}\r\n"), b"", &mut stream),
-                    p if p == format!("/releases/tag/{TAG}") => reply("200 OK", "", b"release", &mut stream),
+                    "/releases/latest" => reply(
+                        "302 Found",
+                        &format!("Location: {b}/releases/tag/{TAG}\r\n"),
+                        b"",
+                        &mut stream,
+                    ),
+                    p if p == format!("/releases/tag/{TAG}") => {
+                        reply("200 OK", "", b"release", &mut stream)
+                    }
                     "/releases.atom" => {
                         let feed = format!(
                             "<feed><entry><title>OpsBatch 9.9.9</title><link href=\"https://example.test/releases/tag/{TAG}\" /><updated>2026-10-01T00:00:00Z</updated><content type=\"html\">&lt;li&gt;mirror notes&lt;/li&gt;</content></entry></feed>"
@@ -50,8 +60,16 @@ pub fn start(asset: String) -> Mirror {
                         reply("200 OK", "", feed.as_bytes(), &mut stream)
                     }
                     p if p == format!("/releases/download/{TAG}/SHA256SUMS") => {
-                        let hash: String = Sha256::digest(&good).iter().map(|x| format!("{x:02x}")).collect();
-                        reply("200 OK", "", format!("{hash}  {asset}\n").as_bytes(), &mut stream)
+                        let hash: String = Sha256::digest(&good)
+                            .iter()
+                            .map(|x| format!("{x:02x}"))
+                            .collect();
+                        reply(
+                            "200 OK",
+                            "",
+                            format!("{hash}  {asset}\n").as_bytes(),
+                            &mut stream,
+                        )
                     }
                     p if p == format!("/releases/download/{TAG}/{asset}") => {
                         let mut body = good;

@@ -4,14 +4,16 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use crate::scale::px;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, WindowExt as _};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use crate::scale::px;
 use ops_i18n::t;
-use ops_workflow::executor::{create_log_entry, execute_workflow, LogEntry, LogLabels, LogStatus, ProgressEvent};
+use ops_workflow::executor::{
+    create_log_entry, execute_workflow, LogEntry, LogLabels, LogStatus, ProgressEvent,
+};
 use ops_workflow::model::{collect_workflow_host_ids, WorkflowRecord};
 
 use super::runtime::{AppRuntime, ConfirmRequest};
@@ -53,23 +55,47 @@ fn log_labels() -> LogLabels {
         start_execute: t!("wfEditor.startExecute"),
         execute_success: t!("wfEditor.executeSuccess"),
         execute_fail: t!("wfEditor.executeFail"),
-        stage_info: Box::new(|level, total, count| t!("wfEditor.stageInfo", level = level, total = total, count = count)),
+        stage_info: Box::new(|level, total, count| {
+            t!(
+                "wfEditor.stageInfo",
+                level = level,
+                total = total,
+                count = count
+            )
+        }),
     }
 }
 
 impl Default for WorkflowRun {
     fn default() -> Self {
-        Self { workflow_id: None, workflow_name: String::new(), logs: Vec::new(), statuses: HashMap::new(), running: false, collapsed: false, pending: None, cancelled: Arc::new(AtomicBool::new(false)), tasks: Vec::new() }
+        Self {
+            workflow_id: None,
+            workflow_name: String::new(),
+            logs: Vec::new(),
+            statuses: HashMap::new(),
+            running: false,
+            collapsed: false,
+            pending: None,
+            cancelled: Arc::new(AtomicBool::new(false)),
+            tasks: Vec::new(),
+        }
     }
 }
 
 impl WorkflowRun {
     pub fn pending_confirm(&self) -> Option<(&str, &str)> {
-        self.pending.as_ref().map(|p| (p.name.as_str(), p.description.as_str()))
+        self.pending
+            .as_ref()
+            .map(|p| (p.name.as_str(), p.description.as_str()))
     }
 
     /// Run `workflow` (the caller has checked it is runnable). Resets the log and node statuses.
-    pub fn start(&mut self, workflow: &WorkflowRecord, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn start(
+        &mut self,
+        workflow: &WorkflowRecord,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.running {
             return;
         }
@@ -86,11 +112,19 @@ impl WorkflowRun {
         let host_ids = collect_workflow_host_ids(&nodes);
         let interval = workflow.settings.default_node_interval_seconds;
         let (confirm_tx, confirm_rx) = flume::unbounded::<ConfirmRequest>();
-        let runtime = AppRuntime::new(crate::services::ctx(cx), cx.background_executor().clone(), confirm_tx, self.cancelled.clone());
+        let runtime = AppRuntime::new(
+            crate::services::ctx(cx),
+            cx.background_executor().clone(),
+            confirm_tx,
+            self.cancelled.clone(),
+        );
 
         self.tasks.push(cx.spawn_in(window, async move |this, cx| {
             while let Ok(req) = confirm_rx.recv_async().await {
-                if this.update_in(cx, |this, window, cx| this.request_confirm(req, window, cx)).is_err() {
+                if this
+                    .update_in(cx, |this, window, cx| this.request_confirm(req, window, cx))
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -122,12 +156,22 @@ impl WorkflowRun {
             ProgressEvent::NodeStart { node_id, .. } => {
                 self.statuses.insert(node_id.clone(), NodeStatus::Running);
             }
-            ProgressEvent::NodeComplete { node_id, success, .. } => {
-                self.statuses.insert(node_id.clone(), if *success { NodeStatus::Success } else { NodeStatus::Fail });
+            ProgressEvent::NodeComplete {
+                node_id, success, ..
+            } => {
+                self.statuses.insert(
+                    node_id.clone(),
+                    if *success {
+                        NodeStatus::Success
+                    } else {
+                        NodeStatus::Fail
+                    },
+                );
             }
             _ => {}
         }
-        if let Some(entry) = create_log_entry(&event, labels, chrono::Utc::now().timestamp_millis()) {
+        if let Some(entry) = create_log_entry(&event, labels, chrono::Utc::now().timestamp_millis())
+        {
             self.logs.push(entry);
         }
         cx.notify();
@@ -139,8 +183,17 @@ impl WorkflowRun {
         self.answer_confirm(false, cx);
     }
 
-    fn request_confirm(&mut self, req: ConfirmRequest, window: &mut Window, cx: &mut Context<Self>) {
-        self.pending = Some(PendingConfirm { name: req.node_name.clone(), description: req.description.clone(), reply: Some(req.reply) });
+    fn request_confirm(
+        &mut self,
+        req: ConfirmRequest,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.pending = Some(PendingConfirm {
+            name: req.node_name.clone(),
+            description: req.description.clone(),
+            reply: Some(req.reply),
+        });
         cx.notify();
         let run = cx.entity();
         let (name, description) = (req.node_name, req.description);
@@ -151,7 +204,11 @@ impl WorkflowRun {
                 .close_button(false)
                 .overlay_closable(false)
                 .keyboard(false)
-                .child(cx_confirm_body(run.clone(), name.clone(), description.clone()))
+                .child(cx_confirm_body(
+                    run.clone(),
+                    name.clone(),
+                    description.clone(),
+                ))
         });
     }
 
@@ -166,8 +223,16 @@ impl WorkflowRun {
     }
 }
 
-fn cx_confirm_body(run: Entity<WorkflowRun>, name: String, description: String) -> impl IntoElement {
-    ConfirmBody { run, name, description }
+fn cx_confirm_body(
+    run: Entity<WorkflowRun>,
+    name: String,
+    description: String,
+) -> impl IntoElement {
+    ConfirmBody {
+        run,
+        name,
+        description,
+    }
 }
 
 #[derive(IntoElement)]
@@ -185,27 +250,56 @@ impl RenderOnce for ConfirmBody {
             .id("wf-confirm")
             .test_support()
             .gap_2()
-            .child(div().font_weight(FontWeight::SEMIBOLD).text_size(px(16.)).child(self.name))
-            .when(!self.description.is_empty(), |d| d.child(div().text_color(theme.muted_foreground).child(self.description)))
-            .child(div().text_size(px(12.)).child(t!("wfEditor.confirmContinueHint")))
+            .child(
+                div()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_size(px(16.))
+                    .child(self.name),
+            )
+            .when(!self.description.is_empty(), |d| {
+                d.child(
+                    div()
+                        .text_color(theme.muted_foreground)
+                        .child(self.description),
+                )
+            })
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .child(t!("wfEditor.confirmContinueHint")),
+            )
             .child(
                 h_flex()
                     .gap_2()
                     .justify_end()
-                    .child(Button::new("wf-confirm-cancel").danger().label(t!("wfEditor.terminateWorkflow")).on_click(move |_, window, cx| {
-                        cancel_run.update(cx, |r, cx| r.answer_confirm(false, cx));
-                        window.close_dialog(cx);
-                    }))
-                    .child(Button::new("wf-confirm-ok").primary().label(t!("wfEditor.confirmContinue")).on_click(move |_, window, cx| {
-                        ok_run.update(cx, |r, cx| r.answer_confirm(true, cx));
-                        window.close_dialog(cx);
-                    })),
+                    .child(
+                        Button::new("wf-confirm-cancel")
+                            .danger()
+                            .label(t!("wfEditor.terminateWorkflow"))
+                            .on_click(move |_, window, cx| {
+                                cancel_run.update(cx, |r, cx| r.answer_confirm(false, cx));
+                                window.close_dialog(cx);
+                            }),
+                    )
+                    .child(
+                        Button::new("wf-confirm-ok")
+                            .primary()
+                            .label(t!("wfEditor.confirmContinue"))
+                            .on_click(move |_, window, cx| {
+                                ok_run.update(cx, |r, cx| r.answer_confirm(true, cx));
+                                window.close_dialog(cx);
+                            }),
+                    ),
             )
     }
 }
 
 /// The execution log (collapsible), as used in the run dialog and under the editor.
-pub fn log_panel(run: &WorkflowRun, on_toggle: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static, cx: &App) -> impl IntoElement {
+pub fn log_panel(
+    run: &WorkflowRun,
+    on_toggle: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+    cx: &App,
+) -> impl IntoElement {
     let theme = cx.theme();
     let color = |s: Option<LogStatus>| match s {
         Some(LogStatus::Running) => theme.primary,
@@ -234,10 +328,25 @@ pub fn log_panel(run: &WorkflowRun, on_toggle: impl Fn(&ClickEvent, &mut Window,
                 .items_center()
                 .cursor_pointer()
                 .on_click(on_toggle)
-                .child(div().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).child(t!("wfEditor.execLog")))
-                .child(div().text_size(px(11.)).text_color(theme.muted_foreground).child(run.logs.len().to_string()))
+                .child(
+                    div()
+                        .text_size(px(12.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(t!("wfEditor.execLog")),
+                )
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(theme.muted_foreground)
+                        .child(run.logs.len().to_string()),
+                )
                 .child(div().flex_1())
-                .child(div().text_size(px(11.)).text_color(theme.muted_foreground).child(if run.collapsed { "▸" } else { "▾" })),
+                .child(
+                    div()
+                        .text_size(px(11.))
+                        .text_color(theme.muted_foreground)
+                        .child(if run.collapsed { "▸" } else { "▾" }),
+                ),
         )
         .when(!run.collapsed, |d| {
             d.child(
@@ -248,9 +357,22 @@ pub fn log_panel(run: &WorkflowRun, on_toggle: impl Fn(&ClickEvent, &mut Window,
                     .px_3()
                     .pb_2()
                     .gap_0p5()
-                    .when(run.logs.is_empty(), |d| d.child(div().text_size(px(12.)).text_color(theme.muted_foreground).child(t!("wfEditor.noLogs"))))
+                    .when(run.logs.is_empty(), |d| {
+                        d.child(
+                            div()
+                                .text_size(px(12.))
+                                .text_color(theme.muted_foreground)
+                                .child(t!("wfEditor.noLogs")),
+                        )
+                    })
                     .children(run.logs.iter().enumerate().map(|(i, e)| {
-                        let time = chrono::DateTime::from_timestamp_millis(e.timestamp_ms).map(|t| t.with_timezone(&chrono::Local).format("%H:%M:%S").to_string()).unwrap_or_default();
+                        let time = chrono::DateTime::from_timestamp_millis(e.timestamp_ms)
+                            .map(|t| {
+                                t.with_timezone(&chrono::Local)
+                                    .format("%H:%M:%S")
+                                    .to_string()
+                            })
+                            .unwrap_or_default();
                         h_flex()
                             .id(ElementId::Name(format!("wf-log-row-{i}").into()))
                             .test_support()
@@ -258,8 +380,15 @@ pub fn log_panel(run: &WorkflowRun, on_toggle: impl Fn(&ClickEvent, &mut Window,
                             .text_size(px(12.))
                             .child(div().text_color(theme.muted_foreground).child(time))
                             .child(div().text_color(color(e.status)).child(icon(e.status)))
-                            .when_some(e.node_name.clone(), |d, n| d.child(div().font_weight(FontWeight::MEDIUM).child(n)))
-                            .child(div().min_w_0().text_color(color(e.status)).child(e.message.clone()))
+                            .when_some(e.node_name.clone(), |d, n| {
+                                d.child(div().font_weight(FontWeight::MEDIUM).child(n))
+                            })
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .text_color(color(e.status))
+                                    .child(e.message.clone()),
+                            )
                     })),
             )
         })
@@ -276,10 +405,18 @@ impl RunDialog {
         let name = run.read(cx).workflow_name.clone();
         let view = cx.new(|cx| {
             let sub = cx.observe(&run, |_, _, cx| cx.notify());
-            Self { run: run.clone(), _sub: sub }
+            Self {
+                run: run.clone(),
+                _sub: sub,
+            }
         });
         window.open_dialog(cx, move |dialog, _, _| {
-            dialog.title(t!("wfList.executeLogTitle", name = name.clone())).w(px(760.)).close_button(false).overlay_closable(false).child(view.clone())
+            dialog
+                .title(t!("wfList.executeLogTitle", name = name.clone()))
+                .w(px(760.))
+                .close_button(false)
+                .overlay_closable(false)
+                .child(view.clone())
         });
     }
 }
@@ -294,16 +431,34 @@ impl Render for RunDialog {
             .id("wf-run-dialog")
             .test_support()
             .gap_3()
-            .child(log_panel(run, move |_, _, cx| toggle_run.update(cx, |r, cx| {
-                r.collapsed = !r.collapsed;
-                cx.notify();
-            }), cx))
+            .child(log_panel(
+                run,
+                move |_, _, cx| {
+                    toggle_run.update(cx, |r, cx| {
+                        r.collapsed = !r.collapsed;
+                        cx.notify();
+                    })
+                },
+                cx,
+            ))
             .child(
                 h_flex()
                     .gap_2()
                     .justify_end()
-                    .when(running, |d| d.child(Button::new("wf-run-stop").danger().label(t!("wfEditor.terminateWorkflow")).on_click(move |_, _, cx| this.update(cx, |r, cx| r.stop(cx)))))
-                    .child(Button::new("wf-run-close").label(t!("common.close")).disabled_when(running).on_click(|_, window, cx| window.close_dialog(cx))),
+                    .when(running, |d| {
+                        d.child(
+                            Button::new("wf-run-stop")
+                                .danger()
+                                .label(t!("wfEditor.terminateWorkflow"))
+                                .on_click(move |_, _, cx| this.update(cx, |r, cx| r.stop(cx))),
+                        )
+                    })
+                    .child(
+                        Button::new("wf-run-close")
+                            .label(t!("common.close"))
+                            .disabled_when(running)
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    ),
             )
     }
 }

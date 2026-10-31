@@ -9,11 +9,19 @@ use opsbatch_app::log::window::{GlobalLogWindow, MAX_RENDERED_LOGS};
 
 use common::{serial, wait_until};
 
-fn open_log_window(cx: &mut TestAppContext) -> (gpui_kit::WindowHandle<gpui_kit::base::Root>, Entity<GlobalLogWindow>) {
+fn open_log_window(
+    cx: &mut TestAppContext,
+) -> (
+    gpui_kit::WindowHandle<gpui_kit::base::Root>,
+    Entity<GlobalLogWindow>,
+) {
     cx.update(|cx| {
         let (w, v) = gpui_kit::open_window(
             gpui_kit::WindowOptions {
-                window_bounds: Some(gpui_kit::WindowBounds::Windowed(gpui_kit::Bounds { origin: Default::default(), size: gpui_kit::size(gpui_kit::px(720.), gpui_kit::px(600.)) })),
+                window_bounds: Some(gpui_kit::WindowBounds::Windowed(gpui_kit::Bounds {
+                    origin: Default::default(),
+                    size: gpui_kit::size(gpui_kit::px(720.), gpui_kit::px(600.)),
+                })),
                 ..Default::default()
             },
             cx,
@@ -30,14 +38,34 @@ fn global_log_streams_filters_localises_caps_and_clears(cx: &mut TestAppContext)
     let fx = common::setup(cx, |_| {});
     let (handle, win) = open_log_window(cx);
     let store = cx.update(|cx| log_store(cx));
-    wait_until(cx, "history loaded", |cx| cx.update(|cx| !store.read(cx).loading));
+    wait_until(cx, "history loaded", |cx| {
+        cx.update(|cx| !store.read(cx).loading)
+    });
     // the "connected" notice is emitted by the window itself
-    wait_until(cx, "connected notice", |cx| cx.update(|cx| store.read(cx).logs.iter().any(|l| l.origin == "frontend")));
+    wait_until(cx, "connected notice", |cx| {
+        cx.update(|cx| store.read(cx).logs.iter().any(|l| l.origin == "frontend"))
+    });
 
     let core = fx.ctx.core.clone();
-    ops_core::log::emit_log(&core, "error", "ssh", "主机 h1 连接失败: refused", "backend");
+    ops_core::log::emit_log(
+        &core,
+        "error",
+        "ssh",
+        "主机 h1 连接失败: refused",
+        "backend",
+    );
     ops_core::log::emit_log(&core, "success", "ssh", "主机 h2 已连接", "backend");
-    wait_until(cx, "live entries", |cx| cx.update(|cx| store.read(cx).logs.iter().filter(|l| l.origin == "backend").count() >= 2));
+    wait_until(cx, "live entries", |cx| {
+        cx.update(|cx| {
+            store
+                .read(cx)
+                .logs
+                .iter()
+                .filter(|l| l.origin == "backend")
+                .count()
+                >= 2
+        })
+    });
 
     // newest first
     cx.update(|cx| {
@@ -46,7 +74,10 @@ fn global_log_streams_filters_localises_caps_and_clears(cx: &mut TestAppContext)
     });
 
     // filters
-    cx.update_window(handle.into(), |_, w, cx| win.update(cx, |v, cx| v.set_filters("error", "backend", w, cx))).unwrap();
+    cx.update_window(handle.into(), |_, w, cx| {
+        win.update(cx, |v, cx| v.set_filters("error", "backend", w, cx))
+    })
+    .unwrap();
     cx.update(|cx| {
         let lines = win.read(cx).visible(cx);
         assert_eq!(lines.len(), 1);
@@ -58,14 +89,32 @@ fn global_log_streams_filters_localises_caps_and_clears(cx: &mut TestAppContext)
         assert!(w.try_find("log-count").is_some());
     })
     .unwrap();
-    cx.update(|cx| assert!(win.read(cx).visible(cx).iter().all(|l| l.1 == ops_i18n::t!("log.frontend"))));
+    cx.update(|cx| {
+        assert!(win
+            .read(cx)
+            .visible(cx)
+            .iter()
+            .all(|l| l.1 == ops_i18n::t!("log.frontend")))
+    });
 
     // cap: storing keeps 600, rendering draws 300
-    cx.update_window(handle.into(), |_, w, cx| win.update(cx, |v, cx| v.set_filters("all", "all", w, cx))).unwrap();
+    cx.update_window(handle.into(), |_, w, cx| {
+        win.update(cx, |v, cx| v.set_filters("all", "all", w, cx))
+    })
+    .unwrap();
     for i in 0..(MAX_LOG_ENTRIES + 50) {
         ops_core::log::emit_log(&core, "info", "system", &format!("bulk {i}"), "backend");
     }
-    wait_until(cx, "bulk delivered", |cx| cx.update(|cx| store.read(cx).logs.first().map(|l| l.message == format!("bulk {}", MAX_LOG_ENTRIES + 49)).unwrap_or(false)));
+    wait_until(cx, "bulk delivered", |cx| {
+        cx.update(|cx| {
+            store
+                .read(cx)
+                .logs
+                .first()
+                .map(|l| l.message == format!("bulk {}", MAX_LOG_ENTRIES + 49))
+                .unwrap_or(false)
+        })
+    });
     cx.update(|cx| {
         assert_eq!(store.read(cx).logs.len(), MAX_LOG_ENTRIES);
         assert_eq!(win.read(cx).visible(cx).len(), MAX_RENDERED_LOGS);
@@ -83,7 +132,11 @@ fn global_log_streams_filters_localises_caps_and_clears(cx: &mut TestAppContext)
         assert!(w.try_find("log-empty").is_some());
     })
     .unwrap();
-    wait_until(cx, "history cleared", |_| ops_core::log::get_log_history(&core, Some(10)).map(|h| h.is_empty()).unwrap_or(false));
+    wait_until(cx, "history cleared", |_| {
+        ops_core::log::get_log_history(&core, Some(10))
+            .map(|h| h.is_empty())
+            .unwrap_or(false)
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -92,11 +145,20 @@ fn global_log_streams_filters_localises_caps_and_clears(cx: &mut TestAppContext)
 
 use opsbatch_app::settings::window::{Section, SettingsWindow};
 
-fn open_settings(cx: &mut TestAppContext, section: Section) -> (gpui_kit::WindowHandle<gpui_kit::base::Root>, Entity<SettingsWindow>) {
+fn open_settings(
+    cx: &mut TestAppContext,
+    section: Section,
+) -> (
+    gpui_kit::WindowHandle<gpui_kit::base::Root>,
+    Entity<SettingsWindow>,
+) {
     cx.update(|cx| {
         let (w, v) = gpui_kit::open_window(
             gpui_kit::WindowOptions {
-                window_bounds: Some(gpui_kit::WindowBounds::Windowed(gpui_kit::Bounds { origin: Default::default(), size: gpui_kit::size(gpui_kit::px(1000.), gpui_kit::px(700.)) })),
+                window_bounds: Some(gpui_kit::WindowBounds::Windowed(gpui_kit::Bounds {
+                    origin: Default::default(),
+                    size: gpui_kit::size(gpui_kit::px(1000.), gpui_kit::px(700.)),
+                })),
                 ..Default::default()
             },
             cx,
@@ -117,11 +179,16 @@ fn settings_navigation_and_general_section_persist_clamped_values(cx: &mut TestA
     let fx = common::setup(cx, |_| {});
     let (handle, win) = open_settings(cx, Section::General);
     let general = cx.update(|cx| win.read(cx).general().clone());
-    wait_until(cx, "general loaded", |cx| cx.update(|cx| general.read(cx).loaded()));
+    wait_until(cx, "general loaded", |cx| {
+        cx.update(|cx| general.read(cx).loaded())
+    });
 
     // defaults of the Tauri build
     cx.update(|cx| {
-        let [c, t, r] = general.read(cx).inputs().map(|i| i.read(cx).value().to_string());
+        let [c, t, r] = general
+            .read(cx)
+            .inputs()
+            .map(|i| i.read(cx).value().to_string());
         assert_eq!((c.as_str(), t.as_str(), r.as_str()), ("10", "30", "90"));
         assert!(general.read(cx).minimize_to_tray());
     });
@@ -135,16 +202,34 @@ fn settings_navigation_and_general_section_persist_clamped_values(cx: &mut TestA
         w.click("set-concurrency-down", cx);
     })
     .unwrap();
-    cx.update(|cx| assert_eq!(general.read(cx).inputs()[0].read(cx).value().to_string(), "11"));
+    cx.update(|cx| {
+        assert_eq!(
+            general.read(cx).inputs()[0].read(cx).value().to_string(),
+            "11"
+        )
+    });
     cx.update_window(handle.into(), |_, w, cx| {
-        general.update(cx, |g, cx| g.inputs()[0].clone().update(cx, |s, cx| s.set_value("100", w, cx)));
+        general.update(cx, |g, cx| {
+            g.inputs()[0]
+                .clone()
+                .update(cx, |s, cx| s.set_value("100", w, cx))
+        });
         w.render_frame(cx);
         w.hover("set-concurrency-up", cx);
         w.click("set-concurrency-up", cx);
-        general.update(cx, |g, cx| g.inputs()[0].clone().update(cx, |s, cx| s.set_value("10", w, cx)));
+        general.update(cx, |g, cx| {
+            g.inputs()[0]
+                .clone()
+                .update(cx, |s, cx| s.set_value("10", w, cx))
+        });
     })
     .unwrap();
-    cx.update(|cx| assert_eq!(general.read(cx).inputs()[0].read(cx).value().to_string(), "10"));
+    cx.update(|cx| {
+        assert_eq!(
+            general.read(cx).inputs()[0].read(cx).value().to_string(),
+            "10"
+        )
+    });
 
     // out-of-range numbers are clamped on save, the tray switch is stored
     cx.update_window(handle.into(), |_, w, cx| {
@@ -158,7 +243,9 @@ fn settings_navigation_and_general_section_persist_clamped_values(cx: &mut TestA
         });
     })
     .unwrap();
-    wait_until(cx, "stored", |_| stored(&fx).get("defaultConcurrency").is_some());
+    wait_until(cx, "stored", |_| {
+        stored(&fx).get("defaultConcurrency").is_some()
+    });
     let map = stored(&fx);
     assert_eq!(map["defaultConcurrency"], "100");
     assert_eq!(map["defaultTimeout"], "30");
@@ -174,7 +261,8 @@ fn settings_navigation_and_general_section_persist_clamped_values(cx: &mut TestA
         })
         .unwrap();
         cx.update(|cx| assert_eq!(win.read(cx).section(), *expected));
-        cx.update_window(handle.into(), |_, w, cx| w.render_frame(cx)).unwrap();
+        cx.update_window(handle.into(), |_, w, cx| w.render_frame(cx))
+            .unwrap();
     }
 
     // the language select applies immediately
@@ -187,9 +275,19 @@ fn settings_navigation_and_general_section_persist_clamped_values(cx: &mut TestA
         opsbatch_app::language::set_mode(ops_i18n::LanguageMode::EnUs, cx);
         assert_eq!(ops_i18n::current_language(), ops_i18n::Language::EnUs);
     });
-    wait_until(cx, "english stored", |_| stored(&fx).get("languageMode").map(|v| v == "en-US").unwrap_or(false));
+    wait_until(cx, "english stored", |_| {
+        stored(&fx)
+            .get("languageMode")
+            .map(|v| v == "en-US")
+            .unwrap_or(false)
+    });
     cx.update(|cx| opsbatch_app::language::set_mode(ops_i18n::LanguageMode::ZhCn, cx));
-    wait_until(cx, "language stored", |_| stored(&fx).get("languageMode").map(|v| v == "zh-CN").unwrap_or(false));
+    wait_until(cx, "language stored", |_| {
+        stored(&fx)
+            .get("languageMode")
+            .map(|v| v == "zh-CN")
+            .unwrap_or(false)
+    });
 }
 
 #[gpui_kit::test]
@@ -198,7 +296,10 @@ fn appearance_changes_apply_immediately_and_persist(cx: &mut TestAppContext) {
     let fx = common::setup(cx, |_| {});
     let (handle, win) = open_settings(cx, Section::Appearance);
     let appearance = cx.update(|cx| win.read(cx).appearance().clone());
-    let light_ix = ops_core::theme::THEMES.iter().position(|t| t.tone == ops_core::theme::ThemeTone::Light).unwrap();
+    let light_ix = ops_core::theme::THEMES
+        .iter()
+        .position(|t| t.tone == ops_core::theme::ThemeTone::Light)
+        .unwrap();
     let light_id = ops_core::theme::THEMES[light_ix].id;
 
     cx.update_window(handle.into(), |_, w, cx| {
@@ -210,7 +311,10 @@ fn appearance_changes_apply_immediately_and_persist(cx: &mut TestAppContext) {
     .unwrap();
     cx.update(|cx| {
         let s = &opsbatch_app::theme::current(cx).settings;
-        assert_eq!((s.terminal_theme_id.as_str(), s.terminal_theme_tone), (light_id, ops_core::theme::ThemeTone::Light));
+        assert_eq!(
+            (s.terminal_theme_id.as_str(), s.terminal_theme_tone),
+            (light_id, ops_core::theme::ThemeTone::Light)
+        );
         assert_eq!(s.accent_color_id, ops_core::theme::ACCENTS[3].id);
         assert!(s.reduce_motion);
         assert!(!opsbatch_app::theme::current(cx).resolved.is_dark);
@@ -222,7 +326,12 @@ fn appearance_changes_apply_immediately_and_persist(cx: &mut TestAppContext) {
         w.click("set-theme-system", cx);
     })
     .unwrap();
-    cx.update(|cx| assert_eq!(opsbatch_app::theme::current(cx).settings.theme_mode, ops_core::theme::ThemeSettingsMode::System));
+    cx.update(|cx| {
+        assert_eq!(
+            opsbatch_app::theme::current(cx).settings.theme_mode,
+            ops_core::theme::ThemeSettingsMode::System
+        )
+    });
     cx.update(|cx| {
         opsbatch_app::theme::update(cx, |s| s.ui_scale = 125);
         assert!((f32::from(gpui_kit::component::Theme::global(cx).font_size) - 20.0).abs() < 0.01);
@@ -239,7 +348,12 @@ fn appearance_changes_apply_immediately_and_persist(cx: &mut TestAppContext) {
     })
     .unwrap();
     cx.run_until_parked();
-    cx.update(|cx| assert_eq!(opsbatch_app::theme::current(cx).settings.terminal_font_size, 18));
+    cx.update(|cx| {
+        assert_eq!(
+            opsbatch_app::theme::current(cx).settings.terminal_font_size,
+            18
+        )
+    });
     cx.update_window(handle.into(), |_, w, cx| {
         let size = appearance.read(cx).size_input().clone();
         size.update(cx, |s, cx| {
@@ -250,12 +364,21 @@ fn appearance_changes_apply_immediately_and_persist(cx: &mut TestAppContext) {
     })
     .unwrap();
     cx.run_until_parked();
-    cx.update(|cx| assert_eq!(opsbatch_app::theme::current(cx).settings.terminal_font_size, 18, "out of range ignored"));
+    cx.update(|cx| {
+        assert_eq!(
+            opsbatch_app::theme::current(cx).settings.terminal_font_size,
+            18,
+            "out of range ignored"
+        )
+    });
 
     // everything reached the database
     wait_until(cx, "theme persisted", |_| {
         let m = stored(&fx);
-        m.get("terminalFontSize").map(|v| v == "18").unwrap_or(false) && m.get("uiScale").map(|v| v == "125").unwrap_or(false)
+        m.get("terminalFontSize")
+            .map(|v| v == "18")
+            .unwrap_or(false)
+            && m.get("uiScale").map(|v| v == "125").unwrap_or(false)
     });
     let m = stored(&fx);
     assert_eq!(m["terminalThemeId"], light_id);
@@ -264,7 +387,9 @@ fn appearance_changes_apply_immediately_and_persist(cx: &mut TestAppContext) {
     assert_eq!(m["accentColorId"], ops_core::theme::ACCENTS[3].id);
 
     // font list comes from the machine
-    wait_until(cx, "fonts", |cx| cx.update(|cx| appearance.read(cx).fonts_loaded()));
+    wait_until(cx, "fonts", |cx| {
+        cx.update(|cx| appearance.read(cx).fonts_loaded())
+    });
     cx.update(|cx| assert!(appearance.read(cx).font_count() >= 9));
 }
 
@@ -274,7 +399,9 @@ fn danger_rules_add_validate_toggle_delete_and_data_export(cx: &mut TestAppConte
     let fx = common::setup(cx, |_| {});
     let (handle, win) = open_settings(cx, Section::Danger);
     let danger = cx.update(|cx| win.read(cx).danger().clone());
-    wait_until(cx, "rules loaded", |cx| cx.update(|cx| danger.read(cx).loaded() && !danger.read(cx).rules().is_empty()));
+    wait_until(cx, "rules loaded", |cx| {
+        cx.update(|cx| danger.read(cx).loaded() && !danger.read(cx).rules().is_empty())
+    });
     let builtin = cx.update(|cx| danger.read(cx).rules().len());
     assert!(cx.update(|cx| danger.read(cx).rules().iter().all(|r| r.is_builtin)));
 
@@ -283,12 +410,29 @@ fn danger_rules_add_validate_toggle_delete_and_data_export(cx: &mut TestAppConte
         w.click(("danger-toggle", 0usize), cx);
     })
     .unwrap();
-    cx.update(|cx| assert!(!danger.read(cx).rules()[0].enabled, "switch applies at once"));
+    cx.update(|cx| {
+        assert!(
+            !danger.read(cx).rules()[0].enabled,
+            "switch applies at once"
+        )
+    });
     let first = cx.update(|cx| danger.read(cx).rules()[0].id.clone());
-    wait_until(cx, "built-in rule disabled in the database", |_| ops_core::rt::block_on(ops_core::settings::list_danger_rules(&fx.ctx.db)).unwrap().iter().any(|r| r.id == first && !r.enabled));
+    wait_until(cx, "built-in rule disabled in the database", |_| {
+        ops_core::rt::block_on(ops_core::settings::list_danger_rules(&fx.ctx.db))
+            .unwrap()
+            .iter()
+            .any(|r| r.id == first && !r.enabled)
+    });
     // dialog: empty -> required, bad regex -> backend message, good -> added
-    let dlg = cx.update_window(handle.into(), |_, w, cx| danger.update(cx, |d, cx| d.open_add(w, cx))).unwrap();
-    cx.update_window(handle.into(), |_, w, cx| dlg.update(cx, |d, cx| d.submit(w, cx))).unwrap();
+    let dlg = cx
+        .update_window(handle.into(), |_, w, cx| {
+            danger.update(cx, |d, cx| d.open_add(w, cx))
+        })
+        .unwrap();
+    cx.update_window(handle.into(), |_, w, cx| {
+        dlg.update(cx, |d, cx| d.submit(w, cx))
+    })
+    .unwrap();
     cx.update(|cx| assert_eq!(dlg.read(cx).errors(), ["name", "pattern"]));
     cx.update_window(handle.into(), |_, w, cx| {
         dlg.update(cx, |d, cx| {
@@ -298,22 +442,50 @@ fn danger_rules_add_validate_toggle_delete_and_data_export(cx: &mut TestAppConte
         })
     })
     .unwrap();
-    wait_until(cx, "regex rejected", |cx| cx.update(|cx| dlg.read(cx).backend_error().is_some()));
+    wait_until(cx, "regex rejected", |cx| {
+        cx.update(|cx| dlg.read(cx).backend_error().is_some())
+    });
     cx.update(|cx| assert!(danger.read(cx).rules().len() == builtin));
     cx.update_window(handle.into(), |_, w, cx| {
         dlg.update(cx, |d, cx| {
-            d.pattern.update(cx, |s, cx| s.set_value(r"dd\s+if=", w, cx));
+            d.pattern
+                .update(cx, |s, cx| s.set_value(r"dd\s+if=", w, cx));
             d.submit(w, cx);
         })
     })
     .unwrap();
-    wait_until(cx, "rule added", |cx| cx.update(|cx| danger.read(cx).rules().len() == builtin + 1));
-    let custom = cx.update(|cx| danger.read(cx).rules().iter().find(|r| !r.is_builtin).cloned().unwrap());
-    assert_eq!((custom.name.as_str(), custom.pattern.as_str(), custom.enabled), ("Wipe disk", r"dd\s+if=", true));
+    wait_until(cx, "rule added", |cx| {
+        cx.update(|cx| danger.read(cx).rules().len() == builtin + 1)
+    });
+    let custom = cx.update(|cx| {
+        danger
+            .read(cx)
+            .rules()
+            .iter()
+            .find(|r| !r.is_builtin)
+            .cloned()
+            .unwrap()
+    });
+    assert_eq!(
+        (
+            custom.name.as_str(),
+            custom.pattern.as_str(),
+            custom.enabled
+        ),
+        ("Wipe disk", r"dd\s+if=", true)
+    );
 
     // enable / disable of a custom rule
-    cx.update_window(handle.into(), |_, w, cx| danger.update(cx, |d, cx| d.toggle(custom.id.clone(), false, w, cx))).unwrap();
-    wait_until(cx, "custom rule disabled", |_| ops_core::rt::block_on(ops_core::settings::list_danger_rules(&fx.ctx.db)).unwrap().iter().any(|r| r.id == custom.id && !r.enabled));
+    cx.update_window(handle.into(), |_, w, cx| {
+        danger.update(cx, |d, cx| d.toggle(custom.id.clone(), false, w, cx))
+    })
+    .unwrap();
+    wait_until(cx, "custom rule disabled", |_| {
+        ops_core::rt::block_on(ops_core::settings::list_danger_rules(&fx.ctx.db))
+            .unwrap()
+            .iter()
+            .any(|r| r.id == custom.id && !r.enabled)
+    });
 
     // delete (builtin rows have no delete button)
     cx.update_window(handle.into(), |_, w, cx| {
@@ -322,16 +494,25 @@ fn danger_rules_add_validate_toggle_delete_and_data_export(cx: &mut TestAppConte
         danger.update(cx, |d, cx| d.delete(custom.id.clone(), w, cx));
     })
     .unwrap();
-    wait_until(cx, "rule deleted", |cx| cx.update(|cx| danger.read(cx).rules().len() == builtin));
+    wait_until(cx, "rule deleted", |cx| {
+        cx.update(|cx| danger.read(cx).rules().len() == builtin)
+    });
 
     // data: backup export copies the database file
     let dest = std::env::temp_dir().join(format!("opsbatch-backup-{}.db", std::process::id()));
     let _ = std::fs::remove_file(&dest);
     let data = cx.update(|cx| win.read(cx).data().clone());
-    cx.update_window(handle.into(), |_, w, cx| data.update(cx, |d, cx| d.export_to(dest.display().to_string(), w, cx))).unwrap();
-    wait_until(cx, "backup written", |_| dest.metadata().map(|m| m.len() > 0).unwrap_or(false));
+    cx.update_window(handle.into(), |_, w, cx| {
+        data.update(cx, |d, cx| d.export_to(dest.display().to_string(), w, cx))
+    })
+    .unwrap();
+    wait_until(cx, "backup written", |_| {
+        dest.metadata().map(|m| m.len() > 0).unwrap_or(false)
+    });
     let _ = std::fs::remove_file(&dest);
-    assert!(opsbatch_app::settings::data::DataSection::default_backup_name().starts_with("opsbatch-"));
+    assert!(
+        opsbatch_app::settings::data::DataSection::default_backup_name().starts_with("opsbatch-")
+    );
 }
 
 #[gpui_kit::test]
@@ -369,7 +550,8 @@ fn animations_stop_when_reduce_motion_is_on_or_the_os_asks_for_it(cx: &mut TestA
             w.render_frame(cx);
         })
         .unwrap();
-        cx.executor().advance_clock(std::time::Duration::from_millis(300));
+        cx.executor()
+            .advance_clock(std::time::Duration::from_millis(300));
     }
     cx.update(|cx| {
         opsbatch_app::theme::update(cx, |s| s.reduce_motion = true);

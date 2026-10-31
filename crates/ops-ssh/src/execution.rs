@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::sync::Arc;
 
+use crate::ssh;
 use ops_core::db::Database;
 use ops_core::security::{clamp_execution_concurrency, truncate_output_lossy};
-use crate::ssh;
 
 /// hosts 表查询返回的连接字段：(ip, port, auth_type, name, username, password, private_key, proxy_settings)
 type HostConnectionRow = (
@@ -58,9 +58,7 @@ fn is_cancelled(app: &Arc<Ctx>, task_id: &str) -> bool {
     )
     .is_ok()
 }
-pub async fn list_execution_history(
-    db: &Database,
-) -> Result<Vec<ExecutionHistory>, String> {
+pub async fn list_execution_history(db: &Database) -> Result<Vec<ExecutionHistory>, String> {
     let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn.prepare(
         "SELECT id, command, host_ids, host_count, success_count, fail_count, started_at, completed_at, duration FROM execution_history ORDER BY started_at DESC LIMIT 100"
@@ -392,10 +390,7 @@ pub fn execute_command(
 pub fn get_task_output(_task_id: String) -> Result<Vec<serde_json::Value>, String> {
     Ok(vec![])
 }
-pub async fn cancel_execution(
-    db: &Database,
-    task_id: String,
-) -> Result<(), String> {
+pub async fn cancel_execution(db: &Database, task_id: String) -> Result<(), String> {
     let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO execution_cancellations (task_id) VALUES (?1) ON CONFLICT(task_id) DO UPDATE SET cancelled_at=datetime('now','localtime')",

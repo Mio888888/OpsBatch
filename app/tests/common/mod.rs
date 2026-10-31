@@ -7,12 +7,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use gpui_kit::{AppContext, Entity, TestAppContext, WindowHandle};
+use ops_core::theme::ThemeSettings;
+use ops_ssh::hosts::NewHost;
 use opsbatch_app::app::init_globals;
 use opsbatch_app::stores::assets::AssetsStore;
 use opsbatch_app::ui_state::UiState;
 use opsbatch_app::workbench::Workbench;
-use ops_core::theme::ThemeSettings;
-use ops_ssh::hosts::NewHost;
 
 /// The UI language is process-wide, so tests in one binary must not interleave.
 pub static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -53,7 +53,14 @@ pub fn setup(cx: &mut TestAppContext, seed: impl FnOnce(&ops_core::Core)) -> Fix
     seed(&core);
     let ctx = ops_ssh::Ctx::new(core);
     let c2 = ctx.clone();
-    cx.update(move |cx| init_globals(c2, ops_i18n::LanguageMode::ZhCn, ThemeSettings::default(), cx));
+    cx.update(move |cx| {
+        init_globals(
+            c2,
+            ops_i18n::LanguageMode::ZhCn,
+            ThemeSettings::default(),
+            cx,
+        )
+    });
     let (handle, workbench) = cx.update(|cx| {
         let (window, view) = gpui_kit::open_window(
             gpui_kit::WindowOptions {
@@ -72,11 +79,19 @@ pub fn setup(cx: &mut TestAppContext, seed: impl FnOnce(&ops_core::Core)) -> Fix
         .unwrap();
         (window.downcast::<gpui_kit::base::Root>().unwrap(), view)
     });
-    Fixture { handle, workbench, ctx }
+    Fixture {
+        handle,
+        workbench,
+        ctx,
+    }
 }
 
 /// DB work runs on the tokio runtime; wait for the result to reach the UI thread.
-pub fn wait_until(cx: &mut TestAppContext, what: &str, mut cond: impl FnMut(&mut TestAppContext) -> bool) {
+pub fn wait_until(
+    cx: &mut TestAppContext,
+    what: &str,
+    mut cond: impl FnMut(&mut TestAppContext) -> bool,
+) {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         cx.run_until_parked();
@@ -95,8 +110,13 @@ pub fn assets(cx: &mut TestAppContext) -> Entity<AssetsStore> {
 /// Open the sidebar and wait until the store has loaded `expected` hosts.
 pub fn open_sidebar(cx: &mut TestAppContext, fx: &Fixture, expected: usize) -> Entity<AssetsStore> {
     use gpui_kit::test::TestWindowExt;
-    cx.update_window(fx.handle.into(), |_, window, cx| window.click("open-assets", cx)).unwrap();
+    cx.update_window(fx.handle.into(), |_, window, cx| {
+        window.click("open-assets", cx)
+    })
+    .unwrap();
     let store = assets(cx);
-    wait_until(cx, "hosts loaded", |cx| cx.update(|cx| store.read(cx).hosts.len() == expected && !store.read(cx).loading));
+    wait_until(cx, "hosts loaded", |cx| {
+        cx.update(|cx| store.read(cx).hosts.len() == expected && !store.read(cx).loading)
+    });
     store
 }

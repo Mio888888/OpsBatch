@@ -1,14 +1,14 @@
 //! Forward rules of one host: list, add form, stop, delete. Port of `components/PortForwardPanel.tsx`.
 
+use crate::scale::px;
+use gpui_kit::assets::IconName;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::select::Select;
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Disableable as _, Icon, Sizable as _};
-use gpui_kit::assets::IconName;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use crate::scale::px;
 use ops_i18n::t;
 use ops_ssh::forward::{ForwardConfig, ForwardEntry, ForwardStatus, ForwardType};
 
@@ -40,9 +40,15 @@ impl PortForwardPanel {
             Choice::new("dynamic", t!("portForward.dynamicForward")),
         ];
         let type_select = cx.new(|cx| new_select(choices, "local", window, cx));
-        let local_input = cx.new(|cx| InputState::new(window, cx).placeholder(t!("portForward.localAddr")).default_value("127.0.0.1:"));
-        let remote_input = cx.new(|cx| InputState::new(window, cx).placeholder(t!("portForward.remoteAddr")));
-        let label_input = cx.new(|cx| InputState::new(window, cx).placeholder(t!("portForward.notePlaceholder")));
+        let local_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("portForward.localAddr"))
+                .default_value("127.0.0.1:")
+        });
+        let remote_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("portForward.remoteAddr")));
+        let label_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("portForward.notePlaceholder")));
 
         let subs = vec![
             cx.subscribe_in(&type_select, window, |this, _, ev, window, cx| {
@@ -52,8 +58,13 @@ impl PortForwardPanel {
                         "dynamic" => ForwardType::Dynamic,
                         _ => ForwardType::Local,
                     };
-                    let placeholder = if matches!(this.form_type, ForwardType::Dynamic) { t!("portForward.localAddrDynamic") } else { t!("portForward.localAddr") };
-                    this.local_input.update(cx, |s, cx| s.set_placeholder(placeholder, window, cx));
+                    let placeholder = if matches!(this.form_type, ForwardType::Dynamic) {
+                        t!("portForward.localAddrDynamic")
+                    } else {
+                        t!("portForward.localAddr")
+                    };
+                    this.local_input
+                        .update(cx, |s, cx| s.set_placeholder(placeholder, window, cx));
                     cx.notify();
                 }
             }),
@@ -66,7 +77,9 @@ impl PortForwardPanel {
         {
             let (c, id) = (ctx.clone(), host_id.clone());
             tasks.push(cx.spawn(async move |this, cx| {
-                let list = blocking(move || ops_ssh::forward::forward_list(&c.forwards, id)).await.unwrap_or_default();
+                let list = blocking(move || ops_ssh::forward::forward_list(&c.forwards, id))
+                    .await
+                    .unwrap_or_default();
                 let _ = this.update(cx, |this, cx| {
                     for e in list {
                         this.upsert(e);
@@ -80,12 +93,15 @@ impl PortForwardPanel {
             let events = ctx.events.subscribe(format!("forward-status:{host_id}"));
             tasks.push(cx.spawn(async move |this, cx| {
                 while let Ok(ev) = events.recv_async().await {
-                    let Some(entry) = ev.parse::<ForwardEntry>() else { continue };
-                    if this.update(cx, |this, cx| {
-                        this.upsert(entry);
-                        cx.notify();
-                    })
-                    .is_err()
+                    let Some(entry) = ev.parse::<ForwardEntry>() else {
+                        continue;
+                    };
+                    if this
+                        .update(cx, |this, cx| {
+                            this.upsert(entry);
+                            cx.notify();
+                        })
+                        .is_err()
                     {
                         break;
                     }
@@ -114,7 +130,11 @@ impl PortForwardPanel {
 
     /// (local, remote, note) text fields of the add form.
     pub fn form_inputs(&self) -> (Entity<InputState>, Entity<InputState>, Entity<InputState>) {
-        (self.local_input.clone(), self.remote_input.clone(), self.label_input.clone())
+        (
+            self.local_input.clone(),
+            self.remote_input.clone(),
+            self.label_input.clone(),
+        )
     }
 
     pub fn forwards(&self) -> &[ForwardEntry] {
@@ -153,16 +173,29 @@ impl PortForwardPanel {
         let (ctx, host) = (crate::services::ctx(cx), self.host_id.clone());
         cx.spawn_in(window, async move |this, cx| {
             let c = ctx.clone();
-            let result = blocking(move || ops_ssh::forward::forward_add(c.clone(), &c.db, &c.registry, &c.forwards, host, config)).await;
+            let result = blocking(move || {
+                ops_ssh::forward::forward_add(
+                    c.clone(),
+                    &c.db,
+                    &c.registry,
+                    &c.forwards,
+                    host,
+                    config,
+                )
+            })
+            .await;
             let _ = this.update_in(cx, |this, window, cx| {
                 this.adding = false;
                 match result {
                     Ok(entry) => {
                         this.upsert(entry);
                         this.show_form = false;
-                        this.local_input.update(cx, |s, cx| s.set_value("127.0.0.1:", window, cx));
-                        this.remote_input.update(cx, |s, cx| s.set_value("", window, cx));
-                        this.label_input.update(cx, |s, cx| s.set_value("", window, cx));
+                        this.local_input
+                            .update(cx, |s, cx| s.set_value("127.0.0.1:", window, cx));
+                        this.remote_input
+                            .update(cx, |s, cx| s.set_value("", window, cx));
+                        this.label_input
+                            .update(cx, |s, cx| s.set_value("", window, cx));
                     }
                     Err(e) => toast::error(window, cx, t!("common.operationFailed", error = e)),
                 }
@@ -173,9 +206,15 @@ impl PortForwardPanel {
     }
 
     pub fn stop(&mut self, forward_id: &str, cx: &mut Context<Self>) {
-        let (ctx, host, id) = (crate::services::ctx(cx), self.host_id.clone(), forward_id.to_string());
+        let (ctx, host, id) = (
+            crate::services::ctx(cx),
+            self.host_id.clone(),
+            forward_id.to_string(),
+        );
         cx.spawn(async move |_, _| {
-            if let Err(e) = blocking(move || ops_ssh::forward::forward_stop(&ctx.forwards, host, id)).await {
+            if let Err(e) =
+                blocking(move || ops_ssh::forward::forward_stop(&ctx.forwards, host, id)).await
+            {
                 log::warn!("forward_stop failed: {e}");
             }
         })
@@ -183,10 +222,15 @@ impl PortForwardPanel {
     }
 
     pub fn remove(&mut self, forward_id: &str, cx: &mut Context<Self>) {
-        let (ctx, host, id) = (crate::services::ctx(cx), self.host_id.clone(), forward_id.to_string());
+        let (ctx, host, id) = (
+            crate::services::ctx(cx),
+            self.host_id.clone(),
+            forward_id.to_string(),
+        );
         let id2 = id.clone();
         cx.spawn(async move |this, cx| {
-            match blocking(move || ops_ssh::forward::forward_remove(&ctx.forwards, host, id)).await {
+            match blocking(move || ops_ssh::forward::forward_remove(&ctx.forwards, host, id)).await
+            {
                 Ok(()) => {
                     let _ = this.update(cx, |this, cx| {
                         this.forwards.retain(|f| f.id != id2);
@@ -204,7 +248,11 @@ impl Render for PortForwardPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
         let dynamic = matches!(self.form_type, ForwardType::Dynamic);
-        let complete = form_is_complete(dynamic, &self.local_input.read(cx).value(), &self.remote_input.read(cx).value());
+        let complete = form_is_complete(
+            dynamic,
+            &self.local_input.read(cx).value(),
+            &self.remote_input.read(cx).value(),
+        );
 
         let form = self.show_form.then(|| {
             v_flex()
@@ -214,13 +262,20 @@ impl Render for PortForwardPanel {
                 .p_2()
                 .border_b_1()
                 .border_color(theme.border)
-                .child(div().w(px(180.)).child(Select::new(&self.type_select).small()))
+                .child(
+                    div()
+                        .w(px(180.))
+                        .child(Select::new(&self.type_select).small()),
+                )
                 .child(
                     h_flex()
                         .gap_2()
                         .items_center()
                         .child(div().flex_1().child(Input::new(&self.local_input).small()))
-                        .when(!dynamic, |d| d.child("→").child(div().flex_1().child(Input::new(&self.remote_input).small()))),
+                        .when(!dynamic, |d| {
+                            d.child("→")
+                                .child(div().flex_1().child(Input::new(&self.remote_input).small()))
+                        }),
                 )
                 .child(
                     h_flex()
@@ -253,7 +308,11 @@ impl Render for PortForwardPanel {
                     ForwardStatus::Suspended => (t!("portForward.statusSuspended"), theme.warning),
                     ForwardStatus::Error => (t!("portForward.statusError"), theme.danger),
                 };
-                let addr = if matches!(f.config.forward_type, ForwardType::Dynamic) { f.config.local_addr.clone() } else { format!("{} → {}", f.config.local_addr, f.config.remote_addr) };
+                let addr = if matches!(f.config.forward_type, ForwardType::Dynamic) {
+                    f.config.local_addr.clone()
+                } else {
+                    format!("{} → {}", f.config.local_addr, f.config.remote_addr)
+                };
                 let (stop_id, rm_id) = (f.id.clone(), f.id.clone());
                 let active = matches!(f.status, ForwardStatus::Active);
                 let error = f.error.clone();
@@ -267,14 +326,58 @@ impl Render for PortForwardPanel {
                     .border_b_1()
                     .border_color(theme.border)
                     .text_size(px(12.))
-                    .child(div().w(px(16.)).h(px(16.)).rounded(px(3.)).bg(Hsla { a: 0.2, ..chip }).text_color(chip).text_center().text_size(px(10.)).font_weight(FontWeight::BOLD).child(letter))
+                    .child(
+                        div()
+                            .w(px(16.))
+                            .h(px(16.))
+                            .rounded(px(3.))
+                            .bg(Hsla { a: 0.2, ..chip })
+                            .text_color(chip)
+                            .text_center()
+                            .text_size(px(10.))
+                            .font_weight(FontWeight::BOLD)
+                            .child(letter),
+                    )
                     .child(div().flex_1().min_w_0().truncate().child(addr))
-                    .when_some(f.config.label.clone(), |d, l| d.child(div().text_color(theme.muted_foreground).child(l)))
-                    .child(div().px_1p5().rounded_full().bg(Hsla { a: 0.12, ..status_color }).text_color(status_color).text_size(px(10.)).child(status_label))
-                    .when(f.bytes_sent > 0 || f.bytes_received > 0, |d| {
-                        d.child(div().text_color(theme.muted_foreground).text_size(px(10.)).child(format!("↑{} ↓{}", format_bytes(f.bytes_sent), format_bytes(f.bytes_received))))
+                    .when_some(f.config.label.clone(), |d, l| {
+                        d.child(div().text_color(theme.muted_foreground).child(l))
                     })
-                    .when_some(error, |d, e| d.child(div().id(("pf-error", ix)).text_color(theme.danger).child("!").tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(e.clone()).build(window, cx))))
+                    .child(
+                        div()
+                            .px_1p5()
+                            .rounded_full()
+                            .bg(Hsla {
+                                a: 0.12,
+                                ..status_color
+                            })
+                            .text_color(status_color)
+                            .text_size(px(10.))
+                            .child(status_label),
+                    )
+                    .when(f.bytes_sent > 0 || f.bytes_received > 0, |d| {
+                        d.child(
+                            div()
+                                .text_color(theme.muted_foreground)
+                                .text_size(px(10.))
+                                .child(format!(
+                                    "↑{} ↓{}",
+                                    format_bytes(f.bytes_sent),
+                                    format_bytes(f.bytes_received)
+                                )),
+                        )
+                    })
+                    .when_some(error, |d, e| {
+                        d.child(
+                            div()
+                                .id(("pf-error", ix))
+                                .text_color(theme.danger)
+                                .child("!")
+                                .tooltip(move |window, cx| {
+                                    gpui_kit::component::tooltip::Tooltip::new(e.clone())
+                                        .build(window, cx)
+                                }),
+                        )
+                    })
                     .when(active, |d| {
                         d.child(
                             Button::new(("pf-stop", ix))
@@ -282,7 +385,9 @@ impl Render for PortForwardPanel {
                                 .xsmall()
                                 .icon(Icon::new(IconName::Square))
                                 .tooltip(t!("portForward.stop"))
-                                .on_click(cx.listener(move |this, _, _, cx| this.stop(&stop_id, cx))),
+                                .on_click(
+                                    cx.listener(move |this, _, _, cx| this.stop(&stop_id, cx)),
+                                ),
                         )
                     })
                     .child(
@@ -309,12 +414,21 @@ impl Render for PortForwardPanel {
                     .items_center()
                     .border_b_1()
                     .border_color(theme.border)
-                    .child(div().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).child(t!("portForward.title")))
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(t!("portForward.title")),
+                    )
                     .child(
                         Button::new("pf-toggle-form")
                             .ghost()
                             .xsmall()
-                            .label(if self.show_form { t!("common.cancel") } else { t!("portForward.addNew") })
+                            .label(if self.show_form {
+                                t!("common.cancel")
+                            } else {
+                                t!("portForward.addNew")
+                            })
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.show_form = !this.show_form;
                                 cx.notify();
@@ -328,7 +442,15 @@ impl Render for PortForwardPanel {
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
-                    .when(rows.is_empty(), |d| d.child(div().p_4().text_size(px(12.)).text_color(theme.muted_foreground).child(t!("portForward.noRules"))))
+                    .when(rows.is_empty(), |d| {
+                        d.child(
+                            div()
+                                .p_4()
+                                .text_size(px(12.))
+                                .text_color(theme.muted_foreground)
+                                .child(t!("portForward.noRules")),
+                        )
+                    })
                     .children(rows),
             )
     }

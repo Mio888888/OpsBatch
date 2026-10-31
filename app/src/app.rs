@@ -26,7 +26,12 @@ pub fn open_main_window(cx: &mut App) {
 }
 
 /// Everything that must exist before the first window: services, language, theme, registry, UI state.
-pub fn init_globals(ctx: Arc<Ctx>, language_mode: ops_i18n::LanguageMode, theme: ThemeSettings, cx: &mut App) {
+pub fn init_globals(
+    ctx: Arc<Ctx>,
+    language_mode: ops_i18n::LanguageMode,
+    theme: ThemeSettings,
+    cx: &mut App,
+) {
     gpui_kit::init(cx);
     crate::services::init(ctx, cx);
     crate::language::init(language_mode, cx);
@@ -49,9 +54,14 @@ pub fn init_globals(ctx: Arc<Ctx>, language_mode: ops_i18n::LanguageMode, theme:
 
 pub fn run(ctx: Arc<Ctx>) {
     let (language_mode, theme) = ops_core::rt::block_on(async {
-        (crate::language::load_mode(&ctx.db).await, ThemeSettings::load(&ctx.db).await)
+        (
+            crate::language::load_mode(&ctx.db).await,
+            ThemeSettings::load(&ctx.db).await,
+        )
     });
-    let exit_after: Option<u64> = std::env::var("OPSBATCH_EXIT_AFTER").ok().and_then(|s| s.parse().ok());
+    let exit_after: Option<u64> = std::env::var("OPSBATCH_EXIT_AFTER")
+        .ok()
+        .and_then(|s| s.parse().ok());
 
     gpui_kit::application()
         .with_assets(gpui_kit::assets::AllAssets)
@@ -62,10 +72,14 @@ pub fn run(ctx: Arc<Ctx>) {
 
             cx.on_action(|_: &Quit, cx| {
                 // Hang up every shell / SSH channel instead of leaving them to time out remotely.
-                crate::terminal::workspace::workspace(cx).update(cx, |w, cx| w.close_all_sessions(cx));
+                crate::terminal::workspace::workspace(cx)
+                    .update(cx, |w, cx| w.close_all_sessions(cx));
                 cx.quit();
             });
-            cx.bind_keys([KeyBinding::new("cmd-q", Quit, None), KeyBinding::new("ctrl-q", Quit, None)]);
+            cx.bind_keys([
+                KeyBinding::new("cmd-q", Quit, None),
+                KeyBinding::new("ctrl-q", Quit, None),
+            ]);
 
             // Closing the last window quits unless "minimize to tray" is on.
             let db = ctx.db.clone();
@@ -80,7 +94,9 @@ pub fn run(ctx: Arc<Ctx>) {
             open_main_window(cx);
             // The local vault opens before anything reads secrets (a no-op when it is already open).
             if let Some(main) = cx.windows().first().copied() {
-                let _ = main.update(cx, |_, window, cx| drop(crate::vault::request_unlock(window, cx)));
+                let _ = main.update(cx, |_, window, cx| {
+                    drop(crate::vault::request_unlock(window, cx))
+                });
             }
 
             // Quietly look for a newer release (the update button shows a dot when there is one).
@@ -95,10 +111,17 @@ pub fn run(ctx: Arc<Ctx>) {
                 let core = ctx.core.clone();
                 crate::vault::on_unlocked(cx, move |cx| {
                     cx.spawn(async move |cx| {
-                        let results = ops_core::rt::run(async move { ops_library::github::run_startup_repo_updates(&core).await }).await.and_then(|r| r);
+                        let results = ops_core::rt::run(async move {
+                            ops_library::github::run_startup_repo_updates(&core).await
+                        })
+                        .await
+                        .and_then(|r| r);
                         match results {
                             Ok(r) if !r.is_empty() => {
-                                let _ = cx.update(|cx| crate::library::store::library_store(cx).update(cx, |l, cx| l.load_all(cx)));
+                                let _ = cx.update(|cx| {
+                                    crate::library::store::library_store(cx)
+                                        .update(cx, |l, cx| l.load_all(cx))
+                                });
                             }
                             Ok(_) => {}
                             Err(e) => log::warn!("startup repository update failed: {e}"),
@@ -110,7 +133,9 @@ pub fn run(ctx: Arc<Ctx>) {
 
             if let Some(secs) = exit_after {
                 cx.spawn(async move |cx| {
-                    cx.background_executor().timer(std::time::Duration::from_secs(secs)).await;
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_secs(secs))
+                        .await;
                     let _ = cx.update(|cx| cx.quit());
                 })
                 .detach();

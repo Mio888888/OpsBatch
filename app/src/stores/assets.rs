@@ -3,9 +3,9 @@
 use std::collections::BTreeSet;
 
 use gpui_kit::{App, Context, Entity, EventEmitter, Global, Task};
-use ops_ssh::hosts::{NewHost, UpdateHost};
 use ops_ssh::groups::HostGroup;
 use ops_ssh::hosts::Host;
+use ops_ssh::hosts::{NewHost, UpdateHost};
 
 use crate::asset_tree::{group_host_ids, selected_linux_host_ids};
 
@@ -53,7 +53,9 @@ pub fn push_recent(list: &mut Vec<String>, id: &str, max: usize) {
 }
 
 fn parse_recent(raw: Option<&String>) -> Vec<String> {
-    let mut list: Vec<String> = raw.and_then(|r| serde_json::from_str(r).ok()).unwrap_or_default();
+    let mut list: Vec<String> = raw
+        .and_then(|r| serde_json::from_str(r).ok())
+        .unwrap_or_default();
     let mut seen = std::collections::HashSet::new();
     list.retain(|id| seen.insert(id.clone()));
     list.truncate(RECENT_HOSTS_MAX);
@@ -87,8 +89,18 @@ impl AssetsStore {
             let result = ops_core::rt::run(async move {
                 let hosts = ops_ssh::hosts::list_hosts(&ctx.db).await?;
                 let groups = ops_ssh::groups::list_groups(&ctx.db).await?;
-                let settings = ops_core::settings::get_general_settings(&ctx.db).await.unwrap_or_default();
-                Ok::<_, String>((hosts, groups, settings.get(DEFAULT_GROUP_NAME_KEY).cloned().unwrap_or_default(), parse_recent(settings.get(RECENT_HOSTS_KEY))))
+                let settings = ops_core::settings::get_general_settings(&ctx.db)
+                    .await
+                    .unwrap_or_default();
+                Ok::<_, String>((
+                    hosts,
+                    groups,
+                    settings
+                        .get(DEFAULT_GROUP_NAME_KEY)
+                        .cloned()
+                        .unwrap_or_default(),
+                    parse_recent(settings.get(RECENT_HOSTS_KEY)),
+                ))
             })
             .await
             .and_then(|r| r);
@@ -135,7 +147,11 @@ impl AssetsStore {
                 let mut last = written.lock().await;
                 if seq > *last {
                     *last = seq;
-                    let _ = ops_core::settings::save_general_settings(&ctx.db, std::collections::HashMap::from([(RECENT_HOSTS_KEY.to_string(), value)])).await;
+                    let _ = ops_core::settings::save_general_settings(
+                        &ctx.db,
+                        std::collections::HashMap::from([(RECENT_HOSTS_KEY.to_string(), value)]),
+                    )
+                    .await;
                 }
             })
             .await;
@@ -148,7 +164,11 @@ impl AssetsStore {
     fn write<T: Send + 'static>(
         &mut self,
         cx: &mut Context<Self>,
-        op: impl FnOnce(std::sync::Arc<ops_ssh::Ctx>) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<T, String>> + Send>>,
+        op: impl FnOnce(
+            std::sync::Arc<ops_ssh::Ctx>,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<T, String>> + Send>,
+        >,
     ) -> Task<Result<T, String>> {
         let ctx = crate::services::ctx(cx);
         let fut = op(ctx);
@@ -161,23 +181,44 @@ impl AssetsStore {
         })
     }
 
-    pub fn add_host(&mut self, host: NewHost, cx: &mut Context<Self>) -> Task<Result<Host, String>> {
-        self.write(cx, move |ctx| Box::pin(async move { ops_ssh::hosts::add_host(&ctx.db, host).await }))
+    pub fn add_host(
+        &mut self,
+        host: NewHost,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<Host, String>> {
+        self.write(cx, move |ctx| {
+            Box::pin(async move { ops_ssh::hosts::add_host(&ctx.db, host).await })
+        })
     }
 
-    pub fn update_host(&mut self, host: UpdateHost, cx: &mut Context<Self>) -> Task<Result<Host, String>> {
+    pub fn update_host(
+        &mut self,
+        host: UpdateHost,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<Host, String>> {
         self.write(cx, move |ctx| {
-            Box::pin(async move { ops_ssh::hosts::update_host(ctx.core.clone(), ctx.registry.clone(), host).await })
+            Box::pin(async move {
+                ops_ssh::hosts::update_host(ctx.core.clone(), ctx.registry.clone(), host).await
+            })
         })
     }
 
     pub fn delete_host(&mut self, id: String, cx: &mut Context<Self>) -> Task<Result<(), String>> {
         self.selected.remove(&id);
-        self.write(cx, move |ctx| Box::pin(async move { ops_ssh::hosts::delete_host(&ctx.core, ctx.registry.clone(), id).await }))
+        self.write(cx, move |ctx| {
+            Box::pin(async move {
+                ops_ssh::hosts::delete_host(&ctx.core, ctx.registry.clone(), id).await
+            })
+        })
     }
 
     /// Move a host to another group (`None` = ungrouped). No-op when it is already there.
-    pub fn move_host(&mut self, host_id: &str, group_id: Option<String>, cx: &mut Context<Self>) -> Option<Task<Result<Host, String>>> {
+    pub fn move_host(
+        &mut self,
+        host_id: &str,
+        group_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> Option<Task<Result<Host, String>>> {
         let host = self.host(host_id)?.clone();
         if host.group_id == group_id {
             return None;
@@ -185,17 +226,36 @@ impl AssetsStore {
         Some(self.update_host(update_from_host(&host, group_id), cx))
     }
 
-    pub fn add_group(&mut self, name: String, parent_id: Option<String>, cx: &mut Context<Self>) -> Task<Result<HostGroup, String>> {
-        self.write(cx, move |ctx| Box::pin(async move { ops_ssh::groups::add_group(&ctx.db, name, parent_id).await }))
+    pub fn add_group(
+        &mut self,
+        name: String,
+        parent_id: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> Task<Result<HostGroup, String>> {
+        self.write(cx, move |ctx| {
+            Box::pin(async move { ops_ssh::groups::add_group(&ctx.db, name, parent_id).await })
+        })
     }
 
-    pub fn rename_group(&mut self, id: &str, name: String, cx: &mut Context<Self>) -> Option<Task<Result<HostGroup, String>>> {
-        let group = HostGroup { name, ..self.groups.iter().find(|g| g.id == id)?.clone() };
-        Some(self.write(cx, move |ctx| Box::pin(async move { ops_ssh::groups::update_group(&ctx.db, group).await })))
+    pub fn rename_group(
+        &mut self,
+        id: &str,
+        name: String,
+        cx: &mut Context<Self>,
+    ) -> Option<Task<Result<HostGroup, String>>> {
+        let group = HostGroup {
+            name,
+            ..self.groups.iter().find(|g| g.id == id)?.clone()
+        };
+        Some(self.write(cx, move |ctx| {
+            Box::pin(async move { ops_ssh::groups::update_group(&ctx.db, group).await })
+        }))
     }
 
     pub fn delete_group(&mut self, id: String, cx: &mut Context<Self>) -> Task<Result<(), String>> {
-        self.write(cx, move |ctx| Box::pin(async move { ops_ssh::groups::delete_group(&ctx.db, id).await }))
+        self.write(cx, move |ctx| {
+            Box::pin(async move { ops_ssh::groups::delete_group(&ctx.db, id).await })
+        })
     }
 
     /// The implicit "ungrouped" group can only be renamed locally (stored in general settings).
@@ -298,6 +358,9 @@ mod recent_tests {
     fn stored_list_is_tolerant() {
         assert!(parse_recent(None).is_empty());
         assert!(parse_recent(Some(&"nonsense".to_string())).is_empty());
-        assert_eq!(parse_recent(Some(&r#"["x","y","x"]"#.to_string())), ["x", "y"]);
+        assert_eq!(
+            parse_recent(Some(&r#"["x","y","x"]"#.to_string())),
+            ["x", "y"]
+        );
     }
 }

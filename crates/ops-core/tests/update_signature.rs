@@ -13,11 +13,21 @@ fn b64(bytes: &[u8]) -> String {
     const T: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::new();
     for chunk in bytes.chunks(3) {
-        let n = (chunk[0] as u32) << 16 | (*chunk.get(1).unwrap_or(&0) as u32) << 8 | *chunk.get(2).unwrap_or(&0) as u32;
+        let n = (chunk[0] as u32) << 16
+            | (*chunk.get(1).unwrap_or(&0) as u32) << 8
+            | *chunk.get(2).unwrap_or(&0) as u32;
         out.push(T[(n >> 18) as usize & 63] as char);
         out.push(T[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { T[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { T[n as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            T[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            T[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -30,7 +40,13 @@ fn payload() -> Vec<u8> {
 fn start(asset: String, signature: Option<String>) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
-    let sums = format!("{}  {asset}\n", Sha256::digest(payload()).iter().map(|b| format!("{b:02x}")).collect::<String>());
+    let sums = format!(
+        "{}  {asset}\n",
+        Sha256::digest(payload())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    );
     let signature = Arc::new(signature);
     std::thread::spawn(move || {
         for stream in listener.incoming() {
@@ -42,7 +58,13 @@ fn start(asset: String, signature: Option<String>) -> String {
                 let request = String::from_utf8_lossy(&buf[..len]).to_string();
                 let path = request.split_whitespace().nth(1).unwrap_or("/").to_string();
                 let reply = |status: &str, body: &[u8], stream: &mut std::net::TcpStream| {
-                    let _ = stream.write_all(format!("HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).as_bytes());
+                    let _ = stream.write_all(
+                        format!(
+                            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    );
                     let _ = stream.write_all(body);
                 };
                 if path == format!("/releases/download/{TAG}/SHA256SUMS") {
@@ -64,7 +86,14 @@ fn start(asset: String, signature: Option<String>) -> String {
 }
 
 fn run(source: UpdateSource, dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
-    ops_core::rt::block_on(download_update(&source, TAG, "macos", "aarch64", dir, |_, _| {}))
+    ops_core::rt::block_on(download_update(
+        &source,
+        TAG,
+        "macos",
+        "aarch64",
+        dir,
+        |_, _| {},
+    ))
 }
 
 #[test]
@@ -73,7 +102,14 @@ fn a_valid_signature_is_accepted_and_everything_else_is_rejected() {
     let key = minisign::KeyPair::generate_unencrypted_keypair().unwrap();
     let other = minisign::KeyPair::generate_unencrypted_keypair().unwrap();
     let sign = |pair: &minisign::KeyPair, data: &[u8]| {
-        let sig = minisign::sign(Some(&pair.pk), &pair.sk, Cursor::new(data), Some("opsbatch"), None).unwrap();
+        let sig = minisign::sign(
+            Some(&pair.pk),
+            &pair.sk,
+            Cursor::new(data),
+            Some("opsbatch"),
+            None,
+        )
+        .unwrap();
         b64(sig.to_string().as_bytes())
     };
     let public = |pair: &minisign::KeyPair| b64(pair.pk.to_box().unwrap().to_string().as_bytes());
@@ -92,7 +128,10 @@ fn a_valid_signature_is_accepted_and_everything_else_is_rejected() {
     source.pubkey = Some(public(&key));
     let err = run(source, &dir).unwrap_err();
     assert!(err.contains("签名"), "{err}");
-    assert!(!dir.join(format!("{asset}.part")).exists(), "no partial file is left behind");
+    assert!(
+        !dir.join(format!("{asset}.part")).exists(),
+        "no partial file is left behind"
+    );
 
     // signed by somebody else: refused
     let base = start(asset.clone(), Some(sign(&other, &payload())));

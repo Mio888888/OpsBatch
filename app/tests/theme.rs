@@ -4,9 +4,9 @@ use std::time::{Duration, Instant};
 
 use gpui_kit::component::ActiveTheme as _;
 use gpui_kit::TestAppContext;
+use ops_core::theme::{ThemeSettings, ThemeSettingsMode, ThemeTone};
 use opsbatch_app::app::init_globals;
 use opsbatch_app::theme::{self, css};
-use ops_core::theme::{ThemeSettings, ThemeSettingsMode, ThemeTone};
 
 /// The UI language is process-wide, so tests in this binary must not interleave.
 static SERIAL: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -28,10 +28,22 @@ fn default_theme_maps_the_tokyo_night_storm_palette(cx: &mut TestAppContext) {
         assert!(t.is_dark());
         assert_eq!(t.background, css("#222338"), "ui.mainBg");
         assert_eq!(t.sidebar, css("#1f2035"), "ui.sidebarBg");
-        assert_eq!(t.title_bar, css("#282a40"), "standalone title bars use ui.cardBg (the main window overrides it with ui.pageBg)");
+        assert_eq!(
+            t.title_bar,
+            css("#282a40"),
+            "standalone title bars use ui.cardBg (the main window overrides it with ui.pageBg)"
+        );
         assert_eq!(t.primary, css("#1677ff"), "blue accent");
         // macOS/Linux take the text colours from the theme itself, Windows from the fixed UI palette
-        assert_eq!(t.foreground, css(if cfg!(target_os = "windows") { "#eef1f8" } else { "#c0caf5" }), "UI text");
+        assert_eq!(
+            t.foreground,
+            css(if cfg!(target_os = "windows") {
+                "#eef1f8"
+            } else {
+                "#c0caf5"
+            }),
+            "UI text"
+        );
         assert_eq!(t.danger, css("#ff4d4f"));
     });
 }
@@ -50,8 +62,22 @@ fn switching_to_a_light_theme_and_accent_repaints_and_persists(cx: &mut TestAppC
         assert!(!t.is_dark());
         assert_eq!(t.primary, css("#f43f5e"));
         let light = ops_core::theme::theme_by_id("github-light").unwrap();
-        assert_eq!(t.foreground, css(if cfg!(target_os = "windows") { "#303446" } else { light.preview.line_strong }), "UI text");
-        assert_eq!(t.background, css(ops_core::theme::theme_by_id("github-light").unwrap().ui.main_bg));
+        assert_eq!(
+            t.foreground,
+            css(if cfg!(target_os = "windows") {
+                "#303446"
+            } else {
+                light.preview.line_strong
+            }),
+            "UI text"
+        );
+        assert_eq!(
+            t.background,
+            css(ops_core::theme::theme_by_id("github-light")
+                .unwrap()
+                .ui
+                .main_bg)
+        );
     });
     // The save runs on the background runtime.
     let deadline = Instant::now() + Duration::from_secs(15);
@@ -70,9 +96,18 @@ fn switching_to_a_light_theme_and_accent_repaints_and_persists(cx: &mut TestAppC
 #[gpui_kit::test]
 fn follow_system_mode_tracks_the_os_appearance(cx: &mut TestAppContext) {
     let _serial = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
-    boot(cx, ThemeSettings { theme_mode: ThemeSettingsMode::System, ..Default::default() });
+    boot(
+        cx,
+        ThemeSettings {
+            theme_mode: ThemeSettingsMode::System,
+            ..Default::default()
+        },
+    );
     cx.update(|cx| {
-        let os_dark = matches!(cx.window_appearance(), gpui_kit::WindowAppearance::Dark | gpui_kit::WindowAppearance::VibrantDark);
+        let os_dark = matches!(
+            cx.window_appearance(),
+            gpui_kit::WindowAppearance::Dark | gpui_kit::WindowAppearance::VibrantDark
+        );
         assert_eq!(cx.theme().is_dark(), os_dark);
         assert_eq!(theme::current(cx).resolved.is_dark, os_dark);
     });
@@ -85,7 +120,10 @@ fn language_switch_is_immediate_and_persisted(cx: &mut TestAppContext) {
     cx.update(|cx| {
         opsbatch_app::language::set_mode(ops_i18n::LanguageMode::EnUs, cx);
         assert_eq!(ops_i18n::t!("nav.settings"), "Settings");
-        assert_eq!(opsbatch_app::language::current_mode(cx), ops_i18n::LanguageMode::EnUs);
+        assert_eq!(
+            opsbatch_app::language::current_mode(cx),
+            ops_i18n::LanguageMode::EnUs
+        );
     });
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {

@@ -48,18 +48,39 @@ pub fn parse_css_color(s: &str) -> Option<Rgba8> {
                 Some(Rgba8::rgb(d(0)?, d(1)?, d(2)?))
             }
             6 => Some(Rgba8::rgb(h(0, 2)?, h(2, 2)?, h(4, 2)?)),
-            8 => Some(Rgba8 { r: h(0, 2)?, g: h(2, 2)?, b: h(4, 2)?, a: h(6, 2)? as f32 / 255.0 }),
+            8 => Some(Rgba8 {
+                r: h(0, 2)?,
+                g: h(2, 2)?,
+                b: h(4, 2)?,
+                a: h(6, 2)? as f32 / 255.0,
+            }),
             _ => None,
         };
     }
-    let inner = s.strip_prefix("rgba(").or_else(|| s.strip_prefix("rgb("))?.strip_suffix(')')?;
+    let inner = s
+        .strip_prefix("rgba(")
+        .or_else(|| s.strip_prefix("rgb("))?
+        .strip_suffix(')')?;
     let parts: Vec<&str> = inner.split(',').map(str::trim).collect();
     if parts.len() < 3 || parts.len() > 4 {
         return None;
     }
-    let c = |i: usize| parts[i].parse::<f32>().ok().map(|v| v.round().clamp(0.0, 255.0) as u8);
-    let a = parts.get(3).map(|a| a.parse::<f32>().ok()).unwrap_or(Some(1.0))?;
-    Some(Rgba8 { r: c(0)?, g: c(1)?, b: c(2)?, a: a.clamp(0.0, 1.0) })
+    let c = |i: usize| {
+        parts[i]
+            .parse::<f32>()
+            .ok()
+            .map(|v| v.round().clamp(0.0, 255.0) as u8)
+    };
+    let a = parts
+        .get(3)
+        .map(|a| a.parse::<f32>().ok())
+        .unwrap_or(Some(1.0))?;
+    Some(Rgba8 {
+        r: c(0)?,
+        g: c(1)?,
+        b: c(2)?,
+        a: a.clamp(0.0, 1.0),
+    })
 }
 
 pub fn contrast_ratio(a: Rgba8, b: Rgba8) -> f32 {
@@ -69,11 +90,21 @@ pub fn contrast_ratio(a: Rgba8, b: Rgba8) -> f32 {
 
 /// Channel-wise subtraction (same as the Tauri `darken(hex, amount)`).
 pub fn darken(c: Rgba8, amount: u8) -> Rgba8 {
-    Rgba8 { r: c.r.saturating_sub(amount), g: c.g.saturating_sub(amount), b: c.b.saturating_sub(amount), a: c.a }
+    Rgba8 {
+        r: c.r.saturating_sub(amount),
+        g: c.g.saturating_sub(amount),
+        b: c.b.saturating_sub(amount),
+        a: c.a,
+    }
 }
 
 pub fn lighten(c: Rgba8, amount: u8) -> Rgba8 {
-    Rgba8 { r: c.r.saturating_add(amount), g: c.g.saturating_add(amount), b: c.b.saturating_add(amount), a: c.a }
+    Rgba8 {
+        r: c.r.saturating_add(amount),
+        g: c.g.saturating_add(amount),
+        b: c.b.saturating_add(amount),
+        a: c.a,
+    }
 }
 
 #[cfg(test)]
@@ -82,7 +113,10 @@ mod tests {
 
     #[test]
     fn parses_hex_short_hex_and_rgba() {
-        assert_eq!(parse_css_color("#1677ff"), Some(Rgba8::rgb(0x16, 0x77, 0xff)));
+        assert_eq!(
+            parse_css_color("#1677ff"),
+            Some(Rgba8::rgb(0x16, 0x77, 0xff))
+        );
         assert_eq!(parse_css_color("#fff"), Some(Rgba8::rgb(255, 255, 255)));
         let c = parse_css_color("rgba(122, 162, 247, 0.1)").unwrap();
         assert_eq!((c.r, c.g, c.b), (122, 162, 247));
@@ -99,6 +133,9 @@ mod tests {
         assert!((contrast_ratio(black, white) - 21.0).abs() < 0.01);
         assert_eq!(white.to_hex(), "#ffffff");
         assert_eq!(darken(Rgba8::rgb(10, 100, 200), 20), Rgba8::rgb(0, 80, 180));
-        assert_eq!(lighten(Rgba8::rgb(250, 100, 200), 20), Rgba8::rgb(255, 120, 220));
+        assert_eq!(
+            lighten(Rgba8::rgb(250, 100, 200), 20),
+            Rgba8::rgb(255, 120, 220)
+        );
     }
 }

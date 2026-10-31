@@ -21,12 +21,19 @@ async fn main() -> anyhow::Result<()> {
     let opts = Options {
         username: std::env::var("VNC_USER").ok(),
         password: std::env::var("VNC_PASS").ok(),
-        prefer: if std::env::var("VNC_AUTH").as_deref() == Ok("ard") { AuthPreference::Ard } else { AuthPreference::Vnc },
+        prefer: if std::env::var("VNC_AUTH").as_deref() == Ok("ard") {
+            AuthPreference::Ard
+        } else {
+            AuthPreference::Vnc
+        },
         shared: true,
     };
     let stream = TcpStream::connect(format!("{host}:{port}")).await?;
     let mut c = RfbClient::connect(stream, &opts).await?;
-    println!("connected: {:?} {}x{} rfb {:?}", c.name, c.fb.width, c.fb.height, c.version);
+    println!(
+        "connected: {:?} {}x{} rfb {:?}",
+        c.name, c.fb.width, c.fb.height, c.version
+    );
     c.request_update(false).await?;
     let t0 = std::time::Instant::now();
     let (mut rects, mut updates) = (0usize, 0usize);
@@ -42,7 +49,10 @@ async fn main() -> anyhow::Result<()> {
                         ppm.extend_from_slice(&[px[2], px[1], px[0]]);
                     }
                     std::fs::create_dir_all("target/spike-data")?;
-                    tokio::fs::File::create("target/spike-data/vnc.ppm").await?.write_all(&ppm).await?;
+                    tokio::fs::File::create("target/spike-data/vnc.ppm")
+                        .await?
+                        .write_all(&ppm)
+                        .await?;
                 }
                 c.request_update(true).await?;
             }
@@ -72,7 +82,13 @@ mod tests {
     }
 
     /// Plays the server role. `sec` selects the security type; returns Err(()) if the client failed auth.
-    async fn mock_server(mut s: DuplexStream, version: &str, sec: u8, user: &str, pass: &str) -> Result<(), ()> {
+    async fn mock_server(
+        mut s: DuplexStream,
+        version: &str,
+        sec: u8,
+        user: &str,
+        pass: &str,
+    ) -> Result<(), ()> {
         s.write_all(version.as_bytes()).await.unwrap();
         let cver = read_exact_vec(&mut s, 12).await;
         let v38 = cver == b"RFB 003.008\n";
@@ -124,7 +140,9 @@ mod tests {
         assert_eq!(read_exact_vec(&mut s, 1).await.len(), 1); // ClientInit
         s.write_u16(W).await.unwrap();
         s.write_u16(H).await.unwrap();
-        s.write_all(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]).await.unwrap();
+        s.write_all(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0])
+            .await
+            .unwrap();
         s.write_u32(4).await.unwrap();
         s.write_all(b"mock").await.unwrap();
 
@@ -159,7 +177,9 @@ mod tests {
         let mut stream = flate2::Compress::new(Compression::fast(), true);
         let mut chunk = |input: &[u8]| {
             let mut out = Vec::with_capacity(256);
-            stream.compress_vec(input, &mut out, flate2::FlushCompress::Sync).unwrap();
+            stream
+                .compress_vec(input, &mut out, flate2::FlushCompress::Sync)
+                .unwrap();
             out
         };
         let c1 = chunk(&[1, 10, 20, 30]);
@@ -178,11 +198,19 @@ mod tests {
 
     fn hex_prime() -> Vec<u8> {
         let s = "ffffffffffffffffc90fdaa22168c234c4c6628b80dc1cd129024e088a67cc74020bbea63b139b22514a08798e3404ddef9519b3cd3a431b302b0a6df25f14374fe1356d6d51c245e485b576625e7ec6f44c42e9a637ed6b0bff5cb6f406b7edee386bfb5a899fa5ae9f24117c4b1fe649286651ece65381ffffffffffffffff";
-        (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
+        (0..s.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap())
+            .collect()
     }
 
     fn opts(user: &str, pass: &str, prefer: AuthPreference) -> Options {
-        Options { username: Some(user.into()), password: Some(pass.into()), prefer, shared: true }
+        Options {
+            username: Some(user.into()),
+            password: Some(pass.into()),
+            prefer,
+            shared: true,
+        }
     }
 
     fn px(c: &RfbClient<DuplexStream>, x: usize, y: usize) -> [u8; 4] {
@@ -190,7 +218,12 @@ mod tests {
         c.fb.data[o..o + 4].try_into().unwrap()
     }
 
-    async fn run(version: &'static str, sec: u8, prefer: AuthPreference, cpass: &'static str) -> anyhow::Result<RfbClient<DuplexStream>> {
+    async fn run(
+        version: &'static str,
+        sec: u8,
+        prefer: AuthPreference,
+        cpass: &'static str,
+    ) -> anyhow::Result<RfbClient<DuplexStream>> {
         let (cs, ss) = tokio::io::duplex(1 << 16);
         tokio::spawn(async move {
             let _ = mock_server(ss, version, sec, "alice", "pw12").await;
@@ -220,34 +253,67 @@ mod tests {
 
     #[tokio::test]
     async fn security_none_rfb38() {
-        check_pixels(&run("RFB 003.008\n", SEC_NONE, AuthPreference::Vnc, "").await.unwrap());
+        check_pixels(
+            &run("RFB 003.008\n", SEC_NONE, AuthPreference::Vnc, "")
+                .await
+                .unwrap(),
+        );
     }
 
     #[tokio::test]
     async fn security_vnc_auth_ok_and_wrong_password() {
-        check_pixels(&run("RFB 003.008\n", SEC_VNC, AuthPreference::Vnc, "pw12").await.unwrap());
-        let err = run("RFB 003.008\n", SEC_VNC, AuthPreference::Vnc, "bad").await.err().unwrap();
+        check_pixels(
+            &run("RFB 003.008\n", SEC_VNC, AuthPreference::Vnc, "pw12")
+                .await
+                .unwrap(),
+        );
+        let err = run("RFB 003.008\n", SEC_VNC, AuthPreference::Vnc, "bad")
+            .await
+            .err()
+            .unwrap();
         assert!(err.to_string().contains("authentication failed"), "{err}");
     }
 
     #[tokio::test]
     async fn security_ard_and_apple_version_string() {
         // Apple servers announce RFB 003.889 and are spoken to as 3.8.
-        check_pixels(&run("RFB 003.889\n", SEC_ARD, AuthPreference::Ard, "pw12").await.unwrap());
-        assert!(run("RFB 003.889\n", SEC_ARD, AuthPreference::Ard, "bad").await.is_err());
+        check_pixels(
+            &run("RFB 003.889\n", SEC_ARD, AuthPreference::Ard, "pw12")
+                .await
+                .unwrap(),
+        );
+        assert!(run("RFB 003.889\n", SEC_ARD, AuthPreference::Ard, "bad")
+            .await
+            .is_err());
     }
 
     #[tokio::test]
     async fn rfb33_type_chosen_by_server() {
-        check_pixels(&run("RFB 003.003\n", SEC_VNC, AuthPreference::Vnc, "pw12").await.unwrap());
+        check_pixels(
+            &run("RFB 003.003\n", SEC_VNC, AuthPreference::Vnc, "pw12")
+                .await
+                .unwrap(),
+        );
     }
 
     #[test]
     fn security_preference_order() {
-        assert_eq!(choose_security(&[1, 2, 30], AuthPreference::Vnc, true), Some(SEC_VNC));
-        assert_eq!(choose_security(&[1, 2, 30], AuthPreference::Ard, true), Some(SEC_ARD));
-        assert_eq!(choose_security(&[1, 2], AuthPreference::Vnc, false), Some(SEC_NONE));
-        assert_eq!(choose_security(&[30], AuthPreference::Vnc, true), Some(SEC_ARD));
+        assert_eq!(
+            choose_security(&[1, 2, 30], AuthPreference::Vnc, true),
+            Some(SEC_VNC)
+        );
+        assert_eq!(
+            choose_security(&[1, 2, 30], AuthPreference::Ard, true),
+            Some(SEC_ARD)
+        );
+        assert_eq!(
+            choose_security(&[1, 2], AuthPreference::Vnc, false),
+            Some(SEC_NONE)
+        );
+        assert_eq!(
+            choose_security(&[30], AuthPreference::Vnc, true),
+            Some(SEC_ARD)
+        );
         assert_eq!(choose_security(&[5, 6], AuthPreference::Vnc, true), None);
     }
 }

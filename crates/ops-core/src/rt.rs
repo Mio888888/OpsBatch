@@ -52,7 +52,11 @@ where
     spawn(async move {
         let _ = tx.send_async(fut.await).await;
     });
-    async move { rx.recv_async().await.map_err(|_| "task cancelled".to_string()) }
+    async move {
+        rx.recv_async()
+            .await
+            .map_err(|_| "task cancelled".to_string())
+    }
 }
 
 #[cfg(test)]

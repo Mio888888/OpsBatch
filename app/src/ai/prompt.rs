@@ -65,7 +65,11 @@ pub fn terminal_buffer_text(raw: &str) -> String {
 }
 
 /// The system message of a normal chat turn.
-pub fn build_context(host: Option<(&str, &str)>, sftp_path: Option<&str>, terminal_buffer: &str) -> String {
+pub fn build_context(
+    host: Option<(&str, &str)>,
+    sftp_path: Option<&str>,
+    terminal_buffer: &str,
+) -> String {
     let mut parts = vec![ASSISTANT_PROMPT.to_string()];
     if let Some((name, ip)) = host.filter(|(n, i)| !n.is_empty() && !i.is_empty()) {
         parts.push(format!("当前连接: {name} ({ip})"));
@@ -87,11 +91,20 @@ pub fn analyze_selection(selection: &str, host: Option<(&str, &str)>) -> (String
         None => String::new(),
     };
     let truncated = if selection.chars().count() > MAX_SELECTION_CHARS {
-        format!("{}\n…(已截断)", selection.chars().take(MAX_SELECTION_CHARS).collect::<String>())
+        format!(
+            "{}\n…(已截断)",
+            selection
+                .chars()
+                .take(MAX_SELECTION_CHARS)
+                .collect::<String>()
+        )
     } else {
         selection.to_string()
     };
-    (format!("{ANALYZE_PROMPT}{host_info}"), format!("请分析以下终端输出中的错误原因：\n\n```\n{truncated}\n```"))
+    (
+        format!("{ANALYZE_PROMPT}{host_info}"),
+        format!("请分析以下终端输出中的错误原因：\n\n```\n{truncated}\n```"),
+    )
 }
 
 /// System message of the ⌘I command generator (last 30 lines of the terminal as context).

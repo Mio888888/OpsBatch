@@ -29,7 +29,10 @@ use tokio::sync::{mpsc, oneshot};
 
 use ops_core::db::Database;
 
-pub use types::{RdpConnectRequest, RdpConnectResponse, RdpInputEvent, RdpMetricsPayload, RdpStatusDetail, RdpStatusPayload, RdpTransportMode};
+pub use types::{
+    RdpConnectRequest, RdpConnectResponse, RdpInputEvent, RdpMetricsPayload, RdpStatusDetail,
+    RdpStatusPayload, RdpTransportMode,
+};
 use types::{RdpConnectionOptions, RdpCredentials};
 
 /// Frames are sent as `[width u16][height u16][x u16][y u16][region_w u16][region_h u16][len u32][RGBA…]` (LE).
@@ -95,23 +98,44 @@ impl RdpManager {
     }
 
     /// Connect to the Windows host `request.host_id` using its stored credentials and RDP settings.
-    pub async fn connect_host(&self, core: &ops_core::Core, request: RdpConnectRequest, frame_channel: FrameChannel) -> Result<RdpConnectResponse, String> {
+    pub async fn connect_host(
+        &self,
+        core: &ops_core::Core,
+        request: RdpConnectRequest,
+        frame_channel: FrameChannel,
+    ) -> Result<RdpConnectResponse, String> {
         let db = core.db.clone();
         let host_id = request.host_id.clone();
-        let host_fields = ops_core::rt::spawn_blocking(move || load_host_rdp_fields(&db, &host_id)).await.map_err(|e| e.to_string())??;
+        let host_fields = ops_core::rt::spawn_blocking(move || load_host_rdp_fields(&db, &host_id))
+            .await
+            .map_err(|e| e.to_string())??;
         if !host_fields.os.trim().eq_ignore_ascii_case("windows") {
             return Err("RDP 连接仅支持 Windows 主机".to_string());
         }
         if host_fields.auth_type != "password" {
             return Err("RDP 当前仅支持密码认证".to_string());
         }
-        let password = ops_ssh::hosts::resolve_host_password(&request.host_id, host_fields.password)?;
+        let password =
+            ops_ssh::hosts::resolve_host_password(&request.host_id, host_fields.password)?;
         let credentials = normalize_credentials(&host_fields.username, password)?;
-        let options = normalize_rdp_options(&request, &host_fields.host, Some(host_fields.port), &host_fields.settings, host_fields.proxy)?;
-        self.connect(core.clone(), options, credentials, frame_channel).await
+        let options = normalize_rdp_options(
+            &request,
+            &host_fields.host,
+            Some(host_fields.port),
+            &host_fields.settings,
+            host_fields.proxy,
+        )?;
+        self.connect(core.clone(), options, credentials, frame_channel)
+            .await
     }
 
-    async fn connect(&self, app: ops_core::Core, options: RdpConnectionOptions, credentials: RdpCredentials, frame_channel: FrameChannel) -> Result<RdpConnectResponse, String> {
+    async fn connect(
+        &self,
+        app: ops_core::Core,
+        options: RdpConnectionOptions,
+        credentials: RdpCredentials,
+        frame_channel: FrameChannel,
+    ) -> Result<RdpConnectResponse, String> {
         if let Some((_, existing)) = self.sessions.remove(&options.session_id) {
             let _ = existing.sender.send(RdpSessionCommand::Disconnect);
             existing.task.abort();
@@ -120,7 +144,15 @@ impl RdpManager {
         let (command_tx, command_rx) = mpsc::unbounded_channel();
         let (ready_tx, ready_rx) = oneshot::channel();
         let session_id = options.session_id.clone();
-        let task = ops_core::rt::spawn(protocol::run_rdp_session(app, options, credentials, command_tx.clone(), command_rx, ready_tx, frame_channel));
+        let task = ops_core::rt::spawn(protocol::run_rdp_session(
+            app,
+            options,
+            credentials,
+            command_tx.clone(),
+            command_rx,
+            ready_tx,
+            frame_channel,
+        ));
 
         let ready = match tokio::time::timeout(RDP_CONNECT_TIMEOUT, ready_rx).await {
             Ok(Ok(Ok(ready))) => ready,
@@ -138,11 +170,22 @@ impl RdpManager {
             }
         };
 
-        self.sessions.insert(session_id, RdpSessionHandle { sender: command_tx, task });
+        self.sessions.insert(
+            session_id,
+            RdpSessionHandle {
+                sender: command_tx,
+                task,
+            },
+        );
         Ok(ready)
     }
 
-    pub fn send_input(&self, core: &ops_core::Core, session_id: &str, event: RdpInputEvent) -> Result<(), String> {
+    pub fn send_input(
+        &self,
+        core: &ops_core::Core,
+        session_id: &str,
+        event: RdpInputEvent,
+    ) -> Result<(), String> {
         let trace = protocol::input_trace_enabled();
         let summary = input::input_event_summary(&event);
         let result = input::validate_input_event(&event).and_then(|()| {
@@ -154,9 +197,21 @@ impl RdpManager {
                 .map_err(|_| format!("RDP 会话已断开: {session_id}"))
         });
         match &result {
-            Ok(()) if trace => ops_core::log::emit_log(core, "info", "rdp.input", &format!("stage=queued sessionId={session_id} event={summary}"), "backend"),
+            Ok(()) if trace => ops_core::log::emit_log(
+                core,
+                "info",
+                "rdp.input",
+                &format!("stage=queued sessionId={session_id} event={summary}"),
+                "backend",
+            ),
             Ok(()) => {}
-            Err(error) => ops_core::log::emit_log(core, "warn", "rdp.input", &format!("stage=queue_failed sessionId={session_id} event={summary} error={error}"), "backend"),
+            Err(error) => ops_core::log::emit_log(
+                core,
+                "warn",
+                "rdp.input",
+                &format!("stage=queue_failed sessionId={session_id} event={summary} error={error}"),
+                "backend",
+            ),
         }
         result
     }
@@ -171,7 +226,12 @@ impl RdpManager {
         }
     }
 
-    pub fn upload_files(&self, session_id: &str, paths: Vec<String>, position: Option<(u16, u16)>) -> Result<(), String> {
+    pub fn upload_files(
+        &self,
+        session_id: &str,
+        paths: Vec<String>,
+        position: Option<(u16, u16)>,
+    ) -> Result<(), String> {
         self.sessions
             .get(session_id)
             .map(|entry| entry.sender.clone())
@@ -192,7 +252,13 @@ impl RdpManager {
                 }
             }
         });
-        self.sessions.insert(session_id.to_string(), RdpSessionHandle { sender: command_tx, task });
+        self.sessions.insert(
+            session_id.to_string(),
+            RdpSessionHandle {
+                sender: command_tx,
+                task,
+            },
+        );
         event_rx
     }
 
@@ -222,7 +288,16 @@ fn load_host_rdp_fields(db: &Database, host_id: &str) -> Result<HostRdpFields, S
         )
         .map_err(|e| format!("host not found: {e}"))?;
     let settings = serde_json::from_str(&settings_json).unwrap_or_default();
-    Ok(HostRdpFields { host, port, auth_type, username, password, os, settings, proxy: ops_ssh::hosts::resolve_host_proxy_settings(host_id, proxy_json)? })
+    Ok(HostRdpFields {
+        host,
+        port,
+        auth_type,
+        username,
+        password,
+        os,
+        settings,
+        proxy: ops_ssh::hosts::resolve_host_proxy_settings(host_id, proxy_json)?,
+    })
 }
 
 fn normalize_rdp_options(
@@ -237,20 +312,38 @@ fn normalize_rdp_options(
         return Err("RDP 主机地址不能为空".to_string());
     }
     let port = match stored_port {
-        Some(value) if value > 0 => u16::try_from(value).map_err(|_| format!("RDP 端口超出范围: {value}"))?,
+        Some(value) if value > 0 => {
+            u16::try_from(value).map_err(|_| format!("RDP 端口超出范围: {value}"))?
+        }
         _ => DEFAULT_RDP_PORT,
     };
 
-    let width = settings.desktop_width.or(request.width).unwrap_or(DEFAULT_DESKTOP_WIDTH).clamp(MIN_DESKTOP_WIDTH, MAX_DESKTOP_WIDTH);
-    let height = settings.desktop_height.or(request.height).unwrap_or(DEFAULT_DESKTOP_HEIGHT).clamp(MIN_DESKTOP_HEIGHT, MAX_DESKTOP_HEIGHT);
-    let domain = settings.domain.clone().or_else(|| request.domain.clone()).map(|value| value.trim().to_string()).filter(|value| !value.is_empty());
+    let width = settings
+        .desktop_width
+        .or(request.width)
+        .unwrap_or(DEFAULT_DESKTOP_WIDTH)
+        .clamp(MIN_DESKTOP_WIDTH, MAX_DESKTOP_WIDTH);
+    let height = settings
+        .desktop_height
+        .or(request.height)
+        .unwrap_or(DEFAULT_DESKTOP_HEIGHT)
+        .clamp(MIN_DESKTOP_HEIGHT, MAX_DESKTOP_HEIGHT);
+    let domain = settings
+        .domain
+        .clone()
+        .or_else(|| request.domain.clone())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
 
     let transport_mode = request.transport_mode.unwrap_or_default();
     let default_enable_audio = transport_mode == RdpTransportMode::H264Direct;
 
     Ok(RdpConnectionOptions {
         host_id: request.host_id.clone(),
-        session_id: request.session_id.clone().unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        session_id: request
+            .session_id
+            .clone()
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
         host: host.to_string(),
         port,
         width,
@@ -276,19 +369,30 @@ fn shared_folder(settings: &StoredRdpSettings) -> Option<std::path::PathBuf> {
     }
     if let Some(rest) = path.strip_prefix('~') {
         if rest.is_empty() || rest.starts_with(['/', '\\']) {
-            if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
-                return Some(std::path::PathBuf::from(home).join(rest.trim_start_matches(['/', '\\'])));
+            if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"))
+            {
+                return Some(
+                    std::path::PathBuf::from(home).join(rest.trim_start_matches(['/', '\\'])),
+                );
             }
         }
     }
     Some(std::path::PathBuf::from(path))
 }
 
-fn normalize_credentials(username: &str, password: Option<String>) -> Result<RdpCredentials, String> {
+fn normalize_credentials(
+    username: &str,
+    password: Option<String>,
+) -> Result<RdpCredentials, String> {
     let username = username.trim();
     if username.is_empty() {
         return Err("RDP 用户名不能为空".to_string());
     }
-    let password = password.filter(|value| !value.is_empty()).ok_or_else(|| "RDP 密码不能为空".to_string())?;
-    Ok(RdpCredentials { username: username.to_string(), password })
+    let password = password
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "RDP 密码不能为空".to_string())?;
+    Ok(RdpCredentials {
+        username: username.to_string(),
+        password,
+    })
 }

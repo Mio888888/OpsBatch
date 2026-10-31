@@ -92,7 +92,8 @@ pub fn get_log_history(core: &Core, limit: Option<u32>) -> Result<Vec<AppLogEntr
 }
 
 pub fn clear_app_logs(conn: &rusqlite::Connection) -> Result<(), String> {
-    conn.execute("DELETE FROM app_logs", []).map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM app_logs", [])
+        .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -114,7 +115,10 @@ pub fn emit_frontend_log(core: &Core, level: &str, source: &str, message: &str) 
 }
 
 fn truncate_frontend_log_message(message: &str) -> String {
-    message.chars().take(MAX_FRONTEND_LOG_MESSAGE_CHARS).collect::<String>()
+    message
+        .chars()
+        .take(MAX_FRONTEND_LOG_MESSAGE_CHARS)
+        .collect::<String>()
 }
 
 fn normalize_level(level: &str) -> String {
@@ -139,7 +143,11 @@ fn normalize_source(source: &str) -> String {
 // ---- diagnostics file ----
 
 fn redact_diagnostic_message(message: &str) -> String {
-    sanitize_log_message(message).replace(['\r', '\n'], " ").chars().take(2000).collect()
+    sanitize_log_message(message)
+        .replace(['\r', '\n'], " ")
+        .chars()
+        .take(2000)
+        .collect()
 }
 
 const MAX_LOG_MESSAGE_CHARS: usize = 12000;
@@ -188,7 +196,9 @@ mod tests {
             "Bearer *** token=*** password: *** api_key = ***"
         );
         assert_eq!(
-            sanitize_log_message(r#"{"vncPassword":"secret","proxyPassword":"proxy-secret","apiKey":"live-key"}"#),
+            sanitize_log_message(
+                r#"{"vncPassword":"secret","proxyPassword":"proxy-secret","apiKey":"live-key"}"#
+            ),
             r#"{"vncPassword":"***","proxyPassword":"***","apiKey":"***"}"#
         );
     }
@@ -197,7 +207,10 @@ mod tests {
     fn long_diagnostics_keep_their_tail_but_are_capped() {
         let long = format!("rdp.ai.parse\n{}\nend-marker", "x".repeat(6000));
         assert!(sanitize_log_message(&long).ends_with("end-marker"));
-        assert_eq!(sanitize_log_message(&"y".repeat(20000)).chars().count(), 12000);
+        assert_eq!(
+            sanitize_log_message(&"y".repeat(20000)).chars().count(),
+            12000
+        );
     }
 
     #[test]
@@ -209,8 +222,13 @@ mod tests {
         assert_eq!(history.len(), 2);
         assert!(history.iter().all(|e| e.origin == "frontend"));
         assert_eq!(history[0].message, "login failed password=***");
-        let diag = std::fs::read_to_string(core.data_dir().join("opsbatch-diagnostics.log")).unwrap();
-        assert!(diag.contains("[frontend.ui.test] login failed password=***") && !diag.contains("hunter2") && !diag.contains("just info"));
+        let diag =
+            std::fs::read_to_string(core.data_dir().join("opsbatch-diagnostics.log")).unwrap();
+        assert!(
+            diag.contains("[frontend.ui.test] login failed password=***")
+                && !diag.contains("hunter2")
+                && !diag.contains("just info")
+        );
     }
 
     #[test]
@@ -225,7 +243,9 @@ mod tests {
 
         clear_app_logs(&conn).expect("clear app logs");
 
-        let count: i64 = conn.query_row("SELECT COUNT(*) FROM app_logs", [], |row| row.get(0)).expect("count");
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM app_logs", [], |row| row.get(0))
+            .expect("count");
         assert_eq!(0, count);
     }
 
@@ -247,7 +267,14 @@ mod tests {
         assert!(history.iter().any(|e| e.message == "hello"));
         emit_frontend_log(&core, "bogus", "  ", "from ui");
         let last = get_log_history(&core, Some(1)).unwrap().pop().unwrap();
-        assert_eq!((last.level.as_str(), last.source.as_str(), last.origin.as_str()), ("info", "system", "frontend"));
+        assert_eq!(
+            (
+                last.level.as_str(),
+                last.source.as_str(),
+                last.origin.as_str()
+            ),
+            ("info", "system", "frontend")
+        );
     }
 
     #[test]

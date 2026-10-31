@@ -6,6 +6,6 @@ pub mod mcp;
 pub mod mcp_bridge;
 pub mod parser;
 pub mod prefs;
+pub mod rag;
 pub mod rdp_parser;
 pub mod rdp_verify;
-pub mod rag;

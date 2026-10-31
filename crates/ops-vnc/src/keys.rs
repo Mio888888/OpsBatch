@@ -84,7 +84,11 @@ impl Mods {
     /// Ctrl there (Cmd+V must paste, not press Super+V), so with `cmd_as_ctrl` Command is sent as Control.
     pub fn for_remote(self, cmd_as_ctrl: bool) -> Mods {
         if cmd_as_ctrl {
-            Mods { control: self.control || self.platform, platform: false, ..self }
+            Mods {
+                control: self.control || self.platform,
+                platform: false,
+                ..self
+            }
         } else {
             self
         }
@@ -109,7 +113,14 @@ pub fn modifier_changes(prev: Mods, now: Mods) -> Vec<(u32, bool)> {
 
 /// The Ctrl+Alt+Del chord as `(keysym, down)` events.
 pub fn ctrl_alt_del() -> [(u32, bool); 6] {
-    [(XK_CONTROL_L, true), (XK_ALT_L, true), (XK_DELETE, true), (XK_DELETE, false), (XK_ALT_L, false), (XK_CONTROL_L, false)]
+    [
+        (XK_CONTROL_L, true),
+        (XK_ALT_L, true),
+        (XK_DELETE, true),
+        (XK_DELETE, false),
+        (XK_ALT_L, false),
+        (XK_CONTROL_L, false),
+    ]
 }
 
 #[cfg(test)]
@@ -126,29 +137,74 @@ mod tests {
         assert_eq!(keysym_for_key("space", Some(" ")), Some(0x20));
         assert_eq!(keysym_for_key("é", Some("é")), Some(0xe9));
         assert_eq!(keysym_for_key("中", Some("中")), Some(0x0100_4e2d));
-        assert_eq!(keysym_for_key("x", Some("")), Some(0x78), "falls back to the key name");
+        assert_eq!(
+            keysym_for_key("x", Some("")),
+            Some(0x78),
+            "falls back to the key name"
+        );
         assert_eq!(keysym_for_key("unknownkey", None), None);
     }
 
     #[test]
     fn command_is_sent_as_control_to_machines_that_are_not_macs() {
-        let cmd = Mods { platform: true, ..Mods::default() };
+        let cmd = Mods {
+            platform: true,
+            ..Mods::default()
+        };
         let none = Mods::default();
-        assert_eq!(modifier_changes(none, cmd.for_remote(true)), vec![(XK_CONTROL_L, true)]);
-        assert_eq!(modifier_changes(none, cmd.for_remote(false)), vec![(XK_SUPER_L, true)]);
+        assert_eq!(
+            modifier_changes(none, cmd.for_remote(true)),
+            vec![(XK_CONTROL_L, true)]
+        );
+        assert_eq!(
+            modifier_changes(none, cmd.for_remote(false)),
+            vec![(XK_SUPER_L, true)]
+        );
         // Ctrl and Cmd together are one Control for the remote: letting go of one must not release it
-        let both = Mods { control: true, platform: true, ..none };
+        let both = Mods {
+            control: true,
+            platform: true,
+            ..none
+        };
         assert!(modifier_changes(cmd.for_remote(true), both.for_remote(true)).is_empty());
-        assert!(modifier_changes(both.for_remote(true), Mods { control: true, ..none }.for_remote(true)).is_empty());
-        assert_eq!(modifier_changes(Mods { control: true, ..none }.for_remote(true), none), vec![(XK_CONTROL_L, false)]);
+        assert!(modifier_changes(
+            both.for_remote(true),
+            Mods {
+                control: true,
+                ..none
+            }
+            .for_remote(true)
+        )
+        .is_empty());
+        assert_eq!(
+            modifier_changes(
+                Mods {
+                    control: true,
+                    ..none
+                }
+                .for_remote(true),
+                none
+            ),
+            vec![(XK_CONTROL_L, false)]
+        );
     }
 
     #[test]
     fn modifier_changes_and_chord() {
         let none = Mods::default();
-        let both = Mods { shift: true, platform: true, ..none };
-        assert_eq!(modifier_changes(none, both), vec![(XK_SHIFT_L, true), (XK_SUPER_L, true)]);
-        assert_eq!(modifier_changes(both, none), vec![(XK_SHIFT_L, false), (XK_SUPER_L, false)]);
+        let both = Mods {
+            shift: true,
+            platform: true,
+            ..none
+        };
+        assert_eq!(
+            modifier_changes(none, both),
+            vec![(XK_SHIFT_L, true), (XK_SUPER_L, true)]
+        );
+        assert_eq!(
+            modifier_changes(both, none),
+            vec![(XK_SHIFT_L, false), (XK_SUPER_L, false)]
+        );
         assert!(modifier_changes(both, both).is_empty());
         let chord = ctrl_alt_del();
         assert_eq!(chord[2], (XK_DELETE, true));

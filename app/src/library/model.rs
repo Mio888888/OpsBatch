@@ -133,7 +133,11 @@ impl CommandEntry {
             name: c.name.clone(),
             command: c.command.clone(),
             url: c.url.clone(),
-            kind: if tags.iter().any(|t| t == "docker") { Kind::Docker } else { Kind::Command },
+            kind: if tags.iter().any(|t| t == "docker") {
+                Kind::Docker
+            } else {
+                Kind::Command
+            },
             category: c.category.clone(),
             tags,
             risk: Risk::parse(&c.risk),
@@ -147,7 +151,12 @@ impl CommandEntry {
 
     /// Docker commands carry a `docker` tag; ordinary ones never do.
     fn stored_tags(&self) -> Vec<String> {
-        let mut tags: Vec<String> = self.tags.iter().filter(|t| *t != "docker").cloned().collect();
+        let mut tags: Vec<String> = self
+            .tags
+            .iter()
+            .filter(|t| *t != "docker")
+            .cloned()
+            .collect();
         if self.kind == Kind::Docker {
             tags.push("docker".into());
         }
@@ -170,7 +179,11 @@ impl CommandEntry {
 
     /// The text that is copied/inserted: remote script URLs become a `curl | bash` line.
     pub fn display_command(&self) -> String {
-        if self.url.is_empty() { self.command.clone() } else { format!("curl -sSL '{}' | bash", self.url) }
+        if self.url.is_empty() {
+            self.command.clone()
+        } else {
+            format!("curl -sSL '{}' | bash", self.url)
+        }
     }
 }
 
@@ -244,7 +257,11 @@ impl ScriptEntry {
     }
 
     pub fn display_text(&self) -> String {
-        if self.url.is_empty() { self.content.clone() } else { format!("curl -sSL '{}' | bash", self.url) }
+        if self.url.is_empty() {
+            self.content.clone()
+        } else {
+            format!("curl -sSL '{}' | bash", self.url)
+        }
     }
 }
 
@@ -271,12 +288,20 @@ impl QuickActionEntry {
             name: a.name.clone(),
             command: a.command.clone(),
             category: a.category.clone(),
-            parameters_json: if a.parameters.is_empty() { "[]".into() } else { a.parameters.clone() },
+            parameters_json: if a.parameters.is_empty() {
+                "[]".into()
+            } else {
+                a.parameters.clone()
+            },
             order: a.sort_order,
             starred: a.starred == 1,
             description: a.description.clone(),
             tags: parse_tags(&a.tags),
-            language: if a.language.is_empty() { "shell".into() } else { a.language.clone() },
+            language: if a.language.is_empty() {
+                "shell".into()
+            } else {
+                a.language.clone()
+            },
             last_run_at: a.last_run_at.clone(),
             last_status: a.last_status.clone(),
         }
@@ -316,7 +341,9 @@ impl QuickActionEntry {
 // ---- filtering ----
 
 /// Category -> number of entries (blank categories are not listed).
-pub fn category_counts<'a>(categories: impl IntoIterator<Item = &'a str>) -> BTreeMap<String, usize> {
+pub fn category_counts<'a>(
+    categories: impl IntoIterator<Item = &'a str>,
+) -> BTreeMap<String, usize> {
     let mut m = BTreeMap::new();
     for c in categories {
         let c = c.trim();
@@ -332,35 +359,67 @@ fn contains_ci(hay: &str, needle: &str) -> bool {
 }
 
 /// Commands matching the docker/command split, category and query (name, command, description, tags).
-pub fn filter_commands<'a>(all: &'a [CommandEntry], docker_only: bool, category: Option<&str>, query: &str) -> Vec<&'a CommandEntry> {
+pub fn filter_commands<'a>(
+    all: &'a [CommandEntry],
+    docker_only: bool,
+    category: Option<&str>,
+    query: &str,
+) -> Vec<&'a CommandEntry> {
     let q = query.trim().to_lowercase();
     all.iter()
         .filter(|c| docker_only == (c.kind == Kind::Docker))
         .filter(|c| category.map_or(true, |cat| c.category == cat))
-        .filter(|c| q.is_empty() || contains_ci(&c.name, &q) || contains_ci(&c.command, &q) || contains_ci(&c.description, &q) || c.tags.iter().any(|t| contains_ci(t, &q)))
+        .filter(|c| {
+            q.is_empty()
+                || contains_ci(&c.name, &q)
+                || contains_ci(&c.command, &q)
+                || contains_ci(&c.description, &q)
+                || c.tags.iter().any(|t| contains_ci(t, &q))
+        })
         .collect()
 }
 
 /// Scripts by category and query (name, description, tags).
-pub fn filter_scripts<'a>(all: &'a [ScriptEntry], category: Option<&str>, query: &str) -> Vec<&'a ScriptEntry> {
+pub fn filter_scripts<'a>(
+    all: &'a [ScriptEntry],
+    category: Option<&str>,
+    query: &str,
+) -> Vec<&'a ScriptEntry> {
     let q = query.trim().to_lowercase();
     all.iter()
         .filter(|s| category.map_or(true, |cat| s.category == cat))
-        .filter(|s| q.is_empty() || contains_ci(&s.name, &q) || contains_ci(&s.description, &q) || s.tags.iter().any(|t| contains_ci(t, &q)))
+        .filter(|s| {
+            q.is_empty()
+                || contains_ci(&s.name, &q)
+                || contains_ci(&s.description, &q)
+                || s.tags.iter().any(|t| contains_ci(t, &q))
+        })
         .collect()
 }
 
 /// Quick actions by category and query (name, command, description).
-pub fn filter_actions<'a>(all: &'a [QuickActionEntry], category: Option<&str>, query: &str) -> Vec<&'a QuickActionEntry> {
+pub fn filter_actions<'a>(
+    all: &'a [QuickActionEntry],
+    category: Option<&str>,
+    query: &str,
+) -> Vec<&'a QuickActionEntry> {
     let q = query.trim().to_lowercase();
     all.iter()
         .filter(|a| category.map_or(true, |cat| a.category == cat))
-        .filter(|a| q.is_empty() || contains_ci(&a.name, &q) || contains_ci(&a.command, &q) || contains_ci(&a.description, &q))
+        .filter(|a| {
+            q.is_empty()
+                || contains_ci(&a.name, &q)
+                || contains_ci(&a.command, &q)
+                || contains_ci(&a.description, &q)
+        })
         .collect()
 }
 
 /// Categories offered when creating something: the presets first, then any extra existing ones.
-pub fn category_options(presets: &[&str], existing: impl IntoIterator<Item = String>) -> Vec<String> {
+pub fn category_options(
+    presets: &[&str],
+    existing: impl IntoIterator<Item = String>,
+) -> Vec<String> {
     let mut out: Vec<String> = presets.iter().map(|s| s.to_string()).collect();
     for c in existing {
         if !out.contains(&c) {
@@ -385,7 +444,9 @@ pub fn last_run_bucket(ts: &str, now: NaiveDateTime) -> LastRun {
     if ts.is_empty() {
         return LastRun::Unknown;
     }
-    let Ok(then) = NaiveDateTime::parse_from_str(&ts.replace('T', " "), "%Y-%m-%d %H:%M:%S") else { return LastRun::Unknown };
+    let Ok(then) = NaiveDateTime::parse_from_str(&ts.replace('T', " "), "%Y-%m-%d %H:%M:%S") else {
+        return LastRun::Unknown;
+    };
     let min = (now - then).num_minutes();
     if min < 1 {
         LastRun::JustNow
@@ -405,17 +466,44 @@ mod tests {
     use super::*;
 
     fn row(name: &str, cmd: &str, tags: &str, cat: &str) -> CustomCommand {
-        CustomCommand { id: name.into(), name: name.into(), command: cmd.into(), category: cat.into(), tags: tags.into(), risk: "high".into(), description: format!("about {name}"), platform: "both".into(), parameters: r#"[{"name":"n","description":"d","required":true,"defaultValue":"5"}]"#.into(), url: String::new(), starred: false, is_builtin: false }
+        CustomCommand {
+            id: name.into(),
+            name: name.into(),
+            command: cmd.into(),
+            category: cat.into(),
+            tags: tags.into(),
+            risk: "high".into(),
+            description: format!("about {name}"),
+            platform: "both".into(),
+            parameters: r#"[{"name":"n","description":"d","required":true,"defaultValue":"5"}]"#
+                .into(),
+            url: String::new(),
+            starred: false,
+            is_builtin: false,
+        }
     }
 
     #[test]
     fn command_rows_parse_tags_params_and_kind() {
-        let e = CommandEntry::from_row(&row("ps", "docker ps", r#"["docker","containers"]"#, "docker"));
+        let e = CommandEntry::from_row(&row(
+            "ps",
+            "docker ps",
+            r#"["docker","containers"]"#,
+            "docker",
+        ));
         assert_eq!(e.kind, Kind::Docker);
         assert_eq!(e.risk, Risk::High);
         assert!(e.risk.is_high());
         assert_eq!(e.platform, Platform::Both);
-        assert_eq!(e.parameters, vec![Param { name: "n".into(), description: "d".into(), required: true, default_value: "5".into() }]);
+        assert_eq!(
+            e.parameters,
+            vec![Param {
+                name: "n".into(),
+                description: "d".into(),
+                required: true,
+                default_value: "5".into()
+            }]
+        );
         // Garbage JSON degrades to empty rather than failing the whole list.
         let bad = CommandEntry::from_row(&row("x", "x", "not json", ""));
         assert!(bad.tags.is_empty());
@@ -429,7 +517,11 @@ mod tests {
         assert_eq!(e.to_new().tags.as_deref(), Some(r#"["a","docker"]"#));
         e.tags = vec!["a".into(), "docker".into()];
         e.kind = Kind::Command;
-        assert_eq!(e.to_new().tags.as_deref(), Some(r#"["a"]"#), "docker tag removed for plain commands");
+        assert_eq!(
+            e.to_new().tags.as_deref(),
+            Some(r#"["a"]"#),
+            "docker tag removed for plain commands"
+        );
     }
 
     #[test]
@@ -450,16 +542,31 @@ mod tests {
         assert_eq!(filter_commands(&all, false, None, "").len(), 2);
         assert_eq!(filter_commands(&all, true, None, "").len(), 1);
         assert_eq!(filter_commands(&all, false, Some("disk"), "").len(), 1);
-        assert_eq!(filter_commands(&all, false, None, "DF -H").len(), 1, "matches the command text");
-        assert_eq!(filter_commands(&all, false, None, "RAM").len(), 1, "matches tags");
-        assert_eq!(filter_commands(&all, false, None, "about memory").len(), 1, "matches the description");
+        assert_eq!(
+            filter_commands(&all, false, None, "DF -H").len(),
+            1,
+            "matches the command text"
+        );
+        assert_eq!(
+            filter_commands(&all, false, None, "RAM").len(),
+            1,
+            "matches tags"
+        );
+        assert_eq!(
+            filter_commands(&all, false, None, "about memory").len(),
+            1,
+            "matches the description"
+        );
         assert!(filter_commands(&all, false, None, "nope").is_empty());
     }
 
     #[test]
     fn category_counts_skip_blanks_and_sort() {
         let m = category_counts(["net", "disk", " ", "net", ""]);
-        assert_eq!(m.iter().map(|(k, v)| (k.as_str(), *v)).collect::<Vec<_>>(), [("disk", 1), ("net", 2)]);
+        assert_eq!(
+            m.iter().map(|(k, v)| (k.as_str(), *v)).collect::<Vec<_>>(),
+            [("disk", 1), ("net", 2)]
+        );
     }
 
     #[test]
@@ -470,22 +577,57 @@ mod tests {
 
     #[test]
     fn last_run_buckets() {
-        let now = NaiveDateTime::parse_from_str("2026-10-23 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
-        assert_eq!(last_run_bucket("2026-10-23 11:59:30", now), LastRun::JustNow);
-        assert_eq!(last_run_bucket("2026-10-23 11:30:00", now), LastRun::Minutes(30));
-        assert_eq!(last_run_bucket("2026-10-23 07:00:00", now), LastRun::Hours(5));
-        assert_eq!(last_run_bucket("2026-10-20 12:00:00", now), LastRun::Days(3));
-        assert_eq!(last_run_bucket("2026-08-01 12:00:00", now), LastRun::Date("2026-08-01".into()));
+        let now =
+            NaiveDateTime::parse_from_str("2026-10-23 12:00:00", "%Y-%m-%d %H:%M:%S").unwrap();
+        assert_eq!(
+            last_run_bucket("2026-10-23 11:59:30", now),
+            LastRun::JustNow
+        );
+        assert_eq!(
+            last_run_bucket("2026-10-23 11:30:00", now),
+            LastRun::Minutes(30)
+        );
+        assert_eq!(
+            last_run_bucket("2026-10-23 07:00:00", now),
+            LastRun::Hours(5)
+        );
+        assert_eq!(
+            last_run_bucket("2026-10-20 12:00:00", now),
+            LastRun::Days(3)
+        );
+        assert_eq!(
+            last_run_bucket("2026-08-01 12:00:00", now),
+            LastRun::Date("2026-08-01".into())
+        );
         assert_eq!(last_run_bucket("", now), LastRun::Unknown);
         assert_eq!(last_run_bucket("garbage", now), LastRun::Unknown);
     }
 
     #[test]
     fn quick_action_round_trip() {
-        let row = QuickAction { id: "1".into(), name: "n".into(), command: "echo".into(), category: "c".into(), parameters: String::new(), sort_order: 2, starred: 1, description: String::new(), tags: r#"["t"]"#.into(), language: String::new(), last_run_at: String::new(), last_status: "success".into() };
+        let row = QuickAction {
+            id: "1".into(),
+            name: "n".into(),
+            command: "echo".into(),
+            category: "c".into(),
+            parameters: String::new(),
+            sort_order: 2,
+            starred: 1,
+            description: String::new(),
+            tags: r#"["t"]"#.into(),
+            language: String::new(),
+            last_run_at: String::new(),
+            last_status: "success".into(),
+        };
         let e = QuickActionEntry::from_row(&row);
-        assert_eq!((e.language.as_str(), e.parameters_json.as_str(), e.starred), ("shell", "[]", true));
+        assert_eq!(
+            (e.language.as_str(), e.parameters_json.as_str(), e.starred),
+            ("shell", "[]", true)
+        );
         let back = e.to_row();
-        assert_eq!((back.starred, back.sort_order, back.tags.as_str()), (1, 2, r#"["t"]"#));
+        assert_eq!(
+            (back.starred, back.sort_order, back.tags.as_str()),
+            (1, 2, r#"["t"]"#)
+        );
     }
 }

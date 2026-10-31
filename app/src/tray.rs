@@ -35,7 +35,10 @@ pub fn init(cx: &mut App, show_main: fn(&mut App)) {
     if menu.append_items(&[&show, &quit]).is_err() {
         return;
     }
-    let mut builder = TrayIconBuilder::new().with_menu(Box::new(menu)).with_menu_on_left_click(false).with_tooltip("OpsBatch");
+    let mut builder = TrayIconBuilder::new()
+        .with_menu(Box::new(menu))
+        .with_menu_on_left_click(false)
+        .with_tooltip("OpsBatch");
     if let Some(icon) = icon() {
         builder = builder.with_icon(icon);
     }
@@ -43,10 +46,16 @@ pub fn init(cx: &mut App, show_main: fn(&mut App)) {
         log::warn!("system tray unavailable");
         return;
     };
-    cx.set_global(TrayHolder { _tray: tray, show_id: show.id().clone(), quit_id: quit.id().clone() });
+    cx.set_global(TrayHolder {
+        _tray: tray,
+        show_id: show.id().clone(),
+        quit_id: quit.id().clone(),
+    });
 
     cx.spawn(async move |cx| loop {
-        cx.background_executor().timer(Duration::from_millis(120)).await;
+        cx.background_executor()
+            .timer(Duration::from_millis(120))
+            .await;
         let _ = cx.update(|cx| {
             while let Ok(ev) = MenuEvent::receiver().try_recv() {
                 let (show_id, quit_id) = {
@@ -60,8 +69,21 @@ pub fn init(cx: &mut App, show_main: fn(&mut App)) {
                 }
             }
             while let Ok(ev) = TrayIconEvent::receiver().try_recv() {
-                let left_up = matches!(ev, TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. });
-                let double = matches!(ev, TrayIconEvent::DoubleClick { button: MouseButton::Left, .. });
+                let left_up = matches!(
+                    ev,
+                    TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    }
+                );
+                let double = matches!(
+                    ev,
+                    TrayIconEvent::DoubleClick {
+                        button: MouseButton::Left,
+                        ..
+                    }
+                );
                 if left_up || double {
                     show_main(cx);
                 }
@@ -77,11 +99,13 @@ mod tests {
 
     #[test]
     fn the_tray_icon_is_the_real_artwork() {
-        let (rgba, w, h) = decode_png_rgba(include_bytes!("../../assets/32x32.png")).expect("decodes");
+        let (rgba, w, h) =
+            decode_png_rgba(include_bytes!("../../assets/32x32.png")).expect("decodes");
         assert_eq!((w, h), (32, 32));
         assert_eq!(rgba.len(), 32 * 32 * 4);
         // not the old flat blue disc: the artwork has more than two distinct pixels
-        let distinct: std::collections::HashSet<[u8; 4]> = rgba.chunks(4).map(|p| [p[0], p[1], p[2], p[3]]).collect();
+        let distinct: std::collections::HashSet<[u8; 4]> =
+            rgba.chunks(4).map(|p| [p[0], p[1], p[2], p[3]]).collect();
         assert!(distinct.len() > 8, "{} distinct colours", distinct.len());
         assert!(icon().is_some());
         assert!(decode_png_rgba(b"not an image").is_none());

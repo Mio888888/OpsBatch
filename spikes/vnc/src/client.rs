@@ -60,7 +60,11 @@ pub struct Framebuffer {
 
 impl Framebuffer {
     fn new(width: u16, height: u16) -> Self {
-        Self { width, height, data: vec![0; width as usize * height as usize * 4] }
+        Self {
+            width,
+            height,
+            data: vec![0; width as usize * height as usize * 4],
+        }
     }
 }
 
@@ -104,7 +108,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> RfbClient<S> {
             (m, _) if m > 3 => (3, 8),
             _ => (3, 3),
         };
-        s.write_all(format!("RFB {cm:03}.{cn:03}\n").as_bytes()).await?;
+        s.write_all(format!("RFB {cm:03}.{cn:03}\n").as_bytes())
+            .await?;
 
         // --- security ---
         let has_pw = opts.password.as_deref().is_some_and(|p| !p.is_empty());
@@ -146,7 +151,11 @@ impl<S: AsyncRead + AsyncWrite + Unpin> RfbClient<S> {
                 let mut server_public = vec![0; key_len];
                 s.read_exact(&mut server_public).await?;
                 let (enc, cpub) = ard_client_response(
-                    &ArdServerHello { generator, prime, server_public },
+                    &ArdServerHello {
+                        generator,
+                        prime,
+                        server_public,
+                    },
                     opts.username.as_deref().unwrap_or(""),
                     opts.password.as_deref().unwrap_or(""),
                 )?;
@@ -158,8 +167,19 @@ impl<S: AsyncRead + AsyncWrite + Unpin> RfbClient<S> {
         // SecurityResult is sent for every type in 3.8, and for non-None types in 3.3/3.7.
         if cn == 8 || sec != SEC_NONE {
             if s.read_u32().await? != 0 {
-                let reason = if cn == 8 { read_reason(&mut s).await.unwrap_or_default() } else { String::new() };
-                bail!("authentication failed{}", if reason.is_empty() { String::new() } else { format!(": {reason}") });
+                let reason = if cn == 8 {
+                    read_reason(&mut s).await.unwrap_or_default()
+                } else {
+                    String::new()
+                };
+                bail!(
+                    "authentication failed{}",
+                    if reason.is_empty() {
+                        String::new()
+                    } else {
+                        format!(": {reason}")
+                    }
+                );
             }
         }
 
@@ -239,7 +259,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin> RfbClient<S> {
 
     pub async fn send_cut_text(&mut self, text: &str) -> Result<()> {
         // Latin-1 only per RFC 6143; non-Latin-1 needs the extended clipboard pseudo-encoding (TODO M8).
-        let bytes: Vec<u8> = text.chars().map(|c| if (c as u32) < 256 { c as u8 } else { b'?' }).collect();
+        let bytes: Vec<u8> = text
+            .chars()
+            .map(|c| if (c as u32) < 256 { c as u8 } else { b'?' })
+            .collect();
         let mut m = vec![6u8, 0, 0, 0];
         m.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
         m.extend_from_slice(&bytes);
@@ -300,8 +323,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin> RfbClient<S> {
     }
 
     fn clip(&self, r: Rect) -> Result<()> {
-        if r.x as u32 + r.w as u32 > self.fb.width as u32 || r.y as u32 + r.h as u32 > self.fb.height as u32 {
-            bail!("rect {r:?} outside {}x{} framebuffer", self.fb.width, self.fb.height);
+        if r.x as u32 + r.w as u32 > self.fb.width as u32
+            || r.y as u32 + r.h as u32 > self.fb.height as u32
+        {
+            bail!(
+                "rect {r:?} outside {}x{} framebuffer",
+                self.fb.width,
+                self.fb.height
+            );
         }
         Ok(())
     }
@@ -324,7 +353,12 @@ impl<S: AsyncRead + AsyncWrite + Unpin> RfbClient<S> {
         self.clip(r)?;
         let sx = self.stream.read_u16().await? as usize;
         let sy = self.stream.read_u16().await? as usize;
-        let src = Rect { x: sx as u16, y: sy as u16, w: r.w, h: r.h };
+        let src = Rect {
+            x: sx as u16,
+            y: sy as u16,
+            w: r.w,
+            h: r.h,
+        };
         self.clip(src)?;
         let stride = self.fb.width as usize * 4;
         let tmp: Vec<u8> = (0..r.h as usize)
@@ -335,7 +369,8 @@ impl<S: AsyncRead + AsyncWrite + Unpin> RfbClient<S> {
             .collect();
         for y in 0..r.h as usize {
             let o = (r.y as usize + y) * stride + r.x as usize * 4;
-            self.fb.data[o..o + r.w as usize * 4].copy_from_slice(&tmp[y * r.w as usize * 4..(y + 1) * r.w as usize * 4]);
+            self.fb.data[o..o + r.w as usize * 4]
+                .copy_from_slice(&tmp[y * r.w as usize * 4..(y + 1) * r.w as usize * 4]);
         }
         Ok(())
     }
@@ -405,7 +440,8 @@ fn decode_zrle_tiles(data: &[u8], r: Rect, fb: &mut Framebuffer) -> Result<()> {
                 }
                 (false, 2..=16) => {
                     need(p, pal_size * 3)?;
-                    let pal: Vec<[u8; 4]> = (0..pal_size).map(|i| cpix(&data[p + i * 3..])).collect();
+                    let pal: Vec<[u8; 4]> =
+                        (0..pal_size).map(|i| cpix(&data[p + i * 3..])).collect();
                     p += pal_size * 3;
                     let bits = match pal_size {
                         2 => 1,
@@ -418,8 +454,10 @@ fn decode_zrle_tiles(data: &[u8], r: Rect, fb: &mut Framebuffer) -> Result<()> {
                         for x in 0..tw {
                             let bit = x * bits;
                             let byte = data[p + y * row_bytes + bit / 8];
-                            let idx = ((byte >> (8 - bits - (bit % 8))) & ((1 << bits) - 1)) as usize;
-                            pixels[y * tw + x] = *pal.get(idx).ok_or_else(|| anyhow!("bad palette index"))?;
+                            let idx =
+                                ((byte >> (8 - bits - (bit % 8))) & ((1 << bits) - 1)) as usize;
+                            pixels[y * tw + x] =
+                                *pal.get(idx).ok_or_else(|| anyhow!("bad palette index"))?;
                         }
                     }
                     p += row_bytes * th;
@@ -440,7 +478,8 @@ fn decode_zrle_tiles(data: &[u8], r: Rect, fb: &mut Framebuffer) -> Result<()> {
                 }
                 (true, 2..=127) => {
                     need(p, pal_size * 3)?;
-                    let pal: Vec<[u8; 4]> = (0..pal_size).map(|i| cpix(&data[p + i * 3..])).collect();
+                    let pal: Vec<[u8; 4]> =
+                        (0..pal_size).map(|i| cpix(&data[p + i * 3..])).collect();
                     p += pal_size * 3;
                     let mut i = 0;
                     while i < pixels.len() {
@@ -449,7 +488,11 @@ fn decode_zrle_tiles(data: &[u8], r: Rect, fb: &mut Framebuffer) -> Result<()> {
                         p += 1;
                         let idx = (b & 0x7f) as usize;
                         let c = *pal.get(idx).ok_or_else(|| anyhow!("bad palette index"))?;
-                        let run = if b & 0x80 != 0 { read_run(data, &mut p)? } else { 1 };
+                        let run = if b & 0x80 != 0 {
+                            read_run(data, &mut p)?
+                        } else {
+                            1
+                        };
                         if i + run > pixels.len() {
                             bail!("RLE overrun");
                         }
@@ -460,7 +503,8 @@ fn decode_zrle_tiles(data: &[u8], r: Rect, fb: &mut Framebuffer) -> Result<()> {
                 _ => bail!("invalid ZRLE subencoding {sub}"),
             }
             for y in 0..th {
-                let o = (r.y as usize + ty as usize + y) * stride + (r.x as usize + tx as usize) * 4;
+                let o =
+                    (r.y as usize + ty as usize + y) * stride + (r.x as usize + tx as usize) * 4;
                 for x in 0..tw {
                     fb.data[o + x * 4..o + x * 4 + 4].copy_from_slice(&pixels[y * tw + x]);
                 }

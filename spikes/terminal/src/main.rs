@@ -241,7 +241,11 @@ impl TerminalView {
         let bytes: Option<Vec<u8>> = match ks.key.as_str() {
             "enter" => Some(b"\r".to_vec()),
             "backspace" => Some(vec![0x7f]),
-            "tab" => Some(if m.shift { b"\x1b[Z".to_vec() } else { b"\t".to_vec() }),
+            "tab" => Some(if m.shift {
+                b"\x1b[Z".to_vec()
+            } else {
+                b"\t".to_vec()
+            }),
             "escape" => Some(vec![0x1b]),
             "up" => Some(arrow('A')),
             "down" => Some(arrow('B')),
@@ -287,7 +291,11 @@ impl Render for TerminalView {
                 self.lines,
                 self.bytes_total,
                 secs,
-                if secs > 0.0 { self.bytes_total as f64 / secs / 1e6 } else { 0.0 },
+                if secs > 0.0 {
+                    self.bytes_total as f64 / secs / 1e6
+                } else {
+                    0.0
+                },
                 self.last_paint_us,
                 if self.exited { " | child exited" } else { "" }
             )
@@ -438,7 +446,10 @@ impl Element for TerminalElement {
         let font = font(FONT_FAMILY);
         let font_id = ts.resolve_font(&font);
         let fs = px(FONT_SIZE);
-        let cell_w = ts.advance(font_id, fs, 'm').map(|s| s.width).unwrap_or(px(8.4));
+        let cell_w = ts
+            .advance(font_id, fs, 'm')
+            .map(|s| s.width)
+            .unwrap_or(px(8.4));
         let line_h = px((FONT_SIZE * 1.35).round());
         let cols = (bounds.size.width / cell_w).floor() as usize;
         let lines = (bounds.size.height / line_h).floor() as usize;
@@ -505,7 +516,9 @@ impl Element for TerminalElement {
             if !default_bg {
                 let c = hsla_of(bg);
                 match bg_quads.last_mut() {
-                    Some((r, c0, n, last)) if *r == row && *c0 + *n == col && *last == c => *n += ncols,
+                    Some((r, c0, n, last)) if *r == row && *c0 + *n == col && *last == c => {
+                        *n += ncols
+                    }
                     _ => bg_quads.push((row, col, ncols, c)),
                 }
             }
@@ -524,21 +537,27 @@ impl Element for TerminalElement {
             if cell.flags.contains(Flags::ITALIC) {
                 f.style = FontStyle::Italic;
             }
-            let underline = cell.flags.intersects(Flags::ALL_UNDERLINES).then(|| UnderlineStyle {
-                thickness: px(1.),
-                color: Some(fg_h),
-                wavy: cell.flags.contains(Flags::UNDERCURL),
-            });
+            let underline = cell
+                .flags
+                .intersects(Flags::ALL_UNDERLINES)
+                .then(|| UnderlineStyle {
+                    thickness: px(1.),
+                    color: Some(fg_h),
+                    wavy: cell.flags.contains(Flags::UNDERCURL),
+                });
             let run = TextRun {
                 len: cell.c.len_utf8(),
                 font: f,
                 color: fg_h,
                 background_color: None,
                 underline,
-                strikethrough: cell.flags.contains(Flags::STRIKEOUT).then(|| StrikethroughStyle {
-                    thickness: px(1.),
-                    color: Some(fg_h),
-                }),
+                strikethrough: cell
+                    .flags
+                    .contains(Flags::STRIKEOUT)
+                    .then(|| StrikethroughStyle {
+                        thickness: px(1.),
+                        color: Some(fg_h),
+                    }),
             };
 
             // Merge adjacent narrow cells with an identical style into one shaped segment;
@@ -591,7 +610,14 @@ impl Element for TerminalElement {
                 );
                 let b = Bounds::new(origin, size(m.cell_w, m.line_h));
                 if focused {
-                    window.paint_quad(fill(b, hsla_of(Rgb { r: 0xc0, g: 0xca, b: 0xf5 })));
+                    window.paint_quad(fill(
+                        b,
+                        hsla_of(Rgb {
+                            r: 0xc0,
+                            g: 0xca,
+                            b: 0xf5,
+                        }),
+                    ));
                 } else {
                     window.paint_quad(outline(b, rgb(FG), BorderStyle::Solid));
                 }
@@ -602,14 +628,24 @@ impl Element for TerminalElement {
         for (row, segs) in rows.into_iter().enumerate() {
             for mut seg in segs {
                 // Flip glyph color on the (focused) cursor cell for contrast.
-                if focused && cursor.shape != CursorShape::Hidden && (row as i32, seg.col) == cursor_cell {
+                if focused
+                    && cursor.shape != CursorShape::Hidden
+                    && (row as i32, seg.col) == cursor_cell
+                {
                     seg.run.color = rgb(BG).into();
                 }
                 let shaped = window.text_system().shape_line(
                     seg.text.into(),
                     fs,
                     &[seg.run],
-                    Some(m.cell_w * if seg.width_cols > 1 && seg.col + seg.width_cols <= n_cols { 1.0 } else { 1.0 }),
+                    Some(
+                        m.cell_w
+                            * if seg.width_cols > 1 && seg.col + seg.width_cols <= n_cols {
+                                1.0
+                            } else {
+                                1.0
+                            },
+                    ),
                 );
                 let origin = point(
                     bounds.origin.x + m.cell_w * seg.col as f32,
@@ -625,7 +661,9 @@ impl Element for TerminalElement {
 }
 
 fn main() {
-    let exit_after: Option<u64> = std::env::var("SPIKE_EXIT_AFTER").ok().and_then(|s| s.parse().ok());
+    let exit_after: Option<u64> = std::env::var("SPIKE_EXIT_AFTER")
+        .ok()
+        .and_then(|s| s.parse().ok());
     gpui_kit::application()
         .with_assets(gpui_kit::assets::Assets)
         .run(move |cx| {
@@ -633,9 +671,14 @@ fn main() {
             let mut view_handle = None;
             let (w, h) = std::env::var("SPIKE_SIZE")
                 .ok()
-                .and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse::<f32>().ok()?, b.parse::<f32>().ok()?))))
+                .and_then(|s| {
+                    s.split_once('x')
+                        .and_then(|(a, b)| Some((a.parse::<f32>().ok()?, b.parse::<f32>().ok()?)))
+                })
                 .unwrap_or((1000., 640.));
-            let scroll_up: Option<i32> = std::env::var("SPIKE_SCROLL_UP").ok().and_then(|s| s.parse().ok());
+            let scroll_up: Option<i32> = std::env::var("SPIKE_SCROLL_UP")
+                .ok()
+                .and_then(|s| s.parse().ok());
             let opts = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None,
@@ -667,7 +710,9 @@ fn main() {
             }
             if let (Some(secs), Some(v)) = (exit_after, view_handle) {
                 cx.spawn(async move |cx| {
-                    cx.background_executor().timer(Duration::from_secs(secs)).await;
+                    cx.background_executor()
+                        .timer(Duration::from_secs(secs))
+                        .await;
                     let _ = cx.update(|cx| {
                         let v = v.read(cx);
                         let secs = match (v.first_byte_at, v.last_byte_at) {
@@ -678,7 +723,11 @@ fn main() {
                             "STATS bytes={} feed_secs={:.3} mbps={:.2} last_paint_us={}",
                             v.bytes_total,
                             secs,
-                            if secs > 0.0 { v.bytes_total as f64 / secs / 1e6 } else { 0.0 },
+                            if secs > 0.0 {
+                                v.bytes_total as f64 / secs / 1e6
+                            } else {
+                                0.0
+                            },
                             v.last_paint_us
                         );
                         cx.quit();

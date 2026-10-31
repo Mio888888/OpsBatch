@@ -72,10 +72,7 @@ pub async fn add_group(
     .await
     .map_err(|e| e.to_string())?
 }
-pub async fn update_group(
-    db: &Database,
-    group: HostGroup,
-) -> Result<HostGroup, String> {
+pub async fn update_group(db: &Database, group: HostGroup) -> Result<HostGroup, String> {
     let conn = db.pool.clone();
     tokio::task::spawn_blocking(move || {
         let conn = conn.get().map_err(|e| e.to_string())?;

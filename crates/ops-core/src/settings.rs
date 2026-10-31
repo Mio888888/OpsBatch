@@ -125,11 +125,7 @@ pub async fn delete_danger_rule(db: &Database, id: String) -> Result<(), String>
     .map_err(|e| e.to_string())?;
     Ok(())
 }
-pub async fn toggle_danger_rule(
-    db: &Database,
-    id: String,
-    enabled: bool,
-) -> Result<(), String> {
+pub async fn toggle_danger_rule(db: &Database, id: String, enabled: bool) -> Result<(), String> {
     let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "UPDATE danger_rules SET enabled=?1 WHERE id=?2",
@@ -140,9 +136,7 @@ pub async fn toggle_danger_rule(
 }
 
 // ===== General Settings =====
-pub async fn get_general_settings(
-    db: &Database,
-) -> Result<HashMap<String, String>, String> {
+pub async fn get_general_settings(db: &Database) -> Result<HashMap<String, String>, String> {
     let conn = db.pool.get().map_err(|e| e.to_string())?;
     let mut stmt = conn
         .prepare("SELECT key, value FROM general_settings")
@@ -415,10 +409,7 @@ fn add_font_style(families: &mut HashMap<String, BTreeSet<String>>, family: Stri
 }
 
 fn strip_font_style_suffix(family: &str) -> String {
-    let original = family
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ");
+    let original = family.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut normalized = original.replace(['-', '_'], " ");
 
     loop {
@@ -494,14 +485,17 @@ pub async fn export_database_backup(core: &crate::Core, destination: String) -> 
     Ok(())
 }
 
-
 /// `minimizeToTray` (default true): closing the main window keeps the app alive in the tray. Sync on purpose — it is
 /// read from window-close handlers, like the Tauri build did.
 pub fn minimize_to_tray(db: &Database) -> bool {
     let Ok(conn) = db.pool.get() else { return true };
-    conn.query_row("SELECT value FROM general_settings WHERE key='minimizeToTray'", [], |row| row.get::<_, String>(0))
-        .map(|v| v != "false")
-        .unwrap_or(true)
+    conn.query_row(
+        "SELECT value FROM general_settings WHERE key='minimizeToTray'",
+        [],
+        |row| row.get::<_, String>(0),
+    )
+    .map(|v| v != "false")
+    .unwrap_or(true)
 }
 
 #[cfg(test)]

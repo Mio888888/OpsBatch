@@ -16,11 +16,16 @@ struct Fixture {
 
 impl Render for Fixture {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().size_full().child(Editor::new(&self.state).size_full())
+        div()
+            .size_full()
+            .child(Editor::new(&self.state).size_full())
     }
 }
 
-fn open(cx: &mut TestAppContext, language: &'static str) -> (WindowHandle<gpui_kit::base::Root>, Entity<EditorState>) {
+fn open(
+    cx: &mut TestAppContext,
+    language: &'static str,
+) -> (WindowHandle<gpui_kit::base::Root>, Entity<EditorState>) {
     cx.update(gpui_kit::init);
     cx.update(|cx| {
         let (window, view) = gpui_kit::open_window(
@@ -40,15 +45,26 @@ fn open(cx: &mut TestAppContext, language: &'static str) -> (WindowHandle<gpui_k
         )
         .expect("open test window");
         let state = view.read(cx).state.clone();
-        (window.downcast::<gpui_kit::base::Root>().expect("root"), state)
+        (
+            window.downcast::<gpui_kit::base::Root>().expect("root"),
+            state,
+        )
     })
 }
 
 fn undo_key() -> &'static str {
-    if cfg!(target_os = "macos") { "cmd-z" } else { "ctrl-z" }
+    if cfg!(target_os = "macos") {
+        "cmd-z"
+    } else {
+        "ctrl-z"
+    }
 }
 fn redo_key() -> &'static str {
-    if cfg!(target_os = "macos") { "cmd-shift-z" } else { "ctrl-y" }
+    if cfg!(target_os = "macos") {
+        "cmd-shift-z"
+    } else {
+        "ctrl-y"
+    }
 }
 
 #[gpui_kit::test]
@@ -60,7 +76,10 @@ fn typing_cjk_undo_redo(cx: &mut TestAppContext) {
         assert_eq!(state.read(cx).value(), "echo 中文 テスト");
         window.press(undo_key(), cx);
         let after_undo = state.read(cx).value().to_string();
-        assert!(after_undo.len() < "echo 中文 テスト".len(), "undo removed text: {after_undo:?}");
+        assert!(
+            after_undo.len() < "echo 中文 テスト".len(),
+            "undo removed text: {after_undo:?}"
+        );
         window.press(redo_key(), cx);
         assert_eq!(state.read(cx).value(), "echo 中文 テスト");
     })
@@ -98,7 +117,10 @@ fn large_file_load_and_edit_latency(cx: &mut TestAppContext) {
             window.input("x", cx);
         }
         per_key_ms = t.elapsed().as_secs_f64() * 1e3 / 20.0;
-        assert!(state.read(cx).value().starts_with("xxxxxxxxxxxxxxxxxxxx") || state.read(cx).value().contains("xxxxxxxxxxxxxxxxxxxx"));
+        assert!(
+            state.read(cx).value().starts_with("xxxxxxxxxxxxxxxxxxxx")
+                || state.read(cx).value().contains("xxxxxxxxxxxxxxxxxxxx")
+        );
     })
     .unwrap();
     println!("EDITOR_BENCH bytes={bytes} lines=50000 set_value={load_ms:.1}ms first_frame={render_ms:.1}ms per_keystroke={per_key_ms:.2}ms");
@@ -109,25 +131,64 @@ fn large_file_load_and_edit_latency(cx: &mut TestAppContext) {
 fn syntect_covers_opsbatch_file_types() {
     let set = two_face::syntax::extra_newlines();
     let wanted = [
-        ("sh", "shell"), ("bash", "shell"), ("py", "python"), ("json", "json"), ("yaml", "yaml"), ("yml", "yaml"),
-        ("rs", "rust"), ("js", "javascript"), ("ts", "typescript"), ("html", "html"), ("css", "css"),
-        ("sql", "sql"), ("md", "markdown"), ("c", "c"), ("cpp", "c++"), ("java", "java"), ("xml", "xml"),
-        ("toml", "toml"), ("go", "go"), ("ps1", "powershell"), ("ini", "ini"), ("conf", "conf"),
-        ("Dockerfile", "dockerfile"), ("nginx", "nginx"), ("env", "env"), ("lua", "lua"), ("php", "php"),
+        ("sh", "shell"),
+        ("bash", "shell"),
+        ("py", "python"),
+        ("json", "json"),
+        ("yaml", "yaml"),
+        ("yml", "yaml"),
+        ("rs", "rust"),
+        ("js", "javascript"),
+        ("ts", "typescript"),
+        ("html", "html"),
+        ("css", "css"),
+        ("sql", "sql"),
+        ("md", "markdown"),
+        ("c", "c"),
+        ("cpp", "c++"),
+        ("java", "java"),
+        ("xml", "xml"),
+        ("toml", "toml"),
+        ("go", "go"),
+        ("ps1", "powershell"),
+        ("ini", "ini"),
+        ("conf", "conf"),
+        ("Dockerfile", "dockerfile"),
+        ("nginx", "nginx"),
+        ("env", "env"),
+        ("lua", "lua"),
+        ("php", "php"),
     ];
     let mut missing = Vec::new();
     for (ext, label) in wanted {
-        if set.find_syntax_by_extension(ext).or_else(|| set.find_syntax_by_token(label)).is_none() {
+        if set
+            .find_syntax_by_extension(ext)
+            .or_else(|| set.find_syntax_by_token(label))
+            .is_none()
+        {
             missing.push(ext);
         }
     }
-    println!("SYNTECT syntaxes={} missing={:?}", set.syntaxes().len(), missing);
+    println!(
+        "SYNTECT syntaxes={} missing={:?}",
+        set.syntaxes().len(),
+        missing
+    );
     assert!(missing.len() <= 4, "too many unsupported: {missing:?}");
 }
 
 #[test]
 fn syntect_powershell_lookup() {
     let set = two_face::syntax::extra_newlines();
-    let names: Vec<_> = set.syntaxes().iter().filter(|s| s.name.to_lowercase().contains("power") || s.name.to_lowercase().contains("batch") || s.name.to_lowercase().contains("shell")).map(|s| (s.name.clone(), s.file_extensions.clone())).collect();
+    let names: Vec<_> = set
+        .syntaxes()
+        .iter()
+        .filter(|s| {
+            s.name.to_lowercase().contains("power")
+                || s.name.to_lowercase().contains("batch")
+                || s.name.to_lowercase().contains("shell")
+        })
+        .map(|s| (s.name.clone(), s.file_extensions.clone()))
+        .collect();
     println!("SYNTECT shell-ish: {names:?}");
 }

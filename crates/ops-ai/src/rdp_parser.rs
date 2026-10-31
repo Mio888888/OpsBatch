@@ -9,7 +9,8 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::parser::{
-    extract_fence_blocks, find_fence_end, slice_balanced_json, ActionKind, ActionSource, ParsedPendingAction, RdpOperation,
+    extract_fence_blocks, find_fence_end, slice_balanced_json, ActionKind, ActionSource,
+    ParsedPendingAction, RdpOperation,
 };
 
 const RDP_PLAN_MAX_STEPS: usize = 12;
@@ -21,25 +22,84 @@ const MAX_WAIT_MS: f64 = 30_000.0;
 
 const PLAN_FENCE_LANGUAGES: &[&str] = &["rdp", "rdp-plan", "rdp_actions", "rdp-ops"];
 const GENERIC_FENCE_LANGUAGES: &[&str] = &["", "json", "jsonc", "json5", "js", "javascript"];
-const ALLOWED_INTENTS: &[&str] = &["click", "type", "key", "scroll", "navigate", "launch", "operate", "interact", "wait"];
-const OPERATION_WRAPPER_KEYS: &[&str] = &["operations", "operation", "actions", "ops", "items", "events"];
+const ALLOWED_INTENTS: &[&str] = &[
+    "click", "type", "key", "scroll", "navigate", "launch", "operate", "interact", "wait",
+];
+const OPERATION_WRAPPER_KEYS: &[&str] = &[
+    "operations",
+    "operation",
+    "actions",
+    "ops",
+    "items",
+    "events",
+];
 const SUPPORTED_KEY_NAMES: &[&str] = &[
-    "Enter", "Tab", "Escape", "Backspace", "Delete", "Insert", "Home", "End", "PageUp", "PageDown", "ArrowUp", "ArrowDown", "ArrowLeft",
-    "ArrowRight", "Space", "Shift", "Control", "Alt", "Meta", "ShiftLeft", "ShiftRight", "ControlLeft", "ControlRight", "AltLeft",
-    "AltRight", "MetaLeft", "MetaRight", "CapsLock", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F11", "F12", "Win",
-    "Windows", "Ctrl", "AltGr",
+    "Enter",
+    "Tab",
+    "Escape",
+    "Backspace",
+    "Delete",
+    "Insert",
+    "Home",
+    "End",
+    "PageUp",
+    "PageDown",
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "Space",
+    "Shift",
+    "Control",
+    "Alt",
+    "Meta",
+    "ShiftLeft",
+    "ShiftRight",
+    "ControlLeft",
+    "ControlRight",
+    "AltLeft",
+    "AltRight",
+    "MetaLeft",
+    "MetaRight",
+    "CapsLock",
+    "F1",
+    "F2",
+    "F3",
+    "F4",
+    "F5",
+    "F6",
+    "F7",
+    "F8",
+    "F9",
+    "F10",
+    "F11",
+    "F12",
+    "Win",
+    "Windows",
+    "Ctrl",
+    "AltGr",
 ];
 
-static TAGGED_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<RDP_PLAN>\s*(.*?)\s*</RDP_PLAN>").unwrap());
+static TAGGED_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<RDP_PLAN>\s*(.*?)\s*</RDP_PLAN>").unwrap());
 static OPEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)<RDP_PLAN\s*>?").unwrap());
 static CLOSE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</RDP_PLAN?>?").unwrap());
-static TRAILING_COMMA_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?s),\s*([}\]])").unwrap());
-static STRIP_FULL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<RDP_PLAN\s*>?.*?</RDP_PLAN?>?").unwrap());
-static STRIP_OPEN_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?is)<RDP_PLAN\s*>?.*$").unwrap());
-static STRIP_CLOSE_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)</RDP(?:_PLAN?)?>?\s*$").unwrap());
-static STRIP_OPEN_FENCE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r#"(?is)(?:```|~~~)[ \t]*(?:json[c5]?|javascript|js)?[ \t]*\r?\n\s*\{[^`]*"steps".*$"#).unwrap());
-static KEY_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([A-Za-z_$][A-Za-z0-9_$-]*)(\s*:)").unwrap());
+static TRAILING_COMMA_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s),\s*([}\]])").unwrap());
+static STRIP_FULL_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<RDP_PLAN\s*>?.*?</RDP_PLAN?>?").unwrap());
+static STRIP_OPEN_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<RDP_PLAN\s*>?.*$").unwrap());
+static STRIP_CLOSE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)</RDP(?:_PLAN?)?>?\s*$").unwrap());
+static STRIP_OPEN_FENCE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"(?is)(?:```|~~~)[ \t]*(?:json[c5]?|javascript|js)?[ \t]*\r?\n\s*\{[^`]*"steps".*$"#,
+    )
+    .unwrap()
+});
+static KEY_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^([A-Za-z_$][A-Za-z0-9_$-]*)(\s*:)").unwrap());
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Source {
@@ -137,7 +197,9 @@ fn utf16_len(s: &str) -> usize {
 
 /// `a ?? b ?? ...` over object keys (null and missing both fall through).
 fn first_present<'a>(obj: &'a Value, keys: &[&str]) -> Option<&'a Value> {
-    keys.iter().filter_map(|k| obj.get(*k)).find(|v| !v.is_null())
+    keys.iter()
+        .filter_map(|k| obj.get(*k))
+        .find(|v| !v.is_null())
 }
 
 // ---------------------------------------------------------------------------
@@ -162,14 +224,22 @@ fn extract_candidate(content: &str) -> Option<Candidate> {
                 Some(close) => json_end + close.end(),
                 None => json_end,
             };
-            return Some(Candidate { raw_plan: text.trim().to_string(), start: open.start(), end, source: Source::OpenTagBalancedJson, extract_error: None });
+            return Some(Candidate {
+                raw_plan: text.trim().to_string(),
+                start: open.start(),
+                end,
+                source: Source::OpenTagBalancedJson,
+                extract_error: None,
+            });
         }
         return Some(Candidate {
             raw_plan: String::new(),
             start: open.start(),
             end: content.len(),
             source: Source::OpenTagBalancedJson,
-            extract_error: Some("检测到 <RDP_PLAN> 标签但无法提取有效 JSON（可能格式错误或被截断）".into()),
+            extract_error: Some(
+                "检测到 <RDP_PLAN> 标签但无法提取有效 JSON（可能格式错误或被截断）".into(),
+            ),
         });
     }
 
@@ -177,7 +247,9 @@ fn extract_candidate(content: &str) -> Option<Candidate> {
     // body is a plan-shaped object is accepted; the explicit rdp* languages stay accepted as before.
     for block in extract_fence_blocks(content) {
         let lang = block.language.trim().to_ascii_lowercase();
-        if !PLAN_FENCE_LANGUAGES.contains(&lang.as_str()) && !GENERIC_FENCE_LANGUAGES.contains(&lang.as_str()) {
+        if !PLAN_FENCE_LANGUAGES.contains(&lang.as_str())
+            && !GENERIC_FENCE_LANGUAGES.contains(&lang.as_str())
+        {
             continue;
         }
         if !looks_like_plan(&block.code) {
@@ -194,9 +266,17 @@ fn extract_candidate(content: &str) -> Option<Candidate> {
 
     // Last resort: an unfenced JSON object that carries a `steps` array.
     for (at, _) in content.match_indices('{') {
-        let Some((text, end)) = slice_balanced_json(content, at) else { continue };
+        let Some((text, end)) = slice_balanced_json(content, at) else {
+            continue;
+        };
         if looks_like_plan(&text) {
-            return Some(Candidate { raw_plan: text.trim().to_string(), start: at, end, source: Source::Fence, extract_error: None });
+            return Some(Candidate {
+                raw_plan: text.trim().to_string(),
+                start: at,
+                end,
+                source: Source::Fence,
+                extract_error: None,
+            });
         }
         // a failed object may still contain the plan further in; keep scanning only past this object
         if end > at {
@@ -212,8 +292,12 @@ fn looks_like_plan(code: &str) -> bool {
         return false;
     }
     let has_steps = |v: &Value| v.get("steps").is_some_and(Value::is_array);
-    serde_json::from_str::<Value>(code.trim()).map(|v| has_steps(&v)).unwrap_or(false)
-        || plan_json_candidates(code).iter().any(|c| parse_plan_json_loose(c).is_some_and(|v| has_steps(&v)))
+    serde_json::from_str::<Value>(code.trim())
+        .map(|v| has_steps(&v))
+        .unwrap_or(false)
+        || plan_json_candidates(code)
+            .iter()
+            .any(|c| parse_plan_json_loose(c).is_some_and(|v| has_steps(&v)))
 }
 
 // ---------------------------------------------------------------------------
@@ -233,7 +317,9 @@ fn plan_json_candidates(raw: &str) -> Vec<String> {
 
 fn dedupe(list: Vec<String>) -> Vec<String> {
     let mut seen = HashSet::new();
-    list.into_iter().filter(|s| seen.insert(s.clone())).collect()
+    list.into_iter()
+        .filter(|s| seen.insert(s.clone()))
+        .collect()
 }
 
 fn strip_json_like_comments(raw: &str) -> String {
@@ -407,11 +493,14 @@ fn quote_unquoted_object_keys(raw: &str) -> String {
 }
 
 fn normalize_loose_json(raw: &str) -> String {
-    let mut result: String = raw.chars().map(|c| match c {
-        '\u{201c}' | '\u{201d}' => '"',
-        '\u{2018}' | '\u{2019}' => '\'',
-        other => other,
-    }).collect();
+    let mut result: String = raw
+        .chars()
+        .map(|c| match c {
+            '\u{201c}' | '\u{201d}' => '"',
+            '\u{2018}' | '\u{2019}' => '\'',
+            other => other,
+        })
+        .collect();
     result = strip_json_like_comments(&result);
     result = quote_unquoted_object_keys(&result);
     result = normalize_single_quoted_strings(&result);
@@ -454,7 +543,9 @@ fn rebuild_json_structure(raw: &str) -> String {
                 i += 1;
                 continue;
             }
-            let structural = i + 1 >= len || matches!(chars[i + 1], ',' | '}' | ']' | ':') || chars[i + 1].is_whitespace();
+            let structural = i + 1 >= len
+                || matches!(chars[i + 1], ',' | '}' | ']' | ':')
+                || chars[i + 1].is_whitespace();
             if structural {
                 out.push('"');
                 i += 1;
@@ -525,7 +616,11 @@ fn unwrap_operations(raw: &Value, depth: u32) -> Option<Vec<Value>> {
             }
         }
     }
-    let mut indexed: Vec<(u64, &Value)> = obj.iter().filter(|(k, _)| !k.is_empty() && k.bytes().all(|b| b.is_ascii_digit())).filter_map(|(k, v)| k.parse().ok().map(|n| (n, v))).collect();
+    let mut indexed: Vec<(u64, &Value)> = obj
+        .iter()
+        .filter(|(k, _)| !k.is_empty() && k.bytes().all(|b| b.is_ascii_digit()))
+        .filter_map(|(k, v)| k.parse().ok().map(|n| (n, v)))
+        .collect();
     if !indexed.is_empty() {
         indexed.sort_by_key(|(n, _)| *n);
         return Some(indexed.into_iter().map(|(_, v)| v.clone()).collect());
@@ -538,7 +633,11 @@ fn unwrap_operations(raw: &Value, depth: u32) -> Option<Vec<Value>> {
 }
 
 fn normalize_wait_ms(v: Option<&Value>) -> Result<u32, String> {
-    let n = if v.is_none_or(Value::is_null) { DEFAULT_WAIT_MS } else { js_number(v).floor() };
+    let n = if v.is_none_or(Value::is_null) {
+        DEFAULT_WAIT_MS
+    } else {
+        js_number(v).floor()
+    };
     if !n.is_finite() {
         return Err("RDP wait ms 必须是数字".into());
     }
@@ -558,17 +657,24 @@ fn clamp_coord(v: Option<&Value>, max: u32) -> Result<u16, String> {
 }
 
 fn button_of(op: &Value) -> Result<f64, String> {
-    Ok(if op.get("button").is_none() { 0.0 } else { js_number(op.get("button")).floor() })
+    Ok(if op.get("button").is_none() {
+        0.0
+    } else {
+        js_number(op.get("button")).floor()
+    })
 }
 
 fn validate_operations(raw: Option<&Value>, max: (u32, u32)) -> Result<Vec<RdpOperation>, String> {
     let raw = raw.ok_or_else(|| "RDP operations 必须是数组或单个操作对象".to_string())?;
-    let ops = unwrap_operations(raw, 0).ok_or_else(|| "RDP operations 必须是数组或单个操作对象".to_string())?;
+    let ops = unwrap_operations(raw, 0)
+        .ok_or_else(|| "RDP operations 必须是数组或单个操作对象".to_string())?;
     if ops.is_empty() {
         return Err("RDP operations 不能为空".into());
     }
     if ops.len() > RDP_PLAN_MAX_OPS_PER_STEP {
-        return Err(format!("RDP operations 单步不能超过 {RDP_PLAN_MAX_OPS_PER_STEP} 个操作"));
+        return Err(format!(
+            "RDP operations 单步不能超过 {RDP_PLAN_MAX_OPS_PER_STEP} 个操作"
+        ));
     }
 
     let mut result = Vec::new();
@@ -586,7 +692,12 @@ fn validate_operations(raw: Option<&Value>, max: (u32, u32)) -> Result<Vec<RdpOp
                     if ![0.0, 1.0, 2.0].contains(&b) {
                         return Err(format!("RDP click button 不支持: {b}"));
                     }
-                    result.push(RdpOperation::Click { x, y, button: b as u8, double_click: js_truthy(raw.get("doubleClick")) });
+                    result.push(RdpOperation::Click {
+                        x,
+                        y,
+                        button: b as u8,
+                        double_click: js_truthy(raw.get("doubleClick")),
+                    });
                 } else {
                     result.push(RdpOperation::Move { x, y });
                 }
@@ -600,7 +711,13 @@ fn validate_operations(raw: Option<&Value>, max: (u32, u32)) -> Result<Vec<RdpOp
                 if ![0.0, 2.0].contains(&b) {
                     return Err(format!("RDP drag button 不支持: {b}"));
                 }
-                result.push(RdpOperation::Drag { from_x, from_y, to_x, to_y, button: b as u8 });
+                result.push(RdpOperation::Drag {
+                    from_x,
+                    from_y,
+                    to_x,
+                    to_y,
+                    button: b as u8,
+                });
             }
             "scroll" => {
                 let x = clamp_coord(raw.get("x"), max.0)?;
@@ -612,8 +729,17 @@ fn validate_operations(raw: Option<&Value>, max: (u32, u32)) -> Result<Vec<RdpOp
                 if delta.abs() > 100.0 {
                     return Err("RDP scroll delta 不能超过 ±100".into());
                 }
-                let vertical = if raw.get("vertical").is_none() { true } else { js_truthy(raw.get("vertical")) };
-                result.push(RdpOperation::Scroll { x, y, delta: delta as i32, vertical });
+                let vertical = if raw.get("vertical").is_none() {
+                    true
+                } else {
+                    js_truthy(raw.get("vertical"))
+                };
+                result.push(RdpOperation::Scroll {
+                    x,
+                    y,
+                    delta: delta as i32,
+                    vertical,
+                });
             }
             "type" => {
                 let text = js_string(raw.get("text"));
@@ -628,7 +754,9 @@ fn validate_operations(raw: Option<&Value>, max: (u32, u32)) -> Result<Vec<RdpOp
                 }
                 result.push(RdpOperation::Type { text });
             }
-            "wait" | "pause" | "sleep" => result.push(RdpOperation::Wait { ms: wait_ms_of(raw)? }),
+            "wait" | "pause" | "sleep" => result.push(RdpOperation::Wait {
+                ms: wait_ms_of(raw)?,
+            }),
             "key" => {
                 let keys: Vec<Value> = match raw.get("keys") {
                     Some(Value::Array(a)) => a.clone(),
@@ -642,7 +770,9 @@ fn validate_operations(raw: Option<&Value>, max: (u32, u32)) -> Result<Vec<RdpOp
                     return Err("RDP key 组合键不能超过 6 个".into());
                 }
                 if keys.len() == 1 && js_string(keys.first()).trim().eq_ignore_ascii_case("wait") {
-                    result.push(RdpOperation::Wait { ms: wait_ms_of(raw)? });
+                    result.push(RdpOperation::Wait {
+                        ms: wait_ms_of(raw)?,
+                    });
                     continue;
                 }
                 let mut names = Vec::new();
@@ -657,7 +787,11 @@ fn validate_operations(raw: Option<&Value>, max: (u32, u32)) -> Result<Vec<RdpOp
                 result.push(RdpOperation::Key { keys: names });
             }
             other => {
-                let shown = if raw.get("type").is_none() { "undefined".to_string() } else { other.to_string() };
+                let shown = if raw.get("type").is_none() {
+                    "undefined".to_string()
+                } else {
+                    other.to_string()
+                };
                 return Err(format!("RDP operation type 不支持: {shown}"));
             }
         }
@@ -673,12 +807,27 @@ fn raw_steps(plan: &Value, summary: &str) -> Vec<Value> {
     if let Some(Value::Array(steps)) = plan.get("steps") {
         return steps.clone();
     }
-    let Some(ops) = first_present(plan, &["operations", "operation", "actions", "ops"]) else { return Vec::new() };
+    let Some(ops) = first_present(plan, &["operations", "operation", "actions", "ops"]) else {
+        return Vec::new();
+    };
     let mut step = serde_json::Map::new();
-    let description = first_present(plan, &["description"]).cloned().unwrap_or_else(|| Value::String(if summary.is_empty() { "RDP 操作".into() } else { summary.into() }));
+    let description = first_present(plan, &["description"])
+        .cloned()
+        .unwrap_or_else(|| {
+            Value::String(if summary.is_empty() {
+                "RDP 操作".into()
+            } else {
+                summary.into()
+            })
+        });
     step.insert("description".into(), description);
     step.insert("operations".into(), ops.clone());
-    step.insert("intent".into(), first_present(plan, &["intent"]).cloned().unwrap_or_else(|| Value::String("operate".into())));
+    step.insert(
+        "intent".into(),
+        first_present(plan, &["intent"])
+            .cloned()
+            .unwrap_or_else(|| Value::String("operate".into())),
+    );
     if let Some(e) = first_present(plan, &["expected_outcome", "expectedOutcome"]) {
         step.insert("expected_outcome".into(), e.clone());
     }
@@ -687,15 +836,26 @@ fn raw_steps(plan: &Value, summary: &str) -> Vec<Value> {
 
 pub fn validate_rdp_plan(raw: &str, max: (u32, u32)) -> Result<ValidatedRdpPlan, String> {
     let plan = parse_plan_json_loose(raw).ok_or_else(|| "RdpPlan JSON 解析失败".to_string())?;
-    let version = if plan.get("version").is_none_or(Value::is_null) { 1.0 } else { js_number(plan.get("version")) };
+    let version = if plan.get("version").is_none_or(Value::is_null) {
+        1.0
+    } else {
+        js_number(plan.get("version"))
+    };
     if version != 1.0 {
-        return Err(format!("RdpPlan version 必须为 1，实际为 {}", js_string(plan.get("version"))));
+        return Err(format!(
+            "RdpPlan version 必须为 1，实际为 {}",
+            js_string(plan.get("version"))
+        ));
     }
 
     let mut summary = js_string(plan.get("summary")).trim().to_string();
     let steps_raw = raw_steps(&plan, &summary);
     if summary.is_empty() && !steps_raw.is_empty() {
-        let first = steps_raw.first().and_then(|s| s.get("description")).filter(|v| !v.is_null()).or_else(|| plan.get("description"));
+        let first = steps_raw
+            .first()
+            .and_then(|s| s.get("description"))
+            .filter(|v| !v.is_null())
+            .or_else(|| plan.get("description"));
         summary = js_string(first).trim().chars().take(120).collect();
         if summary.is_empty() {
             summary = "RDP 操作".into();
@@ -711,7 +871,9 @@ pub fn validate_rdp_plan(raw: &str, max: (u32, u32)) -> Result<ValidatedRdpPlan,
         return Err("RdpPlan steps 必须包含 1 到 12 个步骤".into());
     }
     if steps_raw.len() > RDP_PLAN_MAX_STEPS {
-        return Err(format!("RdpPlan steps 不能超过 {RDP_PLAN_MAX_STEPS} 个步骤"));
+        return Err(format!(
+            "RdpPlan steps 不能超过 {RDP_PLAN_MAX_STEPS} 个步骤"
+        ));
     }
 
     let mut steps = Vec::new();
@@ -723,13 +885,30 @@ pub fn validate_rdp_plan(raw: &str, max: (u32, u32)) -> Result<ValidatedRdpPlan,
         if utf16_len(&description) > 120 {
             return Err("RdpPlan step description 不能超过 120 字符".into());
         }
-        let operations = validate_operations(first_present(step, &["operations", "operation", "actions", "ops"]), max)?;
-        let intent = if step.get("intent").is_none_or(Value::is_null) { "operate".to_string() } else { js_string(step.get("intent")).trim().to_lowercase() };
+        let operations = validate_operations(
+            first_present(step, &["operations", "operation", "actions", "ops"]),
+            max,
+        )?;
+        let intent = if step.get("intent").is_none_or(Value::is_null) {
+            "operate".to_string()
+        } else {
+            js_string(step.get("intent")).trim().to_lowercase()
+        };
         if !ALLOWED_INTENTS.contains(&intent.as_str()) {
             return Err(format!("RdpPlan step intent 不支持: {intent}"));
         }
-        let expected_outcome: String = js_string(step.get("expected_outcome")).trim().chars().take(240).collect();
-        steps.push(ValidatedRdpPlanStep { id: uuid::Uuid::new_v4().to_string(), description, operations, intent, expected_outcome });
+        let expected_outcome: String = js_string(step.get("expected_outcome"))
+            .trim()
+            .chars()
+            .take(240)
+            .collect();
+        steps.push(ValidatedRdpPlanStep {
+            id: uuid::Uuid::new_v4().to_string(),
+            description,
+            operations,
+            intent,
+            expected_outcome,
+        });
     }
     Ok(ValidatedRdpPlan { summary, steps })
 }
@@ -744,7 +923,13 @@ fn diagnostic_preview(value: &str) -> String {
     if normalized.chars().count() <= DIAGNOSTIC_PREVIEW_CHARS {
         return normalized.to_string();
     }
-    format!("{}...", normalized.chars().take(DIAGNOSTIC_PREVIEW_CHARS).collect::<String>())
+    format!(
+        "{}...",
+        normalized
+            .chars()
+            .take(DIAGNOSTIC_PREVIEW_CHARS)
+            .collect::<String>()
+    )
 }
 
 fn json_state(s: &str) -> String {
@@ -755,25 +940,40 @@ fn json_state(s: &str) -> String {
 }
 
 fn plan_json_diagnostic(raw: &str) -> String {
-    let mut lines = vec![format!("rawLength={}", utf16_len(raw)), format!("rawPreview={}", diagnostic_preview(raw))];
+    let mut lines = vec![
+        format!("rawLength={}", utf16_len(raw)),
+        format!("rawPreview={}", diagnostic_preview(raw)),
+    ];
     let candidates = plan_json_candidates(raw);
     lines.push(format!("candidateCount={}", candidates.len()));
     for (idx, candidate) in candidates.iter().enumerate() {
         lines.push(format!("candidate[{idx}].length={}", utf16_len(candidate)));
-        lines.push(format!("candidate[{idx}].preview={}", diagnostic_preview(candidate)));
-        lines.push(format!("candidate[{idx}].JSON.parse={}", json_state(candidate)));
+        lines.push(format!(
+            "candidate[{idx}].preview={}",
+            diagnostic_preview(candidate)
+        ));
+        lines.push(format!(
+            "candidate[{idx}].JSON.parse={}",
+            json_state(candidate)
+        ));
         let repaired = rebuild_json_structure(candidate);
         let state = json_state(&repaired);
         lines.push(format!("candidate[{idx}].repair.JSON.parse={state}"));
         if state != "ok" {
-            lines.push(format!("candidate[{idx}].repair.preview={}", diagnostic_preview(&repaired)));
+            lines.push(format!(
+                "candidate[{idx}].repair.preview={}",
+                diagnostic_preview(&repaired)
+            ));
         }
         let normalized = normalize_loose_json(candidate);
         if &normalized != candidate {
             let state = json_state(&normalized);
             lines.push(format!("candidate[{idx}].normalized.JSON.parse={state}"));
             if state != "ok" {
-                lines.push(format!("candidate[{idx}].normalized.preview={}", diagnostic_preview(&normalized)));
+                lines.push(format!(
+                    "candidate[{idx}].normalized.preview={}",
+                    diagnostic_preview(&normalized)
+                ));
             }
         }
     }
@@ -786,13 +986,22 @@ fn context_diagnostic(content: &str, c: &Candidate, max: (u32, u32)) -> String {
         format!("candidateSource={}", c.source.name()),
         format!("candidateRange={}..{}", c.start, c.end),
         format!("maxCoords={}x{}", max.0, max.1),
-        format!("candidatePreview={}", diagnostic_preview(&content[c.start..c.end.min(content.len())])),
+        format!(
+            "candidatePreview={}",
+            diagnostic_preview(&content[c.start..c.end.min(content.len())])
+        ),
     ]
     .join("\n")
 }
 
 fn remove_range(content: &str, start: usize, end: usize) -> String {
-    format!("{}{}", &content[..start], &content[end.min(content.len())..]).trim().to_string()
+    format!(
+        "{}{}",
+        &content[..start],
+        &content[end.min(content.len())..]
+    )
+    .trim()
+    .to_string()
 }
 
 /// Hide `<RDP_PLAN>` blocks (complete, or still streaming in) from the chat text.
@@ -818,7 +1027,10 @@ pub fn parse_rdp_actions(content: &str, max: (u32, u32)) -> Option<ParsedRdpActi
             display_content,
             actions: Vec::new(),
             parse_error: Some(err.clone()),
-            parse_diagnostic: Some(format!("{}\nextractError={err}", context_diagnostic(content, &candidate, max))),
+            parse_diagnostic: Some(format!(
+                "{}\nextractError={err}",
+                context_diagnostic(content, &candidate, max)
+            )),
         });
     }
 
@@ -827,13 +1039,20 @@ pub fn parse_rdp_actions(content: &str, max: (u32, u32)) -> Option<ParsedRdpActi
             let detail = if error == "RdpPlan JSON 解析失败" {
                 plan_json_diagnostic(&candidate.raw_plan)
             } else {
-                format!("validationError={error}\nrawPlanLength={}\nrawPlanPreview={}", utf16_len(&candidate.raw_plan), diagnostic_preview(&candidate.raw_plan))
+                format!(
+                    "validationError={error}\nrawPlanLength={}\nrawPlanPreview={}",
+                    utf16_len(&candidate.raw_plan),
+                    diagnostic_preview(&candidate.raw_plan)
+                )
             };
             Some(ParsedRdpActions {
                 display_content,
                 actions: Vec::new(),
                 parse_error: Some(error),
-                parse_diagnostic: Some(format!("{}\n{detail}", context_diagnostic(content, &candidate, max))),
+                parse_diagnostic: Some(format!(
+                    "{}\n{detail}",
+                    context_diagnostic(content, &candidate, max)
+                )),
             })
         }
         Ok(plan) => {
@@ -857,7 +1076,12 @@ pub fn parse_rdp_actions(content: &str, max: (u32, u32)) -> Option<ParsedRdpActi
                     rejected: false,
                 })
                 .collect();
-            Some(ParsedRdpActions { display_content, actions, parse_error: None, parse_diagnostic: None })
+            Some(ParsedRdpActions {
+                display_content,
+                actions,
+                parse_error: None,
+                parse_diagnostic: None,
+            })
         }
     }
 }
@@ -876,7 +1100,9 @@ mod tests {
     }
 
     fn key(names: &[&str]) -> RdpOperation {
-        Key { keys: names.iter().map(|s| s.to_string()).collect() }
+        Key {
+            keys: names.iter().map(|s| s.to_string()).collect(),
+        }
     }
     fn typed(t: &str) -> RdpOperation {
         Type { text: t.into() }
@@ -887,8 +1113,14 @@ mod tests {
         let c = "<RDP_PLAN>\n{\"version\":1,\"summary\":\"打开开始菜单\",\"steps\":[{\"description\":\"按下 Windows 键\",\"intent\":\"key\",\"operations\":{\"type\":\"key\",\"keys\":[\"Meta\"]},\"expected_outcome\":\"开始菜单打开\"}]}\n</RDP_PLAN>";
         let r = parse_rdp_actions(c, MAX).unwrap();
         assert_eq!(r.actions.len(), 1);
-        assert_eq!(r.actions[0].rdp_operations.as_ref().unwrap(), &vec![key(&["Meta"])]);
-        assert_eq!(r.actions[0].expected_outcome.as_deref(), Some("开始菜单打开"));
+        assert_eq!(
+            r.actions[0].rdp_operations.as_ref().unwrap(),
+            &vec![key(&["Meta"])]
+        );
+        assert_eq!(
+            r.actions[0].expected_outcome.as_deref(),
+            Some("开始菜单打开")
+        );
     }
 
     #[test]
@@ -924,9 +1156,19 @@ mod tests {
         let r = parse_rdp_actions(JSON_FENCED_REPLY, MAX).expect("plan found");
         assert_eq!(r.parse_error, None, "{:?}", r.parse_diagnostic);
         assert_eq!(r.actions.len(), 2);
-        assert_eq!(r.actions[0].rdp_operations.as_ref().unwrap(), &vec![key(&["Meta", "r"])]);
-        assert_eq!(r.actions[1].rdp_operations.as_ref().unwrap(), &vec![typed("explorer"), key(&["Enter"])]);
-        assert!(!r.display_content.contains("steps"), "{}", r.display_content);
+        assert_eq!(
+            r.actions[0].rdp_operations.as_ref().unwrap(),
+            &vec![key(&["Meta", "r"])]
+        );
+        assert_eq!(
+            r.actions[1].rdp_operations.as_ref().unwrap(),
+            &vec![typed("explorer"), key(&["Enter"])]
+        );
+        assert!(
+            !r.display_content.contains("steps"),
+            "{}",
+            r.display_content
+        );
         assert!(r.display_content.contains("第1步"));
         assert!(strip_rdp_plan_block(JSON_FENCED_REPLY).contains("第2步"));
         assert!(!strip_rdp_plan_block(JSON_FENCED_REPLY).contains("\"steps\""));
@@ -935,7 +1177,10 @@ mod tests {
     #[test]
     fn untagged_fence_and_bare_json_are_plans_too() {
         let body = r#"{"version":1,"summary":"s","steps":[{"description":"d","intent":"key","operations":[{"type":"key","keys":["Enter"]}]}]}"#;
-        assert_eq!(ops(&format!("先说明\n```\n{body}\n```")), vec![key(&["Enter"])]);
+        assert_eq!(
+            ops(&format!("先说明\n```\n{body}\n```")),
+            vec![key(&["Enter"])]
+        );
         assert_eq!(ops(&format!("先说明\n{body}\n完毕")), vec![key(&["Enter"])]);
         // sloppy JSON in a fence (trailing comma, single quotes, unquoted keys)
         let sloppy = "```json\n{version:1,summary:'s',steps:[{description:'d',intent:'key',operations:[{type:'key',keys:['Enter'],},],},],}\n```";
@@ -947,7 +1192,9 @@ mod tests {
 
     #[test]
     fn streaming_plain_fence_is_hidden_while_incomplete() {
-        let s = strip_rdp_plan_block("好的\n```json\n{\"version\":1,\"summary\":\"x\",\"steps\":[{\"descr");
+        let s = strip_rdp_plan_block(
+            "好的\n```json\n{\"version\":1,\"summary\":\"x\",\"steps\":[{\"descr",
+        );
         assert_eq!(s, "好的");
     }
 
@@ -958,7 +1205,16 @@ mod tests {
         assert_eq!(r.parse_error.as_deref(), Some("RdpPlan JSON 解析失败"));
         assert!(r.actions.is_empty());
         let d = r.parse_diagnostic.unwrap();
-        for needle in ["contentLength=", "candidateSource=", "candidateRange=", "maxCoords=1280x720", "rawLength=", "candidate[0]", "JSON.parse", "缺少逗号"] {
+        for needle in [
+            "contentLength=",
+            "candidateSource=",
+            "candidateRange=",
+            "maxCoords=1280x720",
+            "rawLength=",
+            "candidate[0]",
+            "JSON.parse",
+            "缺少逗号",
+        ] {
             assert!(d.contains(needle), "{needle} missing in {d}");
         }
         assert_eq!(r.display_content, "");
@@ -973,7 +1229,18 @@ mod tests {
     #[test]
     fn malformed_closing_tag_and_streaming_tail() {
         let c = "<RDP_PLAN>\n{\"version\":1,\"summary\":\"启动 Edge\",\"steps\":[{\"description\":\"双击图标\",\"intent\":\"click\",\"operations\":[{\"type\":\"click\",\"x\":26,\"y\":218,\"doubleClick\":true},{\"type\":\"wait\",\"ms\":3000}],\"expected_outcome\":\"打开\"}]}\n</RDP_PLAN\"}]}]}";
-        assert_eq!(ops(c), vec![Click { x: 26, y: 218, button: 0, double_click: true }, Wait { ms: 3000 }]);
+        assert_eq!(
+            ops(c),
+            vec![
+                Click {
+                    x: 26,
+                    y: 218,
+                    button: 0,
+                    double_click: true
+                },
+                Wait { ms: 3000 }
+            ]
+        );
     }
 
     #[test]
@@ -992,7 +1259,10 @@ mod tests {
         let commas = "<RDP_PLAN>{\"version\":1,\"summary\":\"s\",\"steps\":[{\"description\":\"d\",\"intent\":\"launch\",\"operations\":[{\"type\":\"key\",\"keys\":[\"Meta\"]},],\"expected_outcome\":\"e\",},],}</RDP_PLAN>";
         assert_eq!(ops(commas), vec![key(&["Meta"])]);
         let smart = "<RDP_PLAN>\n{\n  “version”: 1,\n  “summary”: “搜索下载页”,\n  “steps”: [\n    {\n      “description”: “输入地址”,\n      “intent”: “navigate”,\n      “operations”: [\n        { “type”: “type”, “text”: “https://desktop.telegram.org/” },\n        { “type”: “key”, “keys”: [“Enter”] }\n      ]\n    }\n  ]\n}\n</RDP_PLAN>";
-        assert_eq!(ops(smart), vec![typed("https://desktop.telegram.org/"), key(&["Enter"])]);
+        assert_eq!(
+            ops(smart),
+            vec![typed("https://desktop.telegram.org/"), key(&["Enter"])]
+        );
     }
 
     #[test]
@@ -1000,14 +1270,30 @@ mod tests {
         let c = r#"<RDP_PLAN>{"version":1,"summary":"点击","steps":[{"description":"点击估算位置","intent":"click","operations":[{"type":"click","x":1320,"y":960},{"type":"drag","fromX":-12,"fromY":900,"toX":1400,"toY":-30}]}]}</RDP_PLAN>"#;
         assert_eq!(
             ops(c),
-            vec![Click { x: 1279, y: 719, button: 0, double_click: false }, Drag { from_x: 0, from_y: 719, to_x: 1279, to_y: 0, button: 0 }]
+            vec![
+                Click {
+                    x: 1279,
+                    y: 719,
+                    button: 0,
+                    double_click: false
+                },
+                Drag {
+                    from_x: 0,
+                    from_y: 719,
+                    to_x: 1279,
+                    to_y: 0,
+                    button: 0
+                }
+            ]
         );
     }
 
     #[test]
     fn validation_errors_are_reported_not_panicked() {
         let bad = |ops: &str| {
-            let c = format!(r#"<RDP_PLAN>{{"version":1,"summary":"s","steps":[{{"description":"d","intent":"click","operations":{ops}}}]}}</RDP_PLAN>"#);
+            let c = format!(
+                r#"<RDP_PLAN>{{"version":1,"summary":"s","steps":[{{"description":"d","intent":"click","operations":{ops}}}]}}</RDP_PLAN>"#
+            );
             parse_rdp_actions(&c, MAX).unwrap().parse_error.unwrap()
         };
         assert!(bad(r#"[{"type":"key","keys":["Banana"]}]"#).contains("不支持的按键: Banana"));
@@ -1023,11 +1309,23 @@ mod tests {
 
     #[test]
     fn bad_version_intent_and_wait_clamp() {
-        let r = parse_rdp_actions(r#"<RDP_PLAN>{"version":2,"summary":"s","steps":[]}</RDP_PLAN>"#, MAX).unwrap();
-        assert!(r.parse_error.unwrap().contains("version 必须为 1，实际为 2"));
+        let r = parse_rdp_actions(
+            r#"<RDP_PLAN>{"version":2,"summary":"s","steps":[]}</RDP_PLAN>"#,
+            MAX,
+        )
+        .unwrap();
+        assert!(r
+            .parse_error
+            .unwrap()
+            .contains("version 必须为 1，实际为 2"));
         let r = parse_rdp_actions(r#"<RDP_PLAN>{"summary":"s","steps":[{"description":"d","intent":"dance","operations":[{"type":"wait","ms":10}]}]}</RDP_PLAN>"#, MAX).unwrap();
         assert!(r.parse_error.unwrap().contains("intent 不支持: dance"));
-        assert_eq!(ops(r#"<RDP_PLAN>{"summary":"s","steps":[{"description":"d","operations":[{"type":"wait","ms":10},{"type":"pause","ms":99999},{"type":"sleep"}]}]}</RDP_PLAN>"#), vec![Wait { ms: 250 }, Wait { ms: 30000 }, Wait { ms: 1500 }]);
+        assert_eq!(
+            ops(
+                r#"<RDP_PLAN>{"summary":"s","steps":[{"description":"d","operations":[{"type":"wait","ms":10},{"type":"pause","ms":99999},{"type":"sleep"}]}]}</RDP_PLAN>"#
+            ),
+            vec![Wait { ms: 250 }, Wait { ms: 30000 }, Wait { ms: 1500 }]
+        );
     }
 
     #[test]
@@ -1044,12 +1342,18 @@ mod tests {
         let r = parse_rdp_actions(c, MAX).unwrap();
         assert_eq!(r.parse_error, None);
         assert_eq!(r.display_content, "先看看");
-        assert_eq!(r.actions[0].rdp_operations.as_ref().unwrap(), &vec![Move { x: 5, y: 6 }]);
+        assert_eq!(
+            r.actions[0].rdp_operations.as_ref().unwrap(),
+            &vec![Move { x: 5, y: 6 }]
+        );
     }
 
     #[test]
     fn plan_blocks_are_hidden_from_chat_text() {
-        assert_eq!(strip_rdp_plan_block("好的\n<RDP_PLAN>{\"a\":1}</RDP_PLAN>"), "好的");
+        assert_eq!(
+            strip_rdp_plan_block("好的\n<RDP_PLAN>{\"a\":1}</RDP_PLAN>"),
+            "好的"
+        );
         assert_eq!(strip_rdp_plan_block("先说明\n<RDP_PLAN>\n{\"ver"), "先说明");
         assert_eq!(strip_rdp_plan_block("结果\n</RDP"), "结果");
         assert_eq!(strip_rdp_plan_block("没有计划"), "没有计划");

@@ -1,11 +1,11 @@
 //! The global log window (port of `pages/Log/GlobalLogPage.tsx`).
 
+use crate::scale::px;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::select::Select;
 use gpui_kit::component::{h_flex, v_flex, Sizable as _, TitleBar};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use crate::scale::px;
 use ops_core::log::AppLogEntry;
 use ops_i18n::t;
 use regex::Regex;
@@ -18,23 +18,70 @@ use crate::window::{self, WindowKind};
 /// How many rows are drawn at most.
 pub const MAX_RENDERED_LOGS: usize = 300;
 
-static MESSAGE_PATTERNS: LazyLock<Vec<(Regex, &'static str, &'static [&'static str])>> = LazyLock::new(|| {
-    let p = |re: &str, key: &'static str, names: &'static [&'static str]| (Regex::new(re).unwrap(), key, names);
-    vec![
-        p(r"^主机 (.+) 正在连接\.\.\.$", "log.message.sshConnecting", &["hostId"]),
-        p(r"^主机 (.+) 已连接$", "log.message.sshConnected", &["hostId"]),
-        p(r"^主机 (.+) 连接空闲$", "log.message.sshIdle", &["hostId"]),
-        p(r"^主机 (.+) 连接断开$", "log.message.sshDisconnected", &["hostId"]),
-        p(r"^主机 (.+) 正在重连\.\.\.$", "log.message.sshReconnecting", &["hostId"]),
-        p(r"^主机 (.+) 正在连接 ([^:]+):(\d+)\.\.\.$", "log.message.sshConnectingHost", &["hostId", "host", "port"]),
-        p(r"^主机 (.+) \((.+)\) 已连接$", "log.message.sshConnectedHost", &["hostId", "host"]),
-        p(r"^主机 (.+) 连接失败: (.+)$", "log.message.sshConnectFailed", &["hostId", "error"]),
-        p(r"^开始执行命令 \[(.*)\]，目标 (\d+) 台主机$", "log.message.executionStart", &["command", "count"]),
-        p(r"^命令执行完成 \[(.*)\]：全部成功（(\d+)台，耗时(\d+)ms）$", "log.message.executionAllSucceeded", &["command", "count", "duration"]),
-        p(r"^命令执行失败 \[(.*)\]：全部失败（(\d+)台，耗时(\d+)ms）$", "log.message.executionAllFailed", &["command", "count", "duration"]),
-        p(r"^命令执行完成 \[(.*)\]：成功(\d+)台，失败(\d+)台（耗时(\d+)ms）$", "log.message.executionPartial", &["command", "success", "fail", "duration"]),
-    ]
-});
+static MESSAGE_PATTERNS: LazyLock<Vec<(Regex, &'static str, &'static [&'static str])>> =
+    LazyLock::new(|| {
+        let p = |re: &str, key: &'static str, names: &'static [&'static str]| {
+            (Regex::new(re).unwrap(), key, names)
+        };
+        vec![
+            p(
+                r"^主机 (.+) 正在连接\.\.\.$",
+                "log.message.sshConnecting",
+                &["hostId"],
+            ),
+            p(
+                r"^主机 (.+) 已连接$",
+                "log.message.sshConnected",
+                &["hostId"],
+            ),
+            p(r"^主机 (.+) 连接空闲$", "log.message.sshIdle", &["hostId"]),
+            p(
+                r"^主机 (.+) 连接断开$",
+                "log.message.sshDisconnected",
+                &["hostId"],
+            ),
+            p(
+                r"^主机 (.+) 正在重连\.\.\.$",
+                "log.message.sshReconnecting",
+                &["hostId"],
+            ),
+            p(
+                r"^主机 (.+) 正在连接 ([^:]+):(\d+)\.\.\.$",
+                "log.message.sshConnectingHost",
+                &["hostId", "host", "port"],
+            ),
+            p(
+                r"^主机 (.+) \((.+)\) 已连接$",
+                "log.message.sshConnectedHost",
+                &["hostId", "host"],
+            ),
+            p(
+                r"^主机 (.+) 连接失败: (.+)$",
+                "log.message.sshConnectFailed",
+                &["hostId", "error"],
+            ),
+            p(
+                r"^开始执行命令 \[(.*)\]，目标 (\d+) 台主机$",
+                "log.message.executionStart",
+                &["command", "count"],
+            ),
+            p(
+                r"^命令执行完成 \[(.*)\]：全部成功（(\d+)台，耗时(\d+)ms）$",
+                "log.message.executionAllSucceeded",
+                &["command", "count", "duration"],
+            ),
+            p(
+                r"^命令执行失败 \[(.*)\]：全部失败（(\d+)台，耗时(\d+)ms）$",
+                "log.message.executionAllFailed",
+                &["command", "count", "duration"],
+            ),
+            p(
+                r"^命令执行完成 \[(.*)\]：成功(\d+)台，失败(\d+)台（耗时(\d+)ms）$",
+                "log.message.executionPartial",
+                &["command", "success", "fail", "duration"],
+            ),
+        ]
+    });
 
 /// Backend messages are stored in Chinese; show them in the current language (port of `formatLogMessage`).
 pub fn format_log_message(message: &str) -> String {
@@ -60,7 +107,9 @@ pub fn format_log_message(message: &str) -> String {
 
 /// Entries that pass the level/origin filters (`"all"` disables a filter).
 pub fn filter_logs<'a>(logs: &'a [AppLogEntry], level: &str, origin: &str) -> Vec<&'a AppLogEntry> {
-    logs.iter().filter(|l| (level == "all" || l.level == level) && (origin == "all" || l.origin == origin)).collect()
+    logs.iter()
+        .filter(|l| (level == "all" || l.level == level) && (origin == "all" || l.origin == origin))
+        .collect()
 }
 
 pub struct GlobalLogWindow {
@@ -77,7 +126,9 @@ pub struct GlobalLogWindow {
 impl GlobalLogWindow {
     pub fn open(cx: &mut App) {
         let options = window::window_options(WindowKind::GlobalLog, &t!("nav.globalLog"), cx);
-        window::open_or_focus("global-log", options, cx, |window, cx| cx.new(|cx| Self::new(window, cx)));
+        window::open_or_focus("global-log", options, cx, |window, cx| {
+            cx.new(|cx| Self::new(window, cx))
+        });
     }
 
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -90,7 +141,11 @@ impl GlobalLogWindow {
             Choice::new("info", t!("log.info")),
             Choice::new("success", t!("log.success")),
         ];
-        let origins = vec![Choice::new("all", t!("log.allOrigins")), Choice::new("backend", t!("log.backend")), Choice::new("frontend", t!("log.frontend"))];
+        let origins = vec![
+            Choice::new("all", t!("log.allOrigins")),
+            Choice::new("backend", t!("log.backend")),
+            Choice::new("frontend", t!("log.frontend")),
+        ];
         let level_select = cx.new(|cx| new_select(levels, "all", window, cx));
         let origin_select = cx.new(|cx| new_select(origins, "all", window, cx));
         let subs = vec![
@@ -113,15 +168,32 @@ impl GlobalLogWindow {
                 }
             }),
         ];
-        Self { store, level: "all".into(), origin: "all".into(), level_select, origin_select, scroll: ScrollHandle::new(), follow: true, _subs: subs }
+        Self {
+            store,
+            level: "all".into(),
+            origin: "all".into(),
+            level_select,
+            origin_select,
+            scroll: ScrollHandle::new(),
+            follow: true,
+            _subs: subs,
+        }
     }
 
-    pub fn set_filters(&mut self, level: &str, origin: &str, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn set_filters(
+        &mut self,
+        level: &str,
+        origin: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.level = level.to_string();
         self.origin = origin.to_string();
         let (l, o) = (level.to_string(), origin.to_string());
-        self.level_select.update(cx, |s, cx| s.set_selected_value(&l, window, cx));
-        self.origin_select.update(cx, |s, cx| s.set_selected_value(&o, window, cx));
+        self.level_select
+            .update(cx, |s, cx| s.set_selected_value(&l, window, cx));
+        self.origin_select
+            .update(cx, |s, cx| s.set_selected_value(&o, window, cx));
         cx.notify();
     }
 
@@ -132,7 +204,18 @@ impl GlobalLogWindow {
     /// Visible lines as `(time, origin, source, text)` (tests).
     pub fn visible(&self, cx: &App) -> Vec<(String, String, String, String)> {
         let store = self.store.read(cx);
-        filter_logs(&store.logs, &self.level, &self.origin).into_iter().take(MAX_RENDERED_LOGS).map(|l| (l.timestamp.clone(), origin_label(&l.origin), source_label(&l.source), format_log_message(&l.message))).collect()
+        filter_logs(&store.logs, &self.level, &self.origin)
+            .into_iter()
+            .take(MAX_RENDERED_LOGS)
+            .map(|l| {
+                (
+                    l.timestamp.clone(),
+                    origin_label(&l.origin),
+                    source_label(&l.source),
+                    format_log_message(&l.message),
+                )
+            })
+            .collect()
     }
 }
 
@@ -160,7 +243,10 @@ impl Render for GlobalLogWindow {
         self.follow = f32::from(self.scroll.offset().y).abs() < 40.0;
         let (total, loading) = {
             let s = self.store.read(cx);
-            (filter_logs(&s.logs, &self.level, &self.origin).len(), s.loading)
+            (
+                filter_logs(&s.logs, &self.level, &self.origin).len(),
+                s.loading,
+            )
         };
         let lines = self.visible(cx);
         // levelColors: error / warn / success / info(primary)
@@ -174,7 +260,11 @@ impl Render for GlobalLogWindow {
         };
         let colors: Vec<Hsla> = {
             let s = self.store.read(cx);
-            filter_logs(&s.logs, &self.level, &self.origin).into_iter().take(MAX_RENDERED_LOGS).map(|l| level_color(&l.level)).collect()
+            filter_logs(&s.logs, &self.level, &self.origin)
+                .into_iter()
+                .take(MAX_RENDERED_LOGS)
+                .map(|l| level_color(&l.level))
+                .collect()
         };
         // `.global-log-action-btn`: 24px, 11px text, surface-soft fill, 5px corners
         let action = |id: &'static str, label: String| {
@@ -203,24 +293,58 @@ impl Render for GlobalLogWindow {
             .text_color(ui.text)
             .child(
                 // `.global-log-toolbar`: 40px, 12px side padding, hairline underneath
-                TitleBar::new().h(px(40.)).pl(px(if cfg!(target_os = "macos") { 78. } else { 12. })).pr(px(12.)).bg(ui.card).child(
-                    h_flex()
-                        .w_full()
-                        .gap(px(8.))
-                        .items_center()
-                        .child(div().w(px(79.)).child(Select::new(&self.level_select).icon(gpui_kit::component::Icon::new(gpui_kit::assets::IconName::ChevronsUpDown)).xsmall().text_size(px(12.))))
-                        .child(div().w(px(79.)).child(Select::new(&self.origin_select).icon(gpui_kit::component::Icon::new(gpui_kit::assets::IconName::ChevronsUpDown)).xsmall().text_size(px(12.))))
-                        .child(div().id("log-count").test_support().text_size(px(11.)).text_color(ui.text_muted).child(t!("log.count", count = total)))
-                        .child(div().flex_1())
-                        .when(!self.follow, |d| {
-                            d.child(action("log-follow", t!("log.follow")).on_click(cx.listener(|this, _, _, cx| {
-                                this.follow = true;
-                                this.scroll.set_offset(point(px(0.), px(0.)));
-                                cx.notify();
-                            })))
-                        })
-                        .child(action("log-clear", t!("log.clear")).on_click(cx.listener(|this, _, _, cx| this.store.update(cx, |s, cx| s.clear(cx))))),
-                ),
+                TitleBar::new()
+                    .h(px(40.))
+                    .pl(px(if cfg!(target_os = "macos") { 78. } else { 12. }))
+                    .pr(px(12.))
+                    .bg(ui.card)
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .gap(px(8.))
+                            .items_center()
+                            .child(
+                                div().w(px(79.)).child(
+                                    Select::new(&self.level_select)
+                                        .icon(gpui_kit::component::Icon::new(
+                                            gpui_kit::assets::IconName::ChevronsUpDown,
+                                        ))
+                                        .xsmall()
+                                        .text_size(px(12.)),
+                                ),
+                            )
+                            .child(
+                                div().w(px(79.)).child(
+                                    Select::new(&self.origin_select)
+                                        .icon(gpui_kit::component::Icon::new(
+                                            gpui_kit::assets::IconName::ChevronsUpDown,
+                                        ))
+                                        .xsmall()
+                                        .text_size(px(12.)),
+                                ),
+                            )
+                            .child(
+                                div()
+                                    .id("log-count")
+                                    .test_support()
+                                    .text_size(px(11.))
+                                    .text_color(ui.text_muted)
+                                    .child(t!("log.count", count = total)),
+                            )
+                            .child(div().flex_1())
+                            .when(!self.follow, |d| {
+                                d.child(action("log-follow", t!("log.follow")).on_click(
+                                    cx.listener(|this, _, _, cx| {
+                                        this.follow = true;
+                                        this.scroll.set_offset(point(px(0.), px(0.)));
+                                        cx.notify();
+                                    }),
+                                ))
+                            })
+                            .child(action("log-clear", t!("log.clear")).on_click(cx.listener(
+                                |this, _, _, cx| this.store.update(cx, |s, cx| s.clear(cx)),
+                            ))),
+                    ),
             )
             .child(
                 // `.workbench-log-body`: soft surface, 14/18 padding, mono font, 1.7 line height
@@ -238,20 +362,51 @@ impl Render for GlobalLogWindow {
                     .text_size(px(14.))
                     .line_height(px(23.))
                     .text_color(ui.text_secondary)
-                    .when(loading, |d| d.child(div().text_color(ui.text_muted).text_align(TextAlign::Center).pt(px(40.)).child(t!("log.loading"))))
-                    .when(!loading && lines.is_empty(), |d| d.child(div().id("log-empty").test_support().text_color(ui.text_muted).text_align(TextAlign::Center).pt(px(40.)).child(t!("log.empty"))))
-                    .children(lines.into_iter().zip(colors).enumerate().map(|(i, ((time, origin, source, text), color))| {
-                        h_flex()
-                            .id(ElementId::Name(format!("log-line-{i}").into()))
-                            .test_support()
-                            .gap(px(8.))
-                            .items_baseline()
-                            .whitespace_nowrap()
-                            .child(div().flex_none().text_color(ui.text_muted).child(time))
-                            .child(div().flex_none().font_weight(FontWeight::BOLD).text_color(color).child(format!("[{origin}]")))
-                            .child(div().flex_none().text_color(color).child(format!("[{source}]")))
-                            .child(div().child(text))
-                    })),
+                    .when(loading, |d| {
+                        d.child(
+                            div()
+                                .text_color(ui.text_muted)
+                                .text_align(TextAlign::Center)
+                                .pt(px(40.))
+                                .child(t!("log.loading")),
+                        )
+                    })
+                    .when(!loading && lines.is_empty(), |d| {
+                        d.child(
+                            div()
+                                .id("log-empty")
+                                .test_support()
+                                .text_color(ui.text_muted)
+                                .text_align(TextAlign::Center)
+                                .pt(px(40.))
+                                .child(t!("log.empty")),
+                        )
+                    })
+                    .children(lines.into_iter().zip(colors).enumerate().map(
+                        |(i, ((time, origin, source, text), color))| {
+                            h_flex()
+                                .id(ElementId::Name(format!("log-line-{i}").into()))
+                                .test_support()
+                                .gap(px(8.))
+                                .items_baseline()
+                                .whitespace_nowrap()
+                                .child(div().flex_none().text_color(ui.text_muted).child(time))
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .font_weight(FontWeight::BOLD)
+                                        .text_color(color)
+                                        .child(format!("[{origin}]")),
+                                )
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .text_color(color)
+                                        .child(format!("[{source}]")),
+                                )
+                                .child(div().child(text))
+                        },
+                    )),
             )
     }
 }
@@ -262,7 +417,13 @@ mod tests {
     use ops_core::log::AppLogEntry;
 
     fn entry(level: &str, origin: &str, message: &str) -> AppLogEntry {
-        AppLogEntry { timestamp: "10:00:00.000".into(), level: level.into(), source: "ssh".into(), message: message.into(), origin: origin.into() }
+        AppLogEntry {
+            timestamp: "10:00:00.000".into(),
+            level: level.into(),
+            source: "ssh".into(),
+            message: message.into(),
+            origin: origin.into(),
+        }
     }
 
     #[test]
@@ -270,19 +431,32 @@ mod tests {
         ops_i18n::set_current_language(ops_i18n::Language::EnUs);
         let f = |m: &str| format_log_message(m);
         assert_eq!(f("主机 h1 已连接"), "Host h1 connected");
-        assert_eq!(f("主机 h1 连接失败: refused"), "Host h1 connection failed: refused");
-        assert!(f("开始执行命令 [ls -la]，目标 3 台主机").contains("[ls -la]") && f("开始执行命令 [ls -la]，目标 3 台主机").contains('3'));
+        assert_eq!(
+            f("主机 h1 连接失败: refused"),
+            "Host h1 connection failed: refused"
+        );
+        assert!(
+            f("开始执行命令 [ls -la]，目标 3 台主机").contains("[ls -la]")
+                && f("开始执行命令 [ls -la]，目标 3 台主机").contains('3')
+        );
         assert!(f("命令执行完成 [uptime]：成功2台，失败1台（耗时15ms）").contains("15"));
         assert_eq!(f("unknown message"), "unknown message");
         ops_i18n::set_current_language(ops_i18n::Language::ZhCn);
         assert_eq!(f("主机 h1 已连接"), "主机 h1 已连接");
-        assert_eq!(f("主机 srv (10.0.0.1) 已连接"), "主机 srv (10.0.0.1) 已连接");
+        assert_eq!(
+            f("主机 srv (10.0.0.1) 已连接"),
+            "主机 srv (10.0.0.1) 已连接"
+        );
         assert_eq!(f("全局日志窗口已连接"), "全局日志窗口已连接");
     }
 
     #[test]
     fn filters_combine() {
-        let logs = vec![entry("error", "backend", "a"), entry("info", "backend", "b"), entry("error", "frontend", "c")];
+        let logs = vec![
+            entry("error", "backend", "a"),
+            entry("info", "backend", "b"),
+            entry("error", "frontend", "c"),
+        ];
         assert_eq!(filter_logs(&logs, "all", "all").len(), 3);
         assert_eq!(filter_logs(&logs, "error", "all").len(), 2);
         assert_eq!(filter_logs(&logs, "error", "frontend")[0].message, "c");

@@ -4,13 +4,13 @@ pub mod asset_panel;
 pub mod motion;
 pub mod perf;
 
+use crate::scale::px;
 use gpui_kit::assets::IconName;
-use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::base::TestSupportExt as _;
+use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Icon, Sizable as _, TitleBar};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use crate::scale::px;
 use ops_i18n::t;
 
 use crate::asset_tree::HostKind;
@@ -42,7 +42,7 @@ impl Mode {
         match self {
             Mode::Terminal => IconName::Code,
             Mode::Workflow => IconName::Archive, // ApartmentOutlined = lucide Archive
-            Mode::Github => IconName::Code, // GithubOutlined = lucide Code
+            Mode::Github => IconName::Code,      // GithubOutlined = lucide Code
         }
     }
 
@@ -73,26 +73,36 @@ impl Workbench {
         cx.set_global(crate::stores::assets::AssetsHandle(assets.clone()));
         let asset_panel = cx.new(|cx| AssetPanel::new(assets.clone(), window, cx));
         let perf = cx.new(PerfMonitor::new);
-        let subs = vec![cx.subscribe_in(&asset_panel, window, |this, _, ev: &AssetPanelEvent, window, cx| {
-            match ev {
+        let subs = vec![cx.subscribe_in(
+            &asset_panel,
+            window,
+            |this, _, ev: &AssetPanelEvent, window, cx| match ev {
                 AssetPanelEvent::Close => this.set_asset_panel_visible(false, cx),
                 AssetPanelEvent::OpenHost(id) => this.open_host(id, window, cx),
                 AssetPanelEvent::BatchUpload(ids) => {
                     if ids.is_empty() {
-                        crate::widgets::toast::warning(window, cx, t!("assets.selectLinuxHostsFirst"));
+                        crate::widgets::toast::warning(
+                            window,
+                            cx,
+                            t!("assets.selectLinuxHostsFirst"),
+                        );
                     } else {
                         crate::transfer::window::BatchTransferWindow::open(ids.clone(), cx);
                     }
                 }
                 AssetPanelEvent::BroadcastTerminal(ids) => {
                     if ids.is_empty() {
-                        crate::widgets::toast::warning(window, cx, t!("assets.selectLinuxHostsFirst"));
+                        crate::widgets::toast::warning(
+                            window,
+                            cx,
+                            t!("assets.selectLinuxHostsFirst"),
+                        );
                     } else {
                         crate::broadcast::window::BatchTerminalWindow::open(ids.clone(), cx);
                     }
                 }
-            }
-        })];
+            },
+        )];
         let (mode, visible) = {
             let ui = cx.global::<crate::ui_state::UiState>();
             (ui.mode, ui.asset_panel_visible)
@@ -101,10 +111,15 @@ impl Workbench {
             assets.update(cx, |s, cx| s.reload(cx));
         }
         // RDP / VNC windows ask for the asset sidebar through the event bus (the original `open-asset-manager` event).
-        let open_assets = crate::services::ctx(cx).events.subscribe(crate::window::OPEN_ASSET_MANAGER_TOPIC);
+        let open_assets = crate::services::ctx(cx)
+            .events
+            .subscribe(crate::window::OPEN_ASSET_MANAGER_TOPIC);
         let task = cx.spawn(async move |this, cx| {
             while open_assets.recv_async().await.is_ok() {
-                if this.update(cx, |this, cx| this.set_asset_panel_visible(true, cx)).is_err() {
+                if this
+                    .update(cx, |this, cx| this.set_asset_panel_visible(true, cx))
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -112,14 +127,29 @@ impl Workbench {
         let update_sub = cx.observe(&crate::update::update_store(cx), |_, _, cx| cx.notify());
         let mut subs = subs;
         subs.push(update_sub);
-        let mut this = Self { mode, assets, asset_panel, asset_panel_visible: visible, perf, terminal: None, repo_sync: None, workflow: None, _subs: subs, _tasks: vec![task] };
+        let mut this = Self {
+            mode,
+            assets,
+            asset_panel,
+            asset_panel_visible: visible,
+            perf,
+            terminal: None,
+            repo_sync: None,
+            workflow: None,
+            _subs: subs,
+            _tasks: vec![task],
+        };
         if mode == Mode::Terminal {
             this.ensure_terminal_page(window, cx);
         }
         this
     }
 
-    fn ensure_terminal_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<TerminalPage> {
+    fn ensure_terminal_page(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<TerminalPage> {
         if let Some(page) = &self.terminal {
             return page.clone();
         }
@@ -127,7 +157,9 @@ impl Workbench {
         let page = cx.new(|cx| TerminalPage::new(ws, window, cx));
         let sub = cx.subscribe(&page, |this, _, ev: &PageEvent, cx| match ev {
             PageEvent::ShowAssets => this.set_asset_panel_visible(true, cx),
-            PageEvent::OpenEditor { host_id, dir, path } => crate::editor::window::EditorWindow::open(host_id, *dir, path, cx),
+            PageEvent::OpenEditor { host_id, dir, path } => {
+                crate::editor::window::EditorWindow::open(host_id, *dir, path, cx)
+            }
         });
         self._subs.push(sub);
         self.terminal = Some(page.clone());
@@ -144,16 +176,31 @@ impl Workbench {
 
     /// Open a host from the sidebar: Linux hosts get a terminal tab, Windows hosts an RDP window, VNC hosts a VNC window.
     pub fn open_host(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(host) = self.assets.read(cx).host(id).cloned() else { return };
-        self.assets.update(cx, |s, cx| s.record_recent(&host.id, cx));
+        let Some(host) = self.assets.read(cx).host(id).cloned() else {
+            return;
+        };
+        self.assets
+            .update(cx, |s, cx| s.record_recent(&host.id, cx));
         match HostKind::of(&host) {
             HostKind::Windows => {
-                crate::rdp::window::RdpWindow::open(crate::rdp::window::HostRequest { host_id: host.id.clone(), name: host.name.clone(), ip: host.ip.clone() }, cx);
+                crate::rdp::window::RdpWindow::open(
+                    crate::rdp::window::HostRequest {
+                        host_id: host.id.clone(),
+                        name: host.name.clone(),
+                        ip: host.ip.clone(),
+                    },
+                    cx,
+                );
                 return;
             }
             HostKind::Vnc => {
                 crate::vnc::window::VncWindow::open(
-                    crate::vnc::window::VncHost { host_id: host.id.clone(), name: host.name.clone(), ip: host.ip.clone(), port: ops_vnc::config::vnc_port_from_settings(&host.rdp_settings) },
+                    crate::vnc::window::VncHost {
+                        host_id: host.id.clone(),
+                        name: host.name.clone(),
+                        ip: host.ip.clone(),
+                        port: ops_vnc::config::vnc_port_from_settings(&host.rdp_settings),
+                    },
                     cx,
                 );
                 return;
@@ -189,7 +236,8 @@ impl Workbench {
             self.assets.update(cx, |s, cx| s.reload(cx));
         }
         self.asset_panel_visible = visible;
-        cx.global_mut::<crate::ui_state::UiState>().asset_panel_visible = visible;
+        cx.global_mut::<crate::ui_state::UiState>()
+            .asset_panel_visible = visible;
         cx.notify();
     }
 
@@ -200,7 +248,11 @@ impl Workbench {
     fn page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if self.mode == Mode::Terminal {
             let page = self.ensure_terminal_page(window, cx);
-            return motion::fade_in(div().flex_1().min_w_0().h_full().child(page), ("page-fade", 0usize), cx);
+            return motion::fade_in(
+                div().flex_1().min_w_0().h_full().child(page),
+                ("page-fade", 0usize),
+                cx,
+            );
         }
         if self.mode == Mode::Workflow {
             let page = match &self.workflow {
@@ -211,11 +263,22 @@ impl Workbench {
                     p
                 }
             };
-            return motion::fade_in(div().flex_1().min_w_0().h_full().child(page), ("page-fade", 1usize), cx);
+            return motion::fade_in(
+                div().flex_1().min_w_0().h_full().child(page),
+                ("page-fade", 1usize),
+                cx,
+            );
         }
         if self.mode == Mode::Github {
-            let page = self.repo_sync.get_or_insert_with(|| cx.new(crate::repo_sync::page::RepoSyncPage::new)).clone();
-            return motion::fade_in(div().flex_1().min_w_0().h_full().child(page), ("page-fade", 2usize), cx);
+            let page = self
+                .repo_sync
+                .get_or_insert_with(|| cx.new(crate::repo_sync::page::RepoSyncPage::new))
+                .clone();
+            return motion::fade_in(
+                div().flex_1().min_w_0().h_full().child(page),
+                ("page-fade", 2usize),
+                cx,
+            );
         }
         let theme = cx.theme().clone();
         let (title, note): (String, &str) = match self.mode {
@@ -231,23 +294,40 @@ impl Workbench {
             .justify_center()
             .gap_2()
             .child(div().text_size(px(16.)).child(title))
-            .child(div().text_size(px(11.)).text_color(theme.muted_foreground).child(note))
-            .when(self.mode == Mode::Terminal && !self.asset_panel_visible, |d| {
-                d.child(
-                    Button::new("open-assets")
-                        .primary()
-                        .small()
-                        .icon(Icon::new(IconName::Plus))
-                        .label(t!("assets.title"))
-                        .on_click(cx.listener(|this, _, _, cx| this.set_asset_panel_visible(true, cx))),
-                )
-            })
+            .child(
+                div()
+                    .text_size(px(11.))
+                    .text_color(theme.muted_foreground)
+                    .child(note),
+            )
+            .when(
+                self.mode == Mode::Terminal && !self.asset_panel_visible,
+                |d| {
+                    d.child(
+                        Button::new("open-assets")
+                            .primary()
+                            .small()
+                            .icon(Icon::new(IconName::Plus))
+                            .label(t!("assets.title"))
+                            .on_click(
+                                cx.listener(|this, _, _, cx| {
+                                    this.set_asset_panel_visible(true, cx)
+                                }),
+                            ),
+                    )
+                },
+            )
             .into_any_element()
     }
 }
 
 /// One entry of the pill-shaped mode switch (`.workbench-mode-tab`).
-fn mode_tab(m: Mode, active: bool, ui: &crate::theme::UiColors, cx: &mut Context<Workbench>) -> impl IntoElement {
+fn mode_tab(
+    m: Mode,
+    active: bool,
+    ui: &crate::theme::UiColors,
+    cx: &mut Context<Workbench>,
+) -> impl IntoElement {
     let ui = *ui;
     h_flex()
         .id(m.id())
@@ -260,8 +340,25 @@ fn mode_tab(m: Mode, active: bool, ui: &crate::theme::UiColors, cx: &mut Context
         .cursor_pointer()
         .text_size(px(12.))
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(if active { gpui_kit::white() } else { ui.text_secondary })
-        .when(active, |d| d.bg(linear_gradient(135., linear_color_stop(ui.primary, 0.), linear_color_stop(ui.primary_strong, 1.))).shadow(vec![BoxShadow { color: ui.primary.opacity(0.28), offset: point(px(0.), px(8.)), blur_radius: px(20.), spread_radius: px(0.), inset: false }]))
+        .text_color(if active {
+            gpui_kit::white()
+        } else {
+            ui.text_secondary
+        })
+        .when(active, |d| {
+            d.bg(linear_gradient(
+                135.,
+                linear_color_stop(ui.primary, 0.),
+                linear_color_stop(ui.primary_strong, 1.),
+            ))
+            .shadow(vec![BoxShadow {
+                color: ui.primary.opacity(0.28),
+                offset: point(px(0.), px(8.)),
+                blur_radius: px(20.),
+                spread_radius: px(0.),
+                inset: false,
+            }])
+        })
         .when(!active, |d| d.hover(|d| d.bg(ui.nav_hover)))
         .child(Icon::new(m.icon()).size_4())
         .child(t!(m.label_key()))
@@ -269,7 +366,14 @@ fn mode_tab(m: Mode, active: bool, ui: &crate::theme::UiColors, cx: &mut Context
 }
 
 /// A 28px icon button of the title bar (`.tool-icon-button`).
-fn tool_button(id: &'static str, icon: IconName, tip: String, ui: &crate::theme::UiColors, badge: bool, on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static) -> impl IntoElement {
+fn tool_button(
+    id: &'static str,
+    icon: IconName,
+    tip: String,
+    ui: &crate::theme::UiColors,
+    badge: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
     let ui = *ui;
     div()
         .id(id)
@@ -285,10 +389,37 @@ fn tool_button(id: &'static str, icon: IconName, tip: String, ui: &crate::theme:
         .bg(ui.input_bg)
         .border_1()
         .border_color(ui.border)
-        .hover(move |d| d.bg(ui.primary).border_color(ui.primary).text_color(gpui_kit::white()).shadow(vec![BoxShadow { color: ui.primary.opacity(0.28), offset: point(px(0.), px(8.)), blur_radius: px(18.), spread_radius: px(0.), inset: false }]))
-        .tooltip(move |window, cx| gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx))
+        .hover(move |d| {
+            d.bg(ui.primary)
+                .border_color(ui.primary)
+                .text_color(gpui_kit::white())
+                .shadow(vec![BoxShadow {
+                    color: ui.primary.opacity(0.28),
+                    offset: point(px(0.), px(8.)),
+                    blur_radius: px(18.),
+                    spread_radius: px(0.),
+                    inset: false,
+                }])
+        })
+        .tooltip(move |window, cx| {
+            gpui_kit::component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+        })
         .child(Icon::new(icon).size_4())
-        .when(badge, |d| d.child(div().id("update-dot").test_support().absolute().top(px(4.)).right(px(4.)).size(px(7.)).rounded_full().bg(gpui_kit::rgb(0xff4d4f)).border_1().border_color(ui.card)))
+        .when(badge, |d| {
+            d.child(
+                div()
+                    .id("update-dot")
+                    .test_support()
+                    .absolute()
+                    .top(px(4.))
+                    .right(px(4.))
+                    .size(px(7.))
+                    .rounded_full()
+                    .bg(gpui_kit::rgb(0xff4d4f))
+                    .border_1()
+                    .border_color(ui.card),
+            )
+        })
         .on_click(on_click)
 }
 
@@ -310,43 +441,111 @@ impl Render for Workbench {
 
         let (has_update, latest) = {
             let u = crate::update::update_store(cx).read(cx);
-            (u.has_update(), u.info.as_ref().and_then(|i| i.latest_version.clone()).unwrap_or_default())
+            (
+                u.has_update(),
+                u.info
+                    .as_ref()
+                    .and_then(|i| i.latest_version.clone())
+                    .unwrap_or_default(),
+            )
         };
-        let update_tip = if has_update { t!("appUpdate.availableTooltip", version = latest) } else { t!("appUpdate.check") };
+        let update_tip = if has_update {
+            t!("appUpdate.availableTooltip", version = latest)
+        } else {
+            t!("appUpdate.check")
+        };
         // right: log, settings, update (red dot when a release is waiting)
         let tools = h_flex()
             .gap(px(10.))
             .items_center()
-            .child(tool_button("tool-log", IconName::FileText, t!("nav.globalLog"), &ui, false, |_, _, cx| crate::log::window::GlobalLogWindow::open(cx)))
-            .child(tool_button("tool-settings", IconName::Settings, t!("nav.settings"), &ui, false, |_, _, cx| crate::settings::window::SettingsWindow::open(crate::settings::window::Section::General, cx)))
-            .child(tool_button("tool-update", IconName::CircleFadingArrowUp, update_tip, &ui, has_update, |_, window, cx| drop(crate::update::UpdateModal::open(window, cx))));
+            .child(tool_button(
+                "tool-log",
+                IconName::FileText,
+                t!("nav.globalLog"),
+                &ui,
+                false,
+                |_, _, cx| crate::log::window::GlobalLogWindow::open(cx),
+            ))
+            .child(tool_button(
+                "tool-settings",
+                IconName::Settings,
+                t!("nav.settings"),
+                &ui,
+                false,
+                |_, _, cx| {
+                    crate::settings::window::SettingsWindow::open(
+                        crate::settings::window::Section::General,
+                        cx,
+                    )
+                },
+            ))
+            .child(tool_button(
+                "tool-update",
+                IconName::CircleFadingArrowUp,
+                update_tip,
+                &ui,
+                has_update,
+                |_, window, cx| drop(crate::update::UpdateModal::open(window, cx)),
+            ));
 
         // macOS keeps its native traffic lights (placed like the original's own 12px dots): room for them
         // (the three columns stay equal so the mode pill is centred on the window)
-        let left_pad = if cfg!(target_os = "macos") { px(78.) } else { px(0.) };
+        let left_pad = if cfg!(target_os = "macos") {
+            px(78.)
+        } else {
+            px(0.)
+        };
 
         v_flex()
             .size_full()
             .bg(ui.page)
             .text_color(ui.text)
             .child(
-                TitleBar::new().h(px(38.)).pl(px(16.)).pr(px(16.)).bg(ui.page).border_b_0().child(
-                    h_flex()
-                        .w_full()
-                        .gap_3()
-                        .items_center()
-                        .child(div().flex_1().min_w_0().flex().justify_start().child(div().ml(left_pad).child(self.perf.clone())))
-                        .child(tabs)
-                        .child(div().flex_1().min_w_0().flex().justify_end().child(tools)),
-                ),
+                TitleBar::new()
+                    .h(px(38.))
+                    .pl(px(16.))
+                    .pr(px(16.))
+                    .bg(ui.page)
+                    .border_b_0()
+                    .child(
+                        h_flex()
+                            .w_full()
+                            .gap_3()
+                            .items_center()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .justify_start()
+                                    .child(div().ml(left_pad).child(self.perf.clone())),
+                            )
+                            .child(tabs)
+                            .child(div().flex_1().min_w_0().flex().justify_end().child(tools)),
+                    ),
             )
             .child(
                 h_flex()
                     .flex_1()
                     .min_h_0()
-                    .when(self.asset_panel_visible, |d| d.child(motion::fade_in(div().h_full().child(self.asset_panel.clone()), "asset-panel-fade", cx)))
+                    .when(self.asset_panel_visible, |d| {
+                        d.child(motion::fade_in(
+                            div().h_full().child(self.asset_panel.clone()),
+                            "asset-panel-fade",
+                            cx,
+                        ))
+                    })
                     // `.workbench-shell`: the main panel is a rounded sheet on the window background
-                    .child(div().flex_1().min_w_0().h_full().bg(ui.main).rounded_tl(px(14.)).overflow_hidden().child(self.page(window, cx))),
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .h_full()
+                            .bg(ui.main)
+                            .rounded_tl(px(14.))
+                            .overflow_hidden()
+                            .child(self.page(window, cx)),
+                    ),
             )
     }
 }

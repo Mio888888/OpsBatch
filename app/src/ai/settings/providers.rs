@@ -3,16 +3,20 @@
 
 use std::collections::BTreeMap;
 
+use crate::scale::px;
 use gpui_kit::assets::IconName;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::InputState;
 use gpui_kit::component::select::Select;
-use gpui_kit::component::{h_flex, v_flex, ActiveTheme as _, Disableable as _, Icon, Sizable as _, WindowExt as _};
+use gpui_kit::component::{
+    h_flex, v_flex, ActiveTheme as _, Disableable as _, Icon, Sizable as _, WindowExt as _,
+};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use crate::scale::px;
-use ops_ai::prefs::provider::{self, AdvancedParams, ProbeHealth, ProbeInputIssue, ProviderConfig, PROVIDER_PRESETS};
+use ops_ai::prefs::provider::{
+    self, AdvancedParams, ProbeHealth, ProbeInputIssue, ProviderConfig, PROVIDER_PRESETS,
+};
 use ops_i18n::t;
 
 use super::ui;
@@ -21,14 +25,34 @@ use crate::widgets::choice::{confirmed_value, new_select, Choice, ChoiceSelect};
 
 /// Colour of the letter badge standing in for Netcatty's provider icons.
 fn badge_color(provider_id: &str) -> Hsla {
-    let hue = provider_id.bytes().fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32)) % 360;
+    let hue = provider_id
+        .bytes()
+        .fold(0u32, |h, b| h.wrapping_mul(31).wrapping_add(b as u32))
+        % 360;
     hsla(hue as f32 / 360., 0.55, 0.5, 1.)
 }
 
 fn icon_badge(p: &ProviderConfig, size: f32) -> Div {
     let color = badge_color(&p.provider_id);
-    let letter = p.name.chars().next().or_else(|| p.provider_id.chars().next()).map(|c| c.to_uppercase().to_string()).unwrap_or_else(|| "?".into());
-    div().size(px(size)).flex_none().flex().items_center().justify_center().rounded(px(size / 4.)).bg(color.opacity(0.18)).text_color(color).text_size(px(size * 0.5)).font_weight(FontWeight::BOLD).child(letter)
+    let letter = p
+        .name
+        .chars()
+        .next()
+        .or_else(|| p.provider_id.chars().next())
+        .map(|c| c.to_uppercase().to_string())
+        .unwrap_or_else(|| "?".into());
+    div()
+        .size(px(size))
+        .flex_none()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(size / 4.))
+        .bg(color.opacity(0.18))
+        .text_color(color)
+        .text_size(px(size * 0.5))
+        .font_weight(FontWeight::BOLD)
+        .child(letter)
 }
 
 pub struct ProvidersTab {
@@ -42,7 +66,13 @@ pub struct ProvidersTab {
 impl ProvidersTab {
     pub fn new(store: Entity<PrefsStore>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
         let subs = vec![cx.observe(&store, |_, _, cx| cx.notify())];
-        Self { store, editing: None, form: None, add_open: false, _subs: subs }
+        Self {
+            store,
+            editing: None,
+            form: None,
+            add_open: false,
+            _subs: subs,
+        }
     }
 
     pub fn editing(&self) -> Option<&str> {
@@ -61,7 +91,8 @@ impl ProvidersTab {
     pub fn add_provider(&mut self, provider_id: &str, cx: &mut Context<Self>) -> String {
         let p = provider::new_provider(provider_id);
         let id = p.id.clone();
-        self.store.update(cx, |s, cx| s.update(cx, |prefs| prefs.providers.push(p)));
+        self.store
+            .update(cx, |s, cx| s.update(cx, |prefs| prefs.providers.push(p)));
         self.add_open = false;
         cx.notify();
         id
@@ -69,7 +100,9 @@ impl ProvidersTab {
 
     pub fn toggle_enabled(&mut self, id: &str, enabled: bool, cx: &mut Context<Self>) {
         let id = id.to_string();
-        self.store.update(cx, |s, cx| s.update(cx, |p| p.set_provider_enabled(&id, enabled)));
+        self.store.update(cx, |s, cx| {
+            s.update(cx, |p| p.set_provider_enabled(&id, enabled))
+        });
     }
 
     pub fn remove_provider(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -78,18 +111,31 @@ impl ProvidersTab {
             self.editing = None;
             self.form = None;
         }
-        self.store.update(cx, |s, cx| s.update(cx, |p| p.remove_provider(&id)));
+        self.store
+            .update(cx, |s, cx| s.update(cx, |p| p.remove_provider(&id)));
         cx.notify();
     }
 
-    fn confirm_remove(&mut self, id: String, name: String, window: &mut Window, cx: &mut Context<Self>) {
+    fn confirm_remove(
+        &mut self,
+        id: String,
+        name: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let weak = cx.entity().downgrade();
         window.open_alert_dialog(cx, move |alert, _, _| {
             let (weak, id) = (weak.clone(), id.clone());
-            alert.confirm().title(t!("ncai.confirmRemoveProvider", name = name.clone())).show_cancel(true).ok_text(t!("ncai.actionRemove")).cancel_text(t!("common.cancel")).on_ok(move |_, _, cx| {
-                let _ = weak.update(cx, |this, cx| this.remove_provider(&id, cx));
-                true
-            })
+            alert
+                .confirm()
+                .title(t!("ncai.confirmRemoveProvider", name = name.clone()))
+                .show_cancel(true)
+                .ok_text(t!("ncai.actionRemove"))
+                .cancel_text(t!("common.cancel"))
+                .on_ok(move |_, _, cx| {
+                    let _ = weak.update(cx, |this, cx| this.remove_provider(&id, cx));
+                    true
+                })
         });
     }
 
@@ -99,7 +145,17 @@ impl ProvidersTab {
             self.close_form(cx);
             return;
         }
-        let Some(provider) = self.store.read(cx).prefs().providers.iter().find(|p| p.id == id).cloned() else { return };
+        let Some(provider) = self
+            .store
+            .read(cx)
+            .prefs()
+            .providers
+            .iter()
+            .find(|p| p.id == id)
+            .cloned()
+        else {
+            return;
+        };
         let store = self.store.clone();
         let form = cx.new(|cx| ProviderForm::new(store, provider, window, cx));
         let sub = cx.subscribe(&form, |this, _, _: &FormClosed, cx| this.close_form(cx));
@@ -123,10 +179,14 @@ impl Render for ProvidersTab {
         let prefs = self.store.read(cx).prefs().clone();
         let weak = cx.entity().downgrade();
 
-        let add_button = Button::new("ai-provider-add").small().icon(Icon::new(IconName::Plus)).label(t!("ncai.providers.add")).on_click(cx.listener(|this, _, _, cx| {
-            this.add_open = !this.add_open;
-            cx.notify();
-        }));
+        let add_button = Button::new("ai-provider-add")
+            .small()
+            .icon(Icon::new(IconName::Plus))
+            .label(t!("ncai.providers.add"))
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.add_open = !this.add_open;
+                cx.notify();
+            }));
 
         let menu = self.add_open.then(|| {
             let w = weak.clone();
@@ -141,7 +201,11 @@ impl Render for ProvidersTab {
                 .py(px(4.))
                 .children(PROVIDER_PRESETS.iter().enumerate().map(|(ix, preset)| {
                     let (w, pid) = (w.clone(), preset.id);
-                    let proto = ProviderConfig { provider_id: preset.id.into(), name: preset.name.into(), ..Default::default() };
+                    let proto = ProviderConfig {
+                        provider_id: preset.id.into(),
+                        name: preset.name.into(),
+                        ..Default::default()
+                    };
                     h_flex()
                         .id(("ai-provider-menu-item", ix))
                         .test_support()
@@ -173,7 +237,11 @@ impl Render for ProvidersTab {
                 .border_1()
                 .border_dashed()
                 .border_color(ui_colors.border)
-                .child(Icon::new(IconName::Bot).size_6().text_color(ui_colors.text_muted))
+                .child(
+                    Icon::new(IconName::Bot)
+                        .size_6()
+                        .text_color(ui_colors.text_muted),
+                )
                 .child(ui::muted_text(t!("ncai.providers.empty"), cx))
                 .into_any_element()
         } else {
@@ -183,7 +251,8 @@ impl Render for ProvidersTab {
                     let active = p.id == prefs.active_provider_id;
                     let editing = self.editing.as_deref() == Some(p.id.as_str());
                     let has_key = p.api_key.as_deref().is_some_and(|k| !k.is_empty());
-                    let (id_edit, id_remove, id_toggle, name_remove) = (p.id.clone(), p.id.clone(), p.id.clone(), p.name.clone());
+                    let (id_edit, id_remove, id_toggle, name_remove) =
+                        (p.id.clone(), p.id.clone(), p.id.clone(), p.name.clone());
                     let (w1, w2) = (weak.clone(), weak.clone());
                     ui::list_card(active, cx)
                         .id(("ai-provider-card", ix))
@@ -197,37 +266,127 @@ impl Render for ProvidersTab {
                                     v_flex()
                                         .flex_1()
                                         .min_w_0()
-                                        .child(h_flex().gap(px(8.)).items_center().child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).truncate().child(p.name.clone())).when(active, |d| d.child(ui::pill(t!("ncai.providers.active"), ui_colors.primary))))
                                         .child(
                                             h_flex()
                                                 .gap(px(8.))
-                                                .child(ui::colored_text(if has_key { t!("ncai.providers.apiKeyConfigured") } else { t!("ncai.providers.noApiKey") }, if has_key { ui::green() } else { ui_colors.text_muted }))
-                                                .when_some(p.default_model.clone().filter(|m| !m.is_empty()), |d, m| d.child(div().text_size(px(12.)).text_color(ui_colors.text_muted).child("|")).child(div().text_size(px(12.)).text_color(ui_colors.text_muted).truncate().child(m))),
+                                                .items_center()
+                                                .child(
+                                                    div()
+                                                        .text_size(px(13.))
+                                                        .font_weight(FontWeight::SEMIBOLD)
+                                                        .truncate()
+                                                        .child(p.name.clone()),
+                                                )
+                                                .when(active, |d| {
+                                                    d.child(ui::pill(
+                                                        t!("ncai.providers.active"),
+                                                        ui_colors.primary,
+                                                    ))
+                                                }),
+                                        )
+                                        .child(
+                                            h_flex()
+                                                .gap(px(8.))
+                                                .child(ui::colored_text(
+                                                    if has_key {
+                                                        t!("ncai.providers.apiKeyConfigured")
+                                                    } else {
+                                                        t!("ncai.providers.noApiKey")
+                                                    },
+                                                    if has_key {
+                                                        ui::green()
+                                                    } else {
+                                                        ui_colors.text_muted
+                                                    },
+                                                ))
+                                                .when_some(
+                                                    p.default_model
+                                                        .clone()
+                                                        .filter(|m| !m.is_empty()),
+                                                    |d, m| {
+                                                        d.child(
+                                                            div()
+                                                                .text_size(px(12.))
+                                                                .text_color(ui_colors.text_muted)
+                                                                .child("|"),
+                                                        )
+                                                        .child(
+                                                            div()
+                                                                .text_size(px(12.))
+                                                                .text_color(ui_colors.text_muted)
+                                                                .truncate()
+                                                                .child(m),
+                                                        )
+                                                    },
+                                                ),
                                         ),
                                 )
                                 .child(
                                     h_flex()
                                         .gap(px(4.))
                                         .items_center()
-                                        .child(Button::new(("ai-provider-edit", ix)).ghost().small().icon(Icon::new(IconName::Pencil)).tooltip(t!("ncai.providers.configure")).on_click(cx.listener(move |this, _, window, cx| this.toggle_edit(&id_edit, window, cx))))
-                                        .child(Button::new(("ai-provider-remove", ix)).ghost().small().icon(Icon::new(IconName::Trash)).tooltip(t!("ncai.providers.remove")).on_click(move |_, window, cx| {
-                                            let (id, name) = (id_remove.clone(), name_remove.clone());
-                                            let _ = w1.update(cx, |this, cx| this.confirm_remove(id, name, window, cx));
-                                        }))
-                                        .child(ui::switch(("ai-provider-switch", ix), p.enabled, move |on, _, cx| {
-                                            let id = id_toggle.clone();
-                                            let _ = w2.update(cx, |this, cx| this.toggle_enabled(&id, on, cx));
-                                        })),
+                                        .child(
+                                            Button::new(("ai-provider-edit", ix))
+                                                .ghost()
+                                                .small()
+                                                .icon(Icon::new(IconName::Pencil))
+                                                .tooltip(t!("ncai.providers.configure"))
+                                                .on_click(cx.listener(
+                                                    move |this, _, window, cx| {
+                                                        this.toggle_edit(&id_edit, window, cx)
+                                                    },
+                                                )),
+                                        )
+                                        .child(
+                                            Button::new(("ai-provider-remove", ix))
+                                                .ghost()
+                                                .small()
+                                                .icon(Icon::new(IconName::Trash))
+                                                .tooltip(t!("ncai.providers.remove"))
+                                                .on_click(move |_, window, cx| {
+                                                    let (id, name) =
+                                                        (id_remove.clone(), name_remove.clone());
+                                                    let _ = w1.update(cx, |this, cx| {
+                                                        this.confirm_remove(id, name, window, cx)
+                                                    });
+                                                }),
+                                        )
+                                        .child(ui::switch(
+                                            ("ai-provider-switch", ix),
+                                            p.enabled,
+                                            move |on, _, cx| {
+                                                let id = id_toggle.clone();
+                                                let _ = w2.update(cx, |this, cx| {
+                                                    this.toggle_enabled(&id, on, cx)
+                                                });
+                                            },
+                                        )),
                                 ),
                         )
-                        .when(editing, |d| d.when_some(self.form.clone(), |d, f| d.child(f)))
+                        .when(editing, |d| {
+                            d.when_some(self.form.clone(), |d, f| d.child(f))
+                        })
                         .into_any_element()
                 }))
                 .into_any_element()
         };
 
         let _ = &theme;
-        v_flex().id("ai-providers-tab").test_support().gap(px(24.)).child(ui::section("ai-providers", t!("ncai.providers"), Some(add_button.into_any_element()), vec![menu.map(|m| m.into_any_element()).unwrap_or_else(|| div().into_any_element()), list], cx))
+        v_flex()
+            .id("ai-providers-tab")
+            .test_support()
+            .gap(px(24.))
+            .child(ui::section(
+                "ai-providers",
+                t!("ncai.providers"),
+                Some(add_button.into_any_element()),
+                vec![
+                    menu.map(|m| m.into_any_element())
+                        .unwrap_or_else(|| div().into_any_element()),
+                    list,
+                ],
+                cx,
+            ))
     }
 }
 
@@ -269,17 +428,36 @@ pub struct ProviderForm {
 impl EventEmitter<FormClosed> for ProviderForm {}
 
 fn style_choices(resolved: &str) -> Vec<Choice> {
-    let mut v = vec![Choice::new("", format!("{} ({})", t!("ncai.providers.style.inherited"), t!(&format!("ncai.providers.style.{resolved}"))))];
-    v.extend(provider::STYLES.iter().map(|s| Choice::new(*s, t!(&format!("ncai.providers.style.{s}")))));
+    let mut v = vec![Choice::new(
+        "",
+        format!(
+            "{} ({})",
+            t!("ncai.providers.style.inherited"),
+            t!(&format!("ncai.providers.style.{resolved}"))
+        ),
+    )];
+    v.extend(
+        provider::STYLES
+            .iter()
+            .map(|s| Choice::new(*s, t!(&format!("ncai.providers.style.{s}")))),
+    );
     v
 }
 
 fn api_choices() -> Vec<Choice> {
-    vec![Choice::new("chat", t!("ncai.providers.openaiApi.chat")), Choice::new("responses", t!("ncai.providers.openaiApi.responses"))]
+    vec![
+        Choice::new("chat", t!("ncai.providers.openaiApi.chat")),
+        Choice::new("responses", t!("ncai.providers.openaiApi.responses")),
+    ]
 }
 
 fn reasoning_choices() -> Vec<Choice> {
-    vec![Choice::new("", t!("ncai.providers.advancedParams.default")), Choice::new("low", "Low"), Choice::new("medium", "Medium"), Choice::new("high", "High")]
+    vec![
+        Choice::new("", t!("ncai.providers.advancedParams.default")),
+        Choice::new("low", "Low"),
+        Choice::new("medium", "Medium"),
+        Choice::new("high", "High"),
+    ]
 }
 
 fn fmt_num(v: Option<f64>) -> String {
@@ -289,51 +467,131 @@ fn fmt_num(v: Option<f64>) -> String {
 /// `HeaderRow` validation: token names, no duplicates, none the app sets itself.
 pub fn headers_valid(rows: &[(String, String)]) -> bool {
     let mut seen = std::collections::HashSet::new();
-    rows.iter().filter(|(n, v)| !(n.trim().is_empty() && v.trim().is_empty())).all(|(name, _)| {
-        let n = name.trim();
-        let token = !n.is_empty() && n.chars().all(|c| c.is_ascii_alphanumeric() || "!#$%&'*+.^_`|~-".contains(c));
-        let reserved = matches!(n.to_ascii_lowercase().as_str(), "content-length" | "transfer-encoding");
-        token && !reserved && seen.insert(n.to_ascii_lowercase())
-    })
+    rows.iter()
+        .filter(|(n, v)| !(n.trim().is_empty() && v.trim().is_empty()))
+        .all(|(name, _)| {
+            let n = name.trim();
+            let token = !n.is_empty()
+                && n.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "!#$%&'*+.^_`|~-".contains(c));
+            let reserved = matches!(
+                n.to_ascii_lowercase().as_str(),
+                "content-length" | "transfer-encoding"
+            );
+            token && !reserved && seen.insert(n.to_ascii_lowercase())
+        })
 }
 
 impl ProviderForm {
-    pub fn new(store: Entity<PrefsStore>, p: ProviderConfig, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        store: Entity<PrefsStore>,
+        p: ProviderConfig,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let resolved = provider::resolve_style(&p);
-        let name = cx.new(|cx| InputState::new(window, cx).placeholder(t!("ncai.providers.name.placeholder")));
-        let style = cx.new(|cx| new_select(style_choices(resolved), p.style.as_deref().unwrap_or(""), window, cx));
-        let openai_api = cx.new(|cx| new_select(api_choices(), provider::resolve_openai_api(&p), window, cx));
-        let api_key = cx.new(|cx| InputState::new(window, cx).placeholder(t!("ncai.providers.apiKey.placeholder")).masked(true));
+        let name = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t!("ncai.providers.name.placeholder"))
+        });
+        let style = cx.new(|cx| {
+            new_select(
+                style_choices(resolved),
+                p.style.as_deref().unwrap_or(""),
+                window,
+                cx,
+            )
+        });
+        let openai_api =
+            cx.new(|cx| new_select(api_choices(), provider::resolve_openai_api(&p), window, cx));
+        let api_key = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("ncai.providers.apiKey.placeholder"))
+                .masked(true)
+        });
         let preset = provider::preset(&p.provider_id);
-        let base_url = cx.new(|cx| InputState::new(window, cx).placeholder(preset.map(|x| x.base_url).filter(|u| !u.is_empty()).unwrap_or("https://api.example.com/v1")));
-        let model = cx.new(|cx| InputState::new(window, cx).placeholder(t!("ncai.providers.defaultModel.placeholder")));
+        let base_url = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(
+                preset
+                    .map(|x| x.base_url)
+                    .filter(|u| !u.is_empty())
+                    .unwrap_or("https://api.example.com/v1"),
+            )
+        });
+        let model = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t!("ncai.providers.defaultModel.placeholder"))
+        });
         let model_pick = cx.new(|cx| new_select(Vec::new(), "", window, cx));
-        let context_window = cx.new(|cx| InputState::new(window, cx).placeholder(t!("ncai.providers.contextWindow.placeholder")));
-        let max_tokens = cx.new(|cx| InputState::new(window, cx).placeholder(t!("ncai.providers.advancedParams.maxTokens.placeholder")));
+        let context_window = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t!("ncai.providers.contextWindow.placeholder"))
+        });
+        let max_tokens = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("ncai.providers.advancedParams.maxTokens.placeholder"))
+        });
         let temperature = cx.new(|cx| InputState::new(window, cx).placeholder("0 – 2"));
         let top_p = cx.new(|cx| InputState::new(window, cx).placeholder("0 – 1"));
         let frequency_penalty = cx.new(|cx| InputState::new(window, cx).placeholder("-2 – 2"));
         let presence_penalty = cx.new(|cx| InputState::new(window, cx).placeholder("-2 – 2"));
         let advanced = p.advanced_params.clone().unwrap_or_default();
-        let reasoning = cx.new(|cx| new_select(reasoning_choices(), advanced.reasoning_effort.as_deref().unwrap_or(""), window, cx));
+        let reasoning = cx.new(|cx| {
+            new_select(
+                reasoning_choices(),
+                advanced.reasoning_effort.as_deref().unwrap_or(""),
+                window,
+                cx,
+            )
+        });
 
         name.update(cx, |s, cx| s.set_value(p.name.clone(), window, cx));
-        api_key.update(cx, |s, cx| s.set_value(p.api_key.clone().unwrap_or_default(), window, cx));
-        base_url.update(cx, |s, cx| s.set_value(p.base_url.clone().unwrap_or_default(), window, cx));
-        model.update(cx, |s, cx| s.set_value(p.default_model.clone().unwrap_or_default(), window, cx));
-        context_window.update(cx, |s, cx| s.set_value(p.context_window.map(|c| c.to_string()).unwrap_or_default(), window, cx));
-        max_tokens.update(cx, |s, cx| s.set_value(advanced.max_tokens.map(|n| n.to_string()).unwrap_or_default(), window, cx));
-        temperature.update(cx, |s, cx| s.set_value(fmt_num(advanced.temperature), window, cx));
+        api_key.update(cx, |s, cx| {
+            s.set_value(p.api_key.clone().unwrap_or_default(), window, cx)
+        });
+        base_url.update(cx, |s, cx| {
+            s.set_value(p.base_url.clone().unwrap_or_default(), window, cx)
+        });
+        model.update(cx, |s, cx| {
+            s.set_value(p.default_model.clone().unwrap_or_default(), window, cx)
+        });
+        context_window.update(cx, |s, cx| {
+            s.set_value(
+                p.context_window.map(|c| c.to_string()).unwrap_or_default(),
+                window,
+                cx,
+            )
+        });
+        max_tokens.update(cx, |s, cx| {
+            s.set_value(
+                advanced
+                    .max_tokens
+                    .map(|n| n.to_string())
+                    .unwrap_or_default(),
+                window,
+                cx,
+            )
+        });
+        temperature.update(cx, |s, cx| {
+            s.set_value(fmt_num(advanced.temperature), window, cx)
+        });
         top_p.update(cx, |s, cx| s.set_value(fmt_num(advanced.top_p), window, cx));
-        frequency_penalty.update(cx, |s, cx| s.set_value(fmt_num(advanced.frequency_penalty), window, cx));
-        presence_penalty.update(cx, |s, cx| s.set_value(fmt_num(advanced.presence_penalty), window, cx));
+        frequency_penalty.update(cx, |s, cx| {
+            s.set_value(fmt_num(advanced.frequency_penalty), window, cx)
+        });
+        presence_penalty.update(cx, |s, cx| {
+            s.set_value(fmt_num(advanced.presence_penalty), window, cx)
+        });
 
         let headers = p
             .custom_headers
             .iter()
             .map(|(n, v)| {
-                let name_input = cx.new(|cx| InputState::new(window, cx).placeholder(t!("ncai.providers.headers.name")));
-                let value_input = cx.new(|cx| InputState::new(window, cx).placeholder(t!("ncai.providers.headers.value")).masked(true));
+                let name_input = cx.new(|cx| {
+                    InputState::new(window, cx).placeholder(t!("ncai.providers.headers.name"))
+                });
+                let value_input = cx.new(|cx| {
+                    InputState::new(window, cx)
+                        .placeholder(t!("ncai.providers.headers.value"))
+                        .masked(true)
+                });
                 name_input.update(cx, |s, cx| s.set_value(n.clone(), window, cx));
                 value_input.update(cx, |s, cx| s.set_value(v.clone(), window, cx));
                 (name_input, value_input)
@@ -423,7 +681,11 @@ impl ProviderForm {
     }
 
     fn style_value(&self, cx: &App) -> Option<String> {
-        self.style.read(cx).selected_value().cloned().filter(|s: &String| !s.is_empty())
+        self.style
+            .read(cx)
+            .selected_value()
+            .cloned()
+            .filter(|s: &String| !s.is_empty())
     }
 
     fn refresh_style_labels(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -445,7 +707,8 @@ impl ProviderForm {
             }
         }
         let choices: Vec<Choice> = ids.into_iter().map(|m| Choice::new(m.clone(), m)).collect();
-        self.model_pick.update(cx, |s, cx| s.set_items(choices, window, cx));
+        self.model_pick
+            .update(cx, |s, cx| s.set_items(choices, window, cx));
     }
 
     /// The provider as the form currently describes it (nothing is validated or stored).
@@ -459,11 +722,26 @@ impl ProviderForm {
         p.base_url = opt(text(&self.base_url));
         p.default_model = opt(text(&self.model));
         p.skip_tls_verify = self.skip_tls;
-        p.context_window = provider::sanitize_context_window(&text(&self.context_window)).ok().flatten();
+        p.context_window = provider::sanitize_context_window(&text(&self.context_window))
+            .ok()
+            .flatten();
         p.model_context_windows = self.context_windows.clone();
         let resolved_style = provider::resolve_style(&p);
-        p.openai_api = (resolved_style == "openai").then(|| self.openai_api.read(cx).selected_value().cloned().unwrap_or_else(|| "chat".into())).filter(|a| a == "responses");
-        p.custom_headers = self.headers.iter().map(|(n, v)| (text(n), v.read(cx).value().to_string())).filter(|(n, v)| !(n.is_empty() && v.trim().is_empty())).collect();
+        p.openai_api = (resolved_style == "openai")
+            .then(|| {
+                self.openai_api
+                    .read(cx)
+                    .selected_value()
+                    .cloned()
+                    .unwrap_or_else(|| "chat".into())
+            })
+            .filter(|a| a == "responses");
+        p.custom_headers = self
+            .headers
+            .iter()
+            .map(|(n, v)| (text(n), v.read(cx).value().to_string()))
+            .filter(|(n, v)| !(n.is_empty() && v.trim().is_empty()))
+            .collect();
         let num = |i: &Entity<InputState>| text(i).parse::<f64>().ok();
         let advanced = AdvancedParams {
             max_tokens: text(&self.max_tokens).parse::<u32>().ok(),
@@ -471,7 +749,12 @@ impl ProviderForm {
             top_p: num(&self.top_p),
             frequency_penalty: num(&self.frequency_penalty),
             presence_penalty: num(&self.presence_penalty),
-            reasoning_effort: self.reasoning.read(cx).selected_value().cloned().filter(|r: &String| !r.is_empty()),
+            reasoning_effort: self
+                .reasoning
+                .read(cx)
+                .selected_value()
+                .cloned()
+                .filter(|r: &String| !r.is_empty()),
         }
         .clamped();
         p.advanced_params = Some(advanced).filter(|a| !a.is_empty());
@@ -479,8 +762,13 @@ impl ProviderForm {
     }
 
     pub fn add_header(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let n = cx.new(|cx| InputState::new(window, cx).placeholder(t!("ncai.providers.headers.name")));
-        let v = cx.new(|cx| InputState::new(window, cx).placeholder(t!("ncai.providers.headers.value")).masked(true));
+        let n =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ncai.providers.headers.name")));
+        let v = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder(t!("ncai.providers.headers.value"))
+                .masked(true)
+        });
         self.headers.push((n, v));
         cx.notify();
     }
@@ -506,7 +794,9 @@ impl ProviderForm {
         self.status = None;
         cx.notify();
         cx.spawn_in(window, async move |this, cx| {
-            let result = ops_core::rt::run(async move { provider::discover_models(&draft).await }).await.and_then(|r| r);
+            let result = ops_core::rt::run(async move { provider::discover_models(&draft).await })
+                .await
+                .and_then(|r| r);
             let _ = this.update_in(cx, |this, window, cx| {
                 this.fetching = false;
                 match result {
@@ -543,10 +833,25 @@ impl ProviderForm {
                 this.testing = false;
                 this.status = Some(match result {
                     Ok(r) => match r.health {
-                        ProbeHealth::Ok => (ProbeHealth::Ok, t!("ncai.providers.test.ok", latency = r.latency_ms)),
-                        ProbeHealth::Warn if r.model_count == Some(0) || r.error.is_some() => (ProbeHealth::Warn, t!("ncai.providers.test.warn", latency = r.latency_ms)),
-                        ProbeHealth::Warn => (ProbeHealth::Warn, t!("ncai.providers.test.warnSlow", latency = r.latency_ms)),
-                        ProbeHealth::Error => (ProbeHealth::Error, t!("ncai.providers.test.error", detail = r.error.unwrap_or_default())),
+                        ProbeHealth::Ok => (
+                            ProbeHealth::Ok,
+                            t!("ncai.providers.test.ok", latency = r.latency_ms),
+                        ),
+                        ProbeHealth::Warn if r.model_count == Some(0) || r.error.is_some() => (
+                            ProbeHealth::Warn,
+                            t!("ncai.providers.test.warn", latency = r.latency_ms),
+                        ),
+                        ProbeHealth::Warn => (
+                            ProbeHealth::Warn,
+                            t!("ncai.providers.test.warnSlow", latency = r.latency_ms),
+                        ),
+                        ProbeHealth::Error => (
+                            ProbeHealth::Error,
+                            t!(
+                                "ncai.providers.test.error",
+                                detail = r.error.unwrap_or_default()
+                            ),
+                        ),
                     },
                     Err(_) => (ProbeHealth::Error, t!("ncai.providers.test.unavailable")),
                 });
@@ -565,7 +870,11 @@ impl ProviderForm {
             cx.notify();
             return false;
         }
-        let rows: Vec<(String, String)> = self.headers.iter().map(|(n, v)| (text(n), v.read(cx).value().to_string())).collect();
+        let rows: Vec<(String, String)> = self
+            .headers
+            .iter()
+            .map(|(n, v)| (text(n), v.read(cx).value().to_string()))
+            .collect();
         if !headers_valid(&rows) {
             self.error = Some(t!("ncai.providers.headers.invalid"));
             cx.notify();
@@ -573,10 +882,14 @@ impl ProviderForm {
         }
         let mut draft = self.draft(cx);
         if draft.name.is_empty() {
-            draft.name = provider::preset(&draft.provider_id).map(|p| p.name.to_string()).unwrap_or_else(|| "Custom".into());
+            draft.name = provider::preset(&draft.provider_id)
+                .map(|p| p.name.to_string())
+                .unwrap_or_else(|| "Custom".into());
         }
         if draft.provider_id == "ollama" {
-            draft.base_url = draft.base_url.map(|u| provider::normalize_ollama_base_url(&u));
+            draft.base_url = draft
+                .base_url
+                .map(|u| provider::normalize_ollama_base_url(&u));
         }
         let id = draft.id.clone();
         self.store.update(cx, |s, cx| {
@@ -634,11 +947,27 @@ impl Render for ProviderForm {
                     .test_support()
                     .gap(px(6.))
                     .items_center()
-                    .child(div().w(px(180.)).child(gpui_kit::component::input::Input::new(n)))
-                    .child(div().flex_1().min_w_0().child(gpui_kit::component::input::Input::new(v).mask_toggle()))
-                    .child(Button::new(("ai-header-remove", ix)).ghost().xsmall().icon(Icon::new(IconName::X)).tooltip(t!("ncai.providers.headers.remove")).on_click(move |_, _, cx| {
-                        let _ = w.update(cx, |this, cx| this.remove_header(ix, cx));
-                    }))
+                    .child(
+                        div()
+                            .w(px(180.))
+                            .child(gpui_kit::component::input::Input::new(n)),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(gpui_kit::component::input::Input::new(v).mask_toggle()),
+                    )
+                    .child(
+                        Button::new(("ai-header-remove", ix))
+                            .ghost()
+                            .xsmall()
+                            .icon(Icon::new(IconName::X))
+                            .tooltip(t!("ncai.providers.headers.remove"))
+                            .on_click(move |_, _, cx| {
+                                let _ = w.update(cx, |this, cx| this.remove_header(ix, cx));
+                            }),
+                    )
                     .into_any_element()
             })
             .collect();
@@ -653,8 +982,22 @@ impl Render for ProviderForm {
                     .gap(px(6.))
                     .items_center()
                     .cursor_pointer()
-                    .child(Icon::new(if advanced_open { IconName::ChevronDown } else { IconName::ChevronRight }).size_3p5().text_color(ui_colors.text_muted))
-                    .child(div().text_size(px(12.)).font_weight(FontWeight::MEDIUM).text_color(ui_colors.text_secondary).child(t!("ncai.providers.advancedParams")))
+                    .child(
+                        Icon::new(if advanced_open {
+                            IconName::ChevronDown
+                        } else {
+                            IconName::ChevronRight
+                        })
+                        .size_3p5()
+                        .text_color(ui_colors.text_muted),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(ui_colors.text_secondary)
+                            .child(t!("ncai.providers.advancedParams")),
+                    )
                     .on_click(cx.listener(|this, _, _, cx| {
                         this.advanced_open = !this.advanced_open;
                         cx.notify();
@@ -666,12 +1009,37 @@ impl Render for ProviderForm {
                         h_flex()
                             .gap(px(8.))
                             .flex_wrap()
-                            .child(ui::stacked("max_tokens", None, ui::input(&self.max_tokens, 140.), cx))
-                            .child(ui::stacked("temperature", None, ui::input(&self.temperature, 120.), cx))
+                            .child(ui::stacked(
+                                "max_tokens",
+                                None,
+                                ui::input(&self.max_tokens, 140.),
+                                cx,
+                            ))
+                            .child(ui::stacked(
+                                "temperature",
+                                None,
+                                ui::input(&self.temperature, 120.),
+                                cx,
+                            ))
                             .child(ui::stacked("top_p", None, ui::input(&self.top_p, 120.), cx))
-                            .child(ui::stacked("frequency_penalty", None, ui::input(&self.frequency_penalty, 140.), cx))
-                            .child(ui::stacked("presence_penalty", None, ui::input(&self.presence_penalty, 140.), cx))
-                            .child(ui::stacked("reasoning_effort", None, div().w(px(160.)).child(Select::new(&self.reasoning)), cx)),
+                            .child(ui::stacked(
+                                "frequency_penalty",
+                                None,
+                                ui::input(&self.frequency_penalty, 140.),
+                                cx,
+                            ))
+                            .child(ui::stacked(
+                                "presence_penalty",
+                                None,
+                                ui::input(&self.presence_penalty, 140.),
+                                cx,
+                            ))
+                            .child(ui::stacked(
+                                "reasoning_effort",
+                                None,
+                                div().w(px(160.)).child(Select::new(&self.reasoning)),
+                                cx,
+                            )),
                     )
             });
 
@@ -681,7 +1049,10 @@ impl Render for ProviderForm {
                 ProbeHealth::Warn => ui::amber(),
                 ProbeHealth::Error => theme.danger,
             };
-            div().id("ai-provider-status").test_support().child(ui::colored_text(text, color))
+            div()
+                .id("ai-provider-status")
+                .test_support()
+                .child(ui::colored_text(text, color))
         });
 
         v_flex()
@@ -691,28 +1062,79 @@ impl Render for ProviderForm {
             .pt(px(12.))
             .border_t_1()
             .border_color(ui_colors.border)
-            .child(ui::stacked(t!("ncai.providers.name"), None, gpui_kit::component::input::Input::new(&self.name), cx))
+            .child(ui::stacked(
+                t!("ncai.providers.name"),
+                None,
+                gpui_kit::component::input::Input::new(&self.name),
+                cx,
+            ))
             .child(
                 h_flex()
                     .gap(px(12.))
                     .items_start()
-                    .child(div().flex_1().min_w_0().child(ui::stacked(t!("ncai.providers.style"), Some(t!("ncai.providers.style.help")), Select::new(&self.style), cx)))
-                    .when(style == "openai", |d| d.child(div().flex_1().min_w_0().child(ui::stacked(t!("ncai.providers.openaiApi"), Some(t!("ncai.providers.openaiApi.help")), Select::new(&self.openai_api), cx)))),
+                    .child(div().flex_1().min_w_0().child(ui::stacked(
+                        t!("ncai.providers.style"),
+                        Some(t!("ncai.providers.style.help")),
+                        Select::new(&self.style),
+                        cx,
+                    )))
+                    .when(style == "openai", |d| {
+                        d.child(div().flex_1().min_w_0().child(ui::stacked(
+                            t!("ncai.providers.openaiApi"),
+                            Some(t!("ncai.providers.openaiApi.help")),
+                            Select::new(&self.openai_api),
+                            cx,
+                        )))
+                    }),
             )
-            .child(ui::stacked(t!("ncai.providers.apiKey"), None, gpui_kit::component::input::Input::new(&self.api_key).mask_toggle(), cx))
-            .child(ui::stacked(t!("ncai.providers.baseUrl"), base_help, gpui_kit::component::input::Input::new(&self.base_url), cx))
+            .child(ui::stacked(
+                t!("ncai.providers.apiKey"),
+                None,
+                gpui_kit::component::input::Input::new(&self.api_key).mask_toggle(),
+                cx,
+            ))
+            .child(ui::stacked(
+                t!("ncai.providers.baseUrl"),
+                base_help,
+                gpui_kit::component::input::Input::new(&self.base_url),
+                cx,
+            ))
             .child(ui::stacked(
                 t!("ncai.providers.defaultModel"),
                 None,
                 h_flex()
                     .gap(px(8.))
                     .items_center()
-                    .child(div().flex_1().min_w_0().child(gpui_kit::component::input::Input::new(&self.model)))
-                    .child(div().w(px(200.)).child(Select::new(&self.model_pick).placeholder(t!("ncai.providers.clickToLoadModels"))))
-                    .child(Button::new("ai-provider-fetch").small().icon(Icon::new(IconName::RefreshCw)).tooltip(t!("ncai.providers.refreshModels")).loading(self.fetching).on_click(cx.listener(|this, _, window, cx| this.fetch_models(window, cx)))),
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(gpui_kit::component::input::Input::new(&self.model)),
+                    )
+                    .child(
+                        div().w(px(200.)).child(
+                            Select::new(&self.model_pick)
+                                .placeholder(t!("ncai.providers.clickToLoadModels")),
+                        ),
+                    )
+                    .child(
+                        Button::new("ai-provider-fetch")
+                            .small()
+                            .icon(Icon::new(IconName::RefreshCw))
+                            .tooltip(t!("ncai.providers.refreshModels"))
+                            .loading(self.fetching)
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.fetch_models(window, cx)),
+                            ),
+                    ),
                 cx,
             ))
-            .child(ui::stacked(t!("ncai.providers.contextWindow"), Some(t!("ncai.providers.contextWindow.help")), ui::input(&self.context_window, 200.), cx))
+            .child(ui::stacked(
+                t!("ncai.providers.contextWindow"),
+                Some(t!("ncai.providers.contextWindow.help")),
+                ui::input(&self.context_window, 200.),
+                cx,
+            ))
             .child(
                 h_flex()
                     .gap(px(10.))
@@ -723,28 +1145,75 @@ impl Render for ProviderForm {
                             let _ = w.update(cx, |this, cx| this.set_skip_tls(on, cx));
                         }
                     }))
-                    .child(div().text_size(px(12.)).text_color(ui_colors.text_secondary).child(t!("ncai.providers.skipTLSVerify"))),
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .text_color(ui_colors.text_secondary)
+                            .child(t!("ncai.providers.skipTLSVerify")),
+                    ),
             )
             .child(
                 v_flex()
                     .gap(px(6.))
-                    .child(div().text_size(px(12.)).font_weight(FontWeight::MEDIUM).text_color(ui_colors.text_secondary).child(t!("ncai.providers.headers")))
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(ui_colors.text_secondary)
+                            .child(t!("ncai.providers.headers")),
+                    )
                     .child(ui::muted_text(t!("ncai.providers.headers.help"), cx))
                     .children(header_rows)
-                    .child(h_flex().child(Button::new("ai-header-add").small().icon(Icon::new(IconName::Plus)).label(t!("ncai.providers.headers.add")).on_click(cx.listener(|this, _, window, cx| this.add_header(window, cx))))),
+                    .child(
+                        h_flex().child(
+                            Button::new("ai-header-add")
+                                .small()
+                                .icon(Icon::new(IconName::Plus))
+                                .label(t!("ncai.providers.headers.add"))
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| this.add_header(window, cx)),
+                                ),
+                        ),
+                    ),
             )
             .child(advanced)
-            .when_some(self.error.clone(), |d, e| d.child(ui::colored_text(e, theme.danger)))
+            .when_some(self.error.clone(), |d, e| {
+                d.child(ui::colored_text(e, theme.danger))
+            })
             .when_some(status, |d, s| d.child(s))
             .child(
                 h_flex()
                     .gap(px(8.))
                     .justify_end()
-                    .child(Button::new("ai-provider-test").small().icon(Icon::new(IconName::Zap)).label(if self.testing { t!("ncai.providers.test.testing") } else { t!("ncai.providers.test") }).disabled(self.testing).on_click(cx.listener(|this, _, window, cx| this.test_connection(window, cx))))
-                    .child(Button::new("ai-provider-cancel").small().label(t!("common.cancel")).on_click(cx.listener(|this, _, _, cx| this.cancel(cx))))
-                    .child(Button::new("ai-provider-save").small().primary().label(t!("common.save")).on_click(cx.listener(|this, _, _, cx| {
-                        this.save(cx);
-                    }))),
+                    .child(
+                        Button::new("ai-provider-test")
+                            .small()
+                            .icon(Icon::new(IconName::Zap))
+                            .label(if self.testing {
+                                t!("ncai.providers.test.testing")
+                            } else {
+                                t!("ncai.providers.test")
+                            })
+                            .disabled(self.testing)
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.test_connection(window, cx)),
+                            ),
+                    )
+                    .child(
+                        Button::new("ai-provider-cancel")
+                            .small()
+                            .label(t!("common.cancel"))
+                            .on_click(cx.listener(|this, _, _, cx| this.cancel(cx))),
+                    )
+                    .child(
+                        Button::new("ai-provider-save")
+                            .small()
+                            .primary()
+                            .label(t!("common.save"))
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.save(cx);
+                            })),
+                    ),
             )
     }
 }
@@ -754,12 +1223,17 @@ mod tests {
     use super::headers_valid;
 
     fn rows(v: &[(&str, &str)]) -> Vec<(String, String)> {
-        v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect()
+        v.iter()
+            .map(|(a, b)| (a.to_string(), b.to_string()))
+            .collect()
     }
 
     #[test]
     fn header_rows_are_validated() {
-        assert!(headers_valid(&rows(&[("X-Org", "1"), ("Authorization-Extra", "2")])));
+        assert!(headers_valid(&rows(&[
+            ("X-Org", "1"),
+            ("Authorization-Extra", "2")
+        ])));
         assert!(headers_valid(&rows(&[("", ""), ("X-A", "v")])));
         assert!(!headers_valid(&rows(&[("X-A", "1"), ("x-a", "2")])));
         assert!(!headers_valid(&rows(&[("Content-Length", "1")])));

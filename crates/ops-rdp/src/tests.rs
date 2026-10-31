@@ -497,35 +497,63 @@ fn rdp_connector_attaches_the_drive_channel_for_a_shared_folder() {
     let mut options = test_rdp_options(false, false);
     options.disk_path = Some(folder.clone());
     let config = build_ironrdp_config(&options, &test_rdp_credentials()).unwrap();
-    let connector = build_client_connector(config, "127.0.0.1:50000".parse().unwrap(), &options).unwrap();
-    assert_eq!(rdp_static_channel_names(&connector), vec!["rdpdr".to_string()]);
+    let connector =
+        build_client_connector(config, "127.0.0.1:50000".parse().unwrap(), &options).unwrap();
+    assert_eq!(
+        rdp_static_channel_names(&connector),
+        vec!["rdpdr".to_string()]
+    );
     let _ = std::fs::remove_dir_all(&folder);
 }
 
 #[test]
 fn rdp_connector_refuses_a_shared_folder_that_does_not_exist() {
     let mut options = test_rdp_options(false, false);
-    options.disk_path = Some(std::env::temp_dir().join(format!("opsbatch-rdp-missing-{}", uuid::Uuid::new_v4())));
+    options.disk_path =
+        Some(std::env::temp_dir().join(format!("opsbatch-rdp-missing-{}", uuid::Uuid::new_v4())));
     let config = build_ironrdp_config(&options, &test_rdp_credentials()).unwrap();
-    let error = build_client_connector(config, "127.0.0.1:50000".parse().unwrap(), &options).err().expect("a missing folder stops the connection");
+    let error = build_client_connector(config, "127.0.0.1:50000".parse().unwrap(), &options)
+        .err()
+        .expect("a missing folder stops the connection");
     assert!(error.contains("共享目录不可用"), "{error}");
 }
 
 #[test]
 fn a_shared_folder_needs_map_disk_and_a_path() {
     let share = |map_disk: Option<bool>, disk_path: Option<&str>| {
-        shared_folder(&StoredRdpSettings { map_disk, disk_path: disk_path.map(str::to_string), ..StoredRdpSettings::default() })
+        shared_folder(&StoredRdpSettings {
+            map_disk,
+            disk_path: disk_path.map(str::to_string),
+            ..StoredRdpSettings::default()
+        })
     };
-    assert_eq!(share(Some(true), Some(" /tmp/share ")), Some(std::path::PathBuf::from("/tmp/share")));
+    assert_eq!(
+        share(Some(true), Some(" /tmp/share ")),
+        Some(std::path::PathBuf::from("/tmp/share"))
+    );
     assert_eq!(share(Some(false), Some("/tmp/share")), None, "switched off");
     assert_eq!(share(None, Some("/tmp/share")), None);
-    assert_eq!(share(Some(true), None), None, "switched on without a folder shares nothing");
+    assert_eq!(
+        share(Some(true), None),
+        None,
+        "switched on without a folder shares nothing"
+    );
     assert_eq!(share(Some(true), Some("   ")), None);
     if let Some(home) = std::env::var_os("HOME") {
-        assert_eq!(share(Some(true), Some("~/Share")), Some(std::path::PathBuf::from(&home).join("Share")));
-        assert_eq!(share(Some(true), Some("~")), Some(std::path::PathBuf::from(home).join("")));
+        assert_eq!(
+            share(Some(true), Some("~/Share")),
+            Some(std::path::PathBuf::from(&home).join("Share"))
+        );
+        assert_eq!(
+            share(Some(true), Some("~")),
+            Some(std::path::PathBuf::from(home).join(""))
+        );
     }
-    assert_eq!(share(Some(true), Some("~other/x")), Some(std::path::PathBuf::from("~other/x")), "only the own home folder expands");
+    assert_eq!(
+        share(Some(true), Some("~other/x")),
+        Some(std::path::PathBuf::from("~other/x")),
+        "only the own home folder expands"
+    );
 }
 
 #[test]
@@ -693,18 +721,53 @@ fn queued_mouse_moves_collapse_to_the_last_one_of_each_run() {
         moved(1),
         moved(2),
         moved(3),
-        MouseButton { x: 3, y: 1, button: 0, down: true },
+        MouseButton {
+            x: 3,
+            y: 1,
+            button: 0,
+            down: true,
+        },
         moved(4),
         moved(5),
-        KeyScancode { code: 0x1e, extended: false, down: true },
+        KeyScancode {
+            code: 0x1e,
+            extended: false,
+            down: true,
+        },
         moved(6),
     ];
     assert_eq!(
         collapse_mouse_moves(events),
-        vec![moved(3), MouseButton { x: 3, y: 1, button: 0, down: true }, moved(5), KeyScancode { code: 0x1e, extended: false, down: true }, moved(6)]
+        vec![
+            moved(3),
+            MouseButton {
+                x: 3,
+                y: 1,
+                button: 0,
+                down: true
+            },
+            moved(5),
+            KeyScancode {
+                code: 0x1e,
+                extended: false,
+                down: true
+            },
+            moved(6)
+        ]
     );
     // wheel notches and key presses are never merged
-    let keys = vec![KeyScancode { code: 1, extended: false, down: true }, KeyScancode { code: 1, extended: false, down: true }];
+    let keys = vec![
+        KeyScancode {
+            code: 1,
+            extended: false,
+            down: true,
+        },
+        KeyScancode {
+            code: 1,
+            extended: false,
+            down: true,
+        },
+    ];
     assert_eq!(collapse_mouse_moves(keys.clone()), keys);
     assert!(collapse_mouse_moves(Vec::new()).is_empty());
 }

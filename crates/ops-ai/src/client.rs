@@ -1,6 +1,6 @@
+use futures_util::StreamExt;
 use ops_core::db::Database;
 use ops_core::security::SECRET_PLACEHOLDER;
-use futures_util::StreamExt;
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 
@@ -14,7 +14,9 @@ pub struct AiConfig {
 }
 
 /// Cancellation flags of in-flight streams, keyed by conversation id.
-static ACTIVE_STREAMS: std::sync::LazyLock<dashmap::DashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>> = std::sync::LazyLock::new(dashmap::DashMap::new);
+static ACTIVE_STREAMS: std::sync::LazyLock<
+    dashmap::DashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>,
+> = std::sync::LazyLock::new(dashmap::DashMap::new);
 
 /// Removes the registration when the stream function returns, whatever the path.
 struct StreamRegistration(String);
@@ -204,10 +206,7 @@ pub async fn get_ai_config(db: &Database) -> Result<AiConfig, String> {
     })
 }
 
-pub async fn save_ai_config(
-    db: &Database,
-    config: AiConfig,
-) -> Result<(), String> {
+pub async fn save_ai_config(db: &Database, config: AiConfig) -> Result<(), String> {
     save_ai_config_blocking(db, config)
 }
 
@@ -217,10 +216,7 @@ pub fn load_ai_config_for_prefs(db: &Database) -> Result<AiConfig, String> {
 }
 
 /// Synchronous body of [`save_ai_config`] (nothing in it awaits).
-pub fn save_ai_config_blocking(
-    db: &Database,
-    config: AiConfig,
-) -> Result<(), String> {
+pub fn save_ai_config_blocking(db: &Database, config: AiConfig) -> Result<(), String> {
     // Determine the real API key
     let real_key = if config.provider == "ollama" {
         String::new()
@@ -686,13 +682,14 @@ fn load_enabled_danger_patterns(db: &Database) -> Result<Vec<String>, String> {
     Ok(patterns)
 }
 
-pub fn ai_assess_action(
-    db: &Database,
-    command: String,
-) -> Result<AiActionAssessment, String> {
+pub fn ai_assess_action(db: &Database, command: String) -> Result<AiActionAssessment, String> {
     let custom_patterns = load_enabled_danger_patterns(&db)?;
     let assessment = assess_ai_action(&command, &custom_patterns);
-    Ok(apply_prefs_policy(assessment, &command, &crate::prefs::runtime_limits(db)))
+    Ok(apply_prefs_policy(
+        assessment,
+        &command,
+        &crate::prefs::runtime_limits(db),
+    ))
 }
 
 /// Layers the AI safety settings over the built-in assessment: observer mode refuses everything, the command
@@ -726,13 +723,28 @@ pub fn apply_prefs_policy(
             ..assessment
         };
     }
-    if assessment.decision == AiActionDecision::Confirm && assessment.risk_level <= AiActionRiskLevel::Low {
-        let ctx = MatchContext { capability_id: "terminal.execute".into(), args: std::collections::BTreeMap::from([("command".to_string(), command.trim().to_string())]), ..Default::default() };
+    if assessment.decision == AiActionDecision::Confirm
+        && assessment.risk_level <= AiActionRiskLevel::Low
+    {
+        let ctx = MatchContext {
+            capability_id: "terminal.execute".into(),
+            args: std::collections::BTreeMap::from([(
+                "command".to_string(),
+                command.trim().to_string(),
+            )]),
+            ..Default::default()
+        };
         if let Some(rule) = match_grant(&limits.permission_grants, &ctx) {
             return AiActionAssessment {
                 decision: AiActionDecision::Safe,
                 matched_rule: "PERMISSION_GRANT".to_string(),
-                reason: format!("命中权限授权规则{}，无需再次确认。", rule.command_pattern.as_deref().map(|p| format!("（{p}）")).unwrap_or_default()),
+                reason: format!(
+                    "命中权限授权规则{}，无需再次确认。",
+                    rule.command_pattern
+                        .as_deref()
+                        .map(|p| format!("（{p}）"))
+                        .unwrap_or_default()
+                ),
                 ..assessment
             };
         }
@@ -740,10 +752,7 @@ pub fn apply_prefs_policy(
     assessment
 }
 
-pub fn ai_record_action_event(
-    db: &Database,
-    event: AiActionAuditEvent,
-) -> Result<String, String> {
+pub fn ai_record_action_event(db: &Database, event: AiActionAuditEvent) -> Result<String, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
@@ -778,7 +787,11 @@ pub fn ai_validate_command_plan(raw_plan: String) -> Result<ValidatedCommandPlan
 // Internal synchronous chat helper (used by both Tauri command and other commands)
 // ---------------------------------------------------------------------------
 
-fn send_chat_request(config: &AiConfig, request: &ChatRequest, opts: &crate::prefs::RequestOptions) -> Result<ChatResponse, String> {
+fn send_chat_request(
+    config: &AiConfig,
+    request: &ChatRequest,
+    opts: &crate::prefs::RequestOptions,
+) -> Result<ChatResponse, String> {
     if !config.enabled || (config.provider != "ollama" && config.api_key.trim().is_empty()) {
         return Err("AI功能未启用或API Key未配置".to_string());
     }
@@ -841,13 +854,11 @@ fn send_chat_request(config: &AiConfig, request: &ChatRequest, opts: &crate::pre
 // Non-blocking Tauri command (runs HTTP on a plain thread to avoid blocking IPC)
 // ---------------------------------------------------------------------------
 
-pub async fn ai_chat(
-    db: &Database,
-    request: ChatRequest,
-) -> Result<ChatResponse, String> {
+pub async fn ai_chat(db: &Database, request: ChatRequest) -> Result<ChatResponse, String> {
     let config = load_ai_config(&db)?;
     // one-shot requests get their own placeholder map, dropped with the answer
-    let mut redactor = crate::prefs::privacy::Redactor::new(&crate::prefs::runtime_limits(db).privacy);
+    let mut redactor =
+        crate::prefs::privacy::Redactor::new(&crate::prefs::runtime_limits(db).privacy);
     let mut request = request;
     if let Some(r) = redactor.as_mut() {
         for m in &mut request.messages {
@@ -1047,7 +1058,10 @@ pub async fn ai_chat_stream(
     let mut emitted = 0usize;
     let restore_ready = |full: &str| -> String {
         match &redactor {
-            Some(r) => r.lock().unwrap_or_else(|e| e.into_inner()).restore_ready(full),
+            Some(r) => r
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .restore_ready(full),
             None => full.to_string(),
         }
     };
@@ -1057,7 +1071,9 @@ pub async fn ai_chat_stream(
             break;
         }
         // Wake up regularly so a cancel request is noticed even while the server is silent.
-        let next = match tokio::time::timeout(std::time::Duration::from_millis(200), stream.next()).await {
+        let next = match tokio::time::timeout(std::time::Duration::from_millis(200), stream.next())
+            .await
+        {
             Ok(n) => n,
             Err(_) => continue,
         };
@@ -1075,11 +1091,25 @@ pub async fn ai_chat_stream(
             let data = &line[6..];
             if data == "[DONE]" {
                 // anything held back for an unfinished placeholder is complete now
-                let rest = redactor.as_ref().map(|r| r.lock().unwrap_or_else(|e| e.into_inner()).restore(&full_content)).unwrap_or_else(|| full_content.clone());
+                let rest = redactor
+                    .as_ref()
+                    .map(|r| {
+                        r.lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .restore(&full_content)
+                    })
+                    .unwrap_or_else(|| full_content.clone());
                 if rest.len() > emitted {
                     core.emit(
                         "ai-stream-chunk",
-                        &StreamChunk { delta: rest[emitted..].to_string(), done: false, model: resp_model.clone(), conversation_id: conversation_id.clone(), message_id: message_id.clone(), client_request_id: client_request_id.clone() },
+                        &StreamChunk {
+                            delta: rest[emitted..].to_string(),
+                            done: false,
+                            model: resp_model.clone(),
+                            conversation_id: conversation_id.clone(),
+                            message_id: message_id.clone(),
+                            client_request_id: client_request_id.clone(),
+                        },
                     );
                     emitted = rest.len();
                 }
@@ -1124,24 +1154,44 @@ pub async fn ai_chat_stream(
 
     if !finished {
         if let Some(r) = &redactor {
-            let rest = r.lock().unwrap_or_else(|e| e.into_inner()).restore(&full_content);
+            let rest = r
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .restore(&full_content);
             if rest.len() > emitted {
                 core.emit(
                     "ai-stream-chunk",
-                    &StreamChunk { delta: rest[emitted..].to_string(), done: false, model: resp_model.clone(), conversation_id: conversation_id.clone(), message_id: message_id.clone(), client_request_id: client_request_id.clone() },
+                    &StreamChunk {
+                        delta: rest[emitted..].to_string(),
+                        done: false,
+                        model: resp_model.clone(),
+                        conversation_id: conversation_id.clone(),
+                        message_id: message_id.clone(),
+                        client_request_id: client_request_id.clone(),
+                    },
                 );
             }
         }
         // Cancelled (or the server closed without [DONE]): tell the UI the stream is over.
         core.emit(
             "ai-stream-chunk",
-            &StreamChunk { delta: String::new(), done: true, model: resp_model.clone(), conversation_id: conversation_id.clone(), message_id: message_id.clone(), client_request_id: client_request_id.clone() },
+            &StreamChunk {
+                delta: String::new(),
+                done: true,
+                model: resp_model.clone(),
+                conversation_id: conversation_id.clone(),
+                message_id: message_id.clone(),
+                client_request_id: client_request_id.clone(),
+            },
         );
     }
 
     // Save assistant message to DB (with the real values, not the placeholders)
     if let Some(r) = &redactor {
-        full_content = r.lock().unwrap_or_else(|e| e.into_inner()).restore(&full_content);
+        full_content = r
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .restore(&full_content);
     }
     {
         let conn = db.pool.get().map_err(|e| e.to_string())?;
@@ -1288,10 +1338,7 @@ pub async fn ai_get_conversation(
     Ok((conv, messages))
 }
 
-pub async fn ai_delete_conversation(
-    db: &Database,
-    conversation_id: String,
-) -> Result<(), String> {
+pub async fn ai_delete_conversation(db: &Database, conversation_id: String) -> Result<(), String> {
     let conn = db.pool.get().map_err(|e| e.to_string())?;
     conn.execute(
         "DELETE FROM ai_messages WHERE conversation_id = ?1",
@@ -1400,10 +1447,7 @@ pub fn ai_diagnose_error(
     Ok(result.content)
 }
 
-pub fn ai_risk_assessment(
-    db: &Database,
-    command: String,
-) -> Result<String, String> {
+pub fn ai_risk_assessment(db: &Database, command: String) -> Result<String, String> {
     let prompt = format!(
         "评估以下命令的风险等级和影响。
 

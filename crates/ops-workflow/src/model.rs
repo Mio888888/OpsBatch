@@ -35,7 +35,17 @@ fn default_height() -> f64 {
 
 impl CanvasNode {
     pub fn new(id: impl Into<String>, kind: &str, name: &str, config: &str) -> Self {
-        Self { id: id.into(), kind: kind.into(), name: name.into(), config: config.into(), x: 0.0, y: 0.0, enabled: true, width: 160.0, height: 56.0 }
+        Self {
+            id: id.into(),
+            kind: kind.into(),
+            name: name.into(),
+            config: config.into(),
+            x: 0.0,
+            y: 0.0,
+            enabled: true,
+            width: 160.0,
+            height: 56.0,
+        }
     }
 }
 
@@ -57,14 +67,18 @@ pub struct WorkflowSettings {
 
 impl Default for WorkflowSettings {
     fn default() -> Self {
-        Self { default_node_interval_seconds: 0.0 }
+        Self {
+            default_node_interval_seconds: 0.0,
+        }
     }
 }
 
 impl WorkflowSettings {
     fn normalized(self) -> Self {
         let v = self.default_node_interval_seconds;
-        Self { default_node_interval_seconds: if v.is_finite() && v > 0.0 { v } else { 0.0 } }
+        Self {
+            default_node_interval_seconds: if v.is_finite() && v > 0.0 { v } else { 0.0 },
+        }
     }
 }
 
@@ -79,16 +93,28 @@ pub fn parse_nodes_payload(raw: &str) -> Result<WorkflowPayload, String> {
     let raw = if raw.trim().is_empty() { "[]" } else { raw };
     let value: serde_json::Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
     match value {
-        serde_json::Value::Array(_) => Ok(WorkflowPayload { nodes: serde_json::from_value(value).map_err(|e| e.to_string())?, settings: WorkflowSettings::default() }),
+        serde_json::Value::Array(_) => Ok(WorkflowPayload {
+            nodes: serde_json::from_value(value).map_err(|e| e.to_string())?,
+            settings: WorkflowSettings::default(),
+        }),
         serde_json::Value::Object(mut map) => {
             let nodes = match map.remove("nodes") {
-                Some(v @ serde_json::Value::Array(_)) => serde_json::from_value(v).map_err(|e| e.to_string())?,
+                Some(v @ serde_json::Value::Array(_)) => {
+                    serde_json::from_value(v).map_err(|e| e.to_string())?
+                }
                 _ => Vec::new(),
             };
-            let settings = map.remove("settings").and_then(|v| serde_json::from_value::<WorkflowSettings>(v).ok()).unwrap_or_default().normalized();
+            let settings = map
+                .remove("settings")
+                .and_then(|v| serde_json::from_value::<WorkflowSettings>(v).ok())
+                .unwrap_or_default()
+                .normalized();
             Ok(WorkflowPayload { nodes, settings })
         }
-        _ => Ok(WorkflowPayload { nodes: Vec::new(), settings: WorkflowSettings::default() }),
+        _ => Ok(WorkflowPayload {
+            nodes: Vec::new(),
+            settings: WorkflowSettings::default(),
+        }),
     }
 }
 
@@ -135,9 +161,19 @@ impl WorkflowStatus {
 pub fn collect_workflow_host_ids(nodes: &[CanvasNode]) -> Vec<String> {
     let mut ids: Vec<String> = Vec::new();
     for node in nodes.iter().filter(|n| n.kind == "selectHost") {
-        let Ok(cfg) = serde_json::from_str::<serde_json::Value>(if node.config.is_empty() { "{}" } else { &node.config }) else { continue };
+        let Ok(cfg) = serde_json::from_str::<serde_json::Value>(if node.config.is_empty() {
+            "{}"
+        } else {
+            &node.config
+        }) else {
+            continue;
+        };
         if let Some(list) = cfg.get("hostIds").and_then(|v| v.as_array()) {
-            for id in list.iter().filter_map(|v| v.as_str()).filter(|s| !s.trim().is_empty()) {
+            for id in list
+                .iter()
+                .filter_map(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
+            {
                 if !ids.iter().any(|x| x == id) {
                     ids.push(id.to_string());
                 }
@@ -160,20 +196,56 @@ pub struct NodeGroup {
     pub types: &'static [NodeTypeEntry],
 }
 
-const fn nt(value: &'static str, label_key: &'static str, fallback_label: &'static str, color: u32) -> NodeTypeEntry {
-    NodeTypeEntry { value, label_key, fallback_label, color }
+const fn nt(
+    value: &'static str,
+    label_key: &'static str,
+    fallback_label: &'static str,
+    color: u32,
+) -> NodeTypeEntry {
+    NodeTypeEntry {
+        value,
+        label_key,
+        fallback_label,
+        color,
+    }
 }
 
 pub static NODE_GROUPS: &[NodeGroup] = &[
-    NodeGroup { label_key: "nodePalette.flowControl", fallback_label: "流程控制", types: &[nt("start", "nodePalette.start", "开始", 0x52c41a), nt("end", "nodePalette.end", "结束", 0xff4d4f)] },
-    NodeGroup { label_key: "nodePalette.target", fallback_label: "目标", types: &[nt("selectHost", "nodePalette.selectHost", "选择主机", 0x1677ff)] },
+    NodeGroup {
+        label_key: "nodePalette.flowControl",
+        fallback_label: "流程控制",
+        types: &[
+            nt("start", "nodePalette.start", "开始", 0x52c41a),
+            nt("end", "nodePalette.end", "结束", 0xff4d4f),
+        ],
+    },
+    NodeGroup {
+        label_key: "nodePalette.target",
+        fallback_label: "目标",
+        types: &[nt(
+            "selectHost",
+            "nodePalette.selectHost",
+            "选择主机",
+            0x1677ff,
+        )],
+    },
     NodeGroup {
         label_key: "nodePalette.executeOps",
         fallback_label: "执行操作",
         types: &[
-            nt("command", "nodePalette.executeCommand", "执行命令", 0x1677ff),
+            nt(
+                "command",
+                "nodePalette.executeCommand",
+                "执行命令",
+                0x1677ff,
+            ),
             nt("script", "nodePalette.executeScript", "执行脚本", 0x52c41a),
-            nt("quickAction", "nodePalette.quickAction", "快捷指令", 0xfa8c16),
+            nt(
+                "quickAction",
+                "nodePalette.quickAction",
+                "快捷指令",
+                0xfa8c16,
+            ),
             nt("transfer", "nodePalette.fileTransfer", "文件传输", 0x722ed1),
         ],
     },
@@ -187,11 +259,23 @@ pub static NODE_GROUPS: &[NodeGroup] = &[
             nt("confirm", "nodePalette.manualConfirm", "人工确认", 0xeb2f96),
         ],
     },
-    NodeGroup { label_key: "nodePalette.rollback", fallback_label: "回滚", types: &[nt("rollback", "nodePalette.rollbackOp", "回滚操作", 0xff4d4f)] },
+    NodeGroup {
+        label_key: "nodePalette.rollback",
+        fallback_label: "回滚",
+        types: &[nt(
+            "rollback",
+            "nodePalette.rollbackOp",
+            "回滚操作",
+            0xff4d4f,
+        )],
+    },
 ];
 
 pub fn node_type_entry(kind: &str) -> Option<&'static NodeTypeEntry> {
-    NODE_GROUPS.iter().flat_map(|g| g.types.iter()).find(|t| t.value == kind)
+    NODE_GROUPS
+        .iter()
+        .flat_map(|g| g.types.iter())
+        .find(|t| t.value == kind)
 }
 
 #[cfg(test)]
@@ -201,7 +285,12 @@ mod tests {
     #[test]
     fn payload_round_trips_and_accepts_the_legacy_array_form() {
         let nodes = vec![CanvasNode::new("a", "command", "跑命令", "ls")];
-        let raw = stringify_nodes_payload(&nodes, WorkflowSettings { default_node_interval_seconds: 3.0 });
+        let raw = stringify_nodes_payload(
+            &nodes,
+            WorkflowSettings {
+                default_node_interval_seconds: 3.0,
+            },
+        );
         let back = parse_nodes_payload(&raw).unwrap();
         assert_eq!(back.nodes, nodes);
         assert_eq!(back.settings.default_node_interval_seconds, 3.0);
@@ -214,7 +303,8 @@ mod tests {
 
     #[test]
     fn settings_are_normalised() {
-        let p = parse_nodes_payload(r#"{"nodes":[],"settings":{"defaultNodeIntervalSeconds":-4}}"#).unwrap();
+        let p = parse_nodes_payload(r#"{"nodes":[],"settings":{"defaultNodeIntervalSeconds":-4}}"#)
+            .unwrap();
         assert_eq!(p.settings.default_node_interval_seconds, 0.0);
         let p = parse_nodes_payload(r#"{"nodes":"oops"}"#).unwrap();
         assert!(p.nodes.is_empty());
@@ -222,11 +312,23 @@ mod tests {
 
     #[test]
     fn connection_json_matches_the_tauri_shape() {
-        let c = Connection { id: "e1".into(), from_id: "a".into(), to_id: "b".into(), source_handle: Some("true".into()) };
-        assert_eq!(serde_json::to_string(&c).unwrap(), r#"{"id":"e1","fromId":"a","toId":"b","sourceHandle":"true"}"#);
-        let plain: Connection = serde_json::from_str(r#"{"id":"e","fromId":"a","toId":"b"}"#).unwrap();
+        let c = Connection {
+            id: "e1".into(),
+            from_id: "a".into(),
+            to_id: "b".into(),
+            source_handle: Some("true".into()),
+        };
+        assert_eq!(
+            serde_json::to_string(&c).unwrap(),
+            r#"{"id":"e1","fromId":"a","toId":"b","sourceHandle":"true"}"#
+        );
+        let plain: Connection =
+            serde_json::from_str(r#"{"id":"e","fromId":"a","toId":"b"}"#).unwrap();
         assert_eq!(plain.source_handle, None);
-        assert_eq!(serde_json::to_string(&plain).unwrap(), r#"{"id":"e","fromId":"a","toId":"b"}"#);
+        assert_eq!(
+            serde_json::to_string(&plain).unwrap(),
+            r#"{"id":"e","fromId":"a","toId":"b"}"#
+        );
     }
 
     #[test]
@@ -243,8 +345,27 @@ mod tests {
 
     #[test]
     fn node_palette_has_all_original_types() {
-        let all: Vec<&str> = NODE_GROUPS.iter().flat_map(|g| g.types.iter().map(|t| t.value)).collect();
-        assert_eq!(all, ["start", "end", "selectHost", "command", "script", "quickAction", "transfer", "condition", "switch", "delay", "confirm", "rollback"]);
+        let all: Vec<&str> = NODE_GROUPS
+            .iter()
+            .flat_map(|g| g.types.iter().map(|t| t.value))
+            .collect();
+        assert_eq!(
+            all,
+            [
+                "start",
+                "end",
+                "selectHost",
+                "command",
+                "script",
+                "quickAction",
+                "transfer",
+                "condition",
+                "switch",
+                "delay",
+                "confirm",
+                "rollback"
+            ]
+        );
         assert_eq!(node_type_entry("delay").unwrap().color, 0x8c8c8c);
     }
 }

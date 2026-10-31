@@ -5,6 +5,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use crate::scale::px;
 use alacritty_terminal::grid::Scroll;
 use alacritty_terminal::index::Side;
 use alacritty_terminal::selection::SelectionType;
@@ -12,7 +13,6 @@ use alacritty_terminal::term::TermMode;
 use futures::channel::oneshot;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::*;
-use crate::scale::px;
 use ops_i18n::t;
 use ops_ssh::Ctx;
 use ops_terminal::keys::{self, KeyModes, Mods, MouseAction, MouseButton as TermButton};
@@ -21,7 +21,9 @@ use ops_terminal::tracker::TrackedCommandOutputCleaner;
 
 use super::element::{pick_font_family, platform_fallback_font, Layout, TerminalElement};
 use super::engine::{Engine, TerminalColors};
-use super::executions::{ExecStatus, ExecutionResult, ExecutionTracker, Started, DEFAULT_COMMAND_TIMEOUT};
+use super::executions::{
+    ExecStatus, ExecutionResult, ExecutionTracker, Started, DEFAULT_COMMAND_TIMEOUT,
+};
 use super::guard::{GuardAction, InputGuard};
 
 const CURSOR_BLINK: Duration = Duration::from_millis(530);
@@ -81,7 +83,11 @@ pub struct TerminalPane {
 impl EventEmitter<PaneEvent> for TerminalPane {}
 
 fn term_mods(m: &Modifiers) -> Mods {
-    Mods { shift: m.shift, alt: m.alt, ctrl: m.control }
+    Mods {
+        shift: m.shift,
+        alt: m.alt,
+        ctrl: m.control,
+    }
 }
 
 impl TerminalPane {
@@ -98,8 +104,25 @@ impl TerminalPane {
             ops_core::rt::spawn(async move {
                 while let Ok(cmd) = pty_rx.recv_async().await {
                     let result = match cmd {
-                        PtyCmd::Write(data) => ops_ssh::terminal::terminal_write(&ctx.terminals_mgr, &ctx.registry, sid.clone(), data).await,
-                        PtyCmd::Resize(cols, rows) => ops_ssh::terminal::terminal_resize(&ctx.terminals_mgr, &ctx.registry, sid.clone(), cols, rows).await,
+                        PtyCmd::Write(data) => {
+                            ops_ssh::terminal::terminal_write(
+                                &ctx.terminals_mgr,
+                                &ctx.registry,
+                                sid.clone(),
+                                data,
+                            )
+                            .await
+                        }
+                        PtyCmd::Resize(cols, rows) => {
+                            ops_ssh::terminal::terminal_resize(
+                                &ctx.terminals_mgr,
+                                &ctx.registry,
+                                sid.clone(),
+                                cols,
+                                rows,
+                            )
+                            .await
+                        }
                     };
                     if let Err(error) = result {
                         log::warn!("terminal {sid}: {error}");
@@ -115,7 +138,9 @@ impl TerminalPane {
         match ctx.terminals.take(&session_id) {
             Some(rx) => tasks.push(cx.spawn(async move |this, cx| {
                 loop {
-                    let Ok(first) = rx.recv_async().await else { break };
+                    let Ok(first) = rx.recv_async().await else {
+                        break;
+                    };
                     let mut batch = vec![first];
                     let mut chars = batch[0].len();
                     while chars < MAX_CHARS_PER_UPDATE {
@@ -127,7 +152,10 @@ impl TerminalPane {
                             Err(_) => break,
                         }
                     }
-                    if this.update(cx, |this, cx| this.on_output(batch, cx)).is_err() {
+                    if this
+                        .update(cx, |this, cx| this.on_output(batch, cx))
+                        .is_err()
+                    {
                         return;
                     }
                 }
@@ -191,7 +219,10 @@ impl TerminalPane {
 
     fn theme_inputs(cx: &App) -> (TerminalColors, usize) {
         let t = crate::theme::current(cx);
-        (TerminalColors::from_palette(&t.resolved.theme.terminal), t.settings.terminal_scrollback as usize)
+        (
+            TerminalColors::from_palette(&t.resolved.theme.terminal),
+            t.settings.terminal_scrollback as usize,
+        )
     }
 
     fn apply_appearance(&mut self, cx: &mut Context<Self>) {
@@ -210,7 +241,12 @@ impl TerminalPane {
     fn load_danger_rules(&mut self, cx: &mut Context<Self>) {
         let ctx = self.ctx.clone();
         cx.spawn(async move |this, cx| {
-            let rules = ops_core::rt::run(async move { ops_core::settings::list_danger_rules(&ctx.db).await }).await.and_then(|r| r);
+            let rules =
+                ops_core::rt::run(
+                    async move { ops_core::settings::list_danger_rules(&ctx.db).await },
+                )
+                .await
+                .and_then(|r| r);
             match rules {
                 Ok(rules) => {
                     let compiled = ops_terminal::danger::compile_danger_rules(&rules);
@@ -274,12 +310,25 @@ impl TerminalPane {
 
     // ---- layout / backend size ----
 
-    pub fn set_viewport(&mut self, cols: usize, lines: usize, layout: Layout, _cx: &mut Context<Self>) {
+    pub fn set_viewport(
+        &mut self,
+        cols: usize,
+        lines: usize,
+        layout: Layout,
+        _cx: &mut Context<Self>,
+    ) {
         self.layout = Some(layout);
-        self.engine.set_cell_px(f32::from(layout.cell_w).round() as u16, f32::from(layout.line_h).round() as u16);
-        if self.engine.resize(cols, lines) || self.backend_size != (self.engine.cols() as u16, self.engine.lines() as u16) {
+        self.engine.set_cell_px(
+            f32::from(layout.cell_w).round() as u16,
+            f32::from(layout.line_h).round() as u16,
+        );
+        if self.engine.resize(cols, lines)
+            || self.backend_size != (self.engine.cols() as u16, self.engine.lines() as u16)
+        {
             self.backend_size = (self.engine.cols() as u16, self.engine.lines() as u16);
-            let _ = self.pty.send(PtyCmd::Resize(self.backend_size.0, self.backend_size.1));
+            let _ = self
+                .pty
+                .send(PtyCmd::Resize(self.backend_size.0, self.backend_size.1));
         }
     }
 
@@ -398,12 +447,17 @@ impl TerminalPane {
 
     fn run_background(&mut self, command: String, cx: &mut Context<Self>) {
         self.write("\x15");
-        self.print_local(&format!("\r\n\x1b[36m{}\x1b[0m\r\n", t!("terminalRuntime.backgroundStart", command = command)));
+        self.print_local(&format!(
+            "\r\n\x1b[36m{}\x1b[0m\r\n",
+            t!("terminalRuntime.backgroundStart", command = command)
+        ));
         let ctx = self.ctx.clone();
         cx.spawn(async move |this, cx| {
-            let result = ops_core::rt::run(async move { ops_ssh::terminal::terminal_spawn_background_process(ctx, command, None, None).await })
-                .await
-                .and_then(|r| r);
+            let result = ops_core::rt::run(async move {
+                ops_ssh::terminal::terminal_spawn_background_process(ctx, command, None, None).await
+            })
+            .await
+            .and_then(|r| r);
             let _ = this.update(cx, |this, cx| {
                 let msg = match result {
                     Ok(info) => format!(
@@ -411,7 +465,10 @@ impl TerminalPane {
                         t!("terminalRuntime.backgroundStarted", pid = info.pid),
                         t!("terminalRuntime.backgroundLog", path = info.log_file)
                     ),
-                    Err(error) => format!("\x1b[31m{}\x1b[0m\r\n", t!("terminalRuntime.backgroundFailed", error = error)),
+                    Err(error) => format!(
+                        "\x1b[31m{}\x1b[0m\r\n",
+                        t!("terminalRuntime.backgroundFailed", error = error)
+                    ),
                 };
                 this.print_local(&msg);
                 cx.notify();
@@ -450,13 +507,26 @@ impl TerminalPane {
     }
 
     /// Run a command in this terminal and resolve with its exit code and output once it finishes.
-    pub fn execute_command(&mut self, command: &str, timeout: Option<Duration>, cx: &mut Context<Self>) -> oneshot::Receiver<ExecutionResult> {
+    pub fn execute_command(
+        &mut self,
+        command: &str,
+        timeout: Option<Duration>,
+        cx: &mut Context<Self>,
+    ) -> oneshot::Receiver<ExecutionResult> {
         if self.closed {
             let (tx, rx) = oneshot::channel();
-            let _ = tx.send(ExecutionResult { execution_id: String::new(), status: ExecStatus::Closed, exit_code: None, output: String::new() });
+            let _ = tx.send(ExecutionResult {
+                execution_id: String::new(),
+                status: ExecStatus::Closed,
+                exit_code: None,
+                output: String::new(),
+            });
             return rx;
         }
-        let (rx, started) = self.executions.submit(command.to_string(), timeout.unwrap_or(DEFAULT_COMMAND_TIMEOUT));
+        let (rx, started) = self.executions.submit(
+            command.to_string(),
+            timeout.unwrap_or(DEFAULT_COMMAND_TIMEOUT),
+        );
         if let Some(started) = started {
             self.begin_execution(started, cx);
         }
@@ -481,13 +551,24 @@ impl TerminalPane {
 
     // ---- search ----
 
-    pub fn search(&mut self, query: &str, backwards: bool, from_index: Option<usize>) -> SearchResult {
+    pub fn search(
+        &mut self,
+        query: &str,
+        backwards: bool,
+        from_index: Option<usize>,
+    ) -> SearchResult {
         if query.trim().is_empty() {
             self.engine.clear_selection();
             return SearchResult::default();
         }
         let rows = self.engine.search_rows();
-        let lines: Vec<SearchLine<'_>> = rows.iter().map(|r| SearchLine { row: r.row, text: &r.text }).collect();
+        let lines: Vec<SearchLine<'_>> = rows
+            .iter()
+            .map(|r| SearchLine {
+                row: r.row,
+                text: &r.text,
+            })
+            .collect();
         let matches = find_terminal_search_matches(&lines, query);
         let Some(index) = next_search_index(matches.len(), backwards, from_index) else {
             self.engine.clear_selection();
@@ -495,7 +576,11 @@ impl TerminalPane {
         };
         let m = matches[index];
         self.engine.select_match(&rows, m.row, m.column, m.length);
-        SearchResult { found: true, match_count: matches.len(), match_index: Some(index) }
+        SearchResult {
+            found: true,
+            match_count: matches.len(),
+            match_index: Some(index),
+        }
     }
 
     pub fn clear_search(&mut self) {
@@ -526,7 +611,11 @@ impl TerminalPane {
         let key = ks.key.as_str();
 
         // Clipboard shortcuts: ⌘C/⌘V/⌘A on macOS, Ctrl+Shift+C/V/A elsewhere.
-        let clip = if cfg!(target_os = "macos") { m.platform && !m.control && !m.alt } else { m.control && m.shift && !m.alt };
+        let clip = if cfg!(target_os = "macos") {
+            m.platform && !m.control && !m.alt
+        } else {
+            m.control && m.shift && !m.alt
+        };
         if clip {
             match key {
                 "c" => {
@@ -560,7 +649,10 @@ impl TerminalPane {
             return;
         }
 
-        let modes = KeyModes { app_cursor: self.engine.mode().contains(TermMode::APP_CURSOR), option_composes_text: false };
+        let modes = KeyModes {
+            app_cursor: self.engine.mode().contains(TermMode::APP_CURSOR),
+            option_composes_text: false,
+        };
         if let Some(bytes) = keys::encode_key(key, ks.key_char.as_deref(), term_mods(m), modes) {
             if let Ok(text) = String::from_utf8(bytes) {
                 self.send_user_text(&text, cx);
@@ -571,7 +663,13 @@ impl TerminalPane {
 
     // ---- mouse ----
 
-    fn report_mouse(&self, button: TermButton, action: MouseAction, mods: Mods, cell: (usize, usize)) {
+    fn report_mouse(
+        &self,
+        button: TermButton,
+        action: MouseAction,
+        mods: Mods,
+        cell: (usize, usize),
+    ) {
         if !self.engine.mode().contains(TermMode::SGR_MOUSE) {
             return;
         }
@@ -616,7 +714,12 @@ impl TerminalPane {
         if self.mouse_mode(ev.modifiers.shift) {
             self.mouse_down = Some(button);
             self.last_mouse_cell = Some((col, row));
-            self.report_mouse(button, MouseAction::Press, term_mods(&ev.modifiers), (col, row));
+            self.report_mouse(
+                button,
+                MouseAction::Press,
+                term_mods(&ev.modifiers),
+                (col, row),
+            );
             return;
         }
         if button == TermButton::Middle {
@@ -629,7 +732,8 @@ impl TerminalPane {
             _ => SelectionType::Lines,
         };
         self.click_cell = (ev.click_count <= 1).then_some((col, row));
-        self.engine.start_selection(kind, col, row, if left { Side::Left } else { Side::Right });
+        self.engine
+            .start_selection(kind, col, row, if left { Side::Left } else { Side::Right });
         self.selecting = true;
         cx.notify();
     }
@@ -638,9 +742,16 @@ impl TerminalPane {
         let (col, row, left) = self.cell(ev.position);
         if let Some(button) = self.mouse_down {
             let mode = self.engine.mode();
-            if (mode.contains(TermMode::MOUSE_DRAG) || mode.contains(TermMode::MOUSE_MOTION)) && self.last_mouse_cell != Some((col, row)) {
+            if (mode.contains(TermMode::MOUSE_DRAG) || mode.contains(TermMode::MOUSE_MOTION))
+                && self.last_mouse_cell != Some((col, row))
+            {
                 self.last_mouse_cell = Some((col, row));
-                self.report_mouse(button, MouseAction::Motion, term_mods(&ev.modifiers), (col, row));
+                self.report_mouse(
+                    button,
+                    MouseAction::Motion,
+                    term_mods(&ev.modifiers),
+                    (col, row),
+                );
             }
             return;
         }
@@ -653,18 +764,32 @@ impl TerminalPane {
                     self.engine.scroll(Scroll::Delta(-1));
                 }
             }
-            self.engine.update_selection(col, row, if left { Side::Left } else { Side::Right });
+            self.engine
+                .update_selection(col, row, if left { Side::Left } else { Side::Right });
             cx.notify();
-        } else if self.engine.mode().contains(TermMode::MOUSE_MOTION) && !ev.modifiers.shift && self.last_mouse_cell != Some((col, row)) {
+        } else if self.engine.mode().contains(TermMode::MOUSE_MOTION)
+            && !ev.modifiers.shift
+            && self.last_mouse_cell != Some((col, row))
+        {
             self.last_mouse_cell = Some((col, row));
-            self.report_mouse(TermButton::None, MouseAction::Motion, term_mods(&ev.modifiers), (col, row));
+            self.report_mouse(
+                TermButton::None,
+                MouseAction::Motion,
+                term_mods(&ev.modifiers),
+                (col, row),
+            );
         }
     }
 
     fn on_mouse_up(&mut self, ev: &MouseUpEvent, cx: &mut Context<Self>) {
         let (col, row, _) = self.cell(ev.position);
         if let Some(button) = self.mouse_down.take() {
-            self.report_mouse(button, MouseAction::Release, term_mods(&ev.modifiers), (col, row));
+            self.report_mouse(
+                button,
+                MouseAction::Release,
+                term_mods(&ev.modifiers),
+                (col, row),
+            );
         }
         if self.selecting {
             self.selecting = false;
@@ -683,7 +808,10 @@ impl TerminalPane {
     }
 
     fn on_scroll(&mut self, ev: &ScrollWheelEvent, cx: &mut Context<Self>) {
-        let line_h = self.layout.map(|l| f32::from(l.line_h)).unwrap_or(self.font_size * 1.35);
+        let line_h = self
+            .layout
+            .map(|l| f32::from(l.line_h))
+            .unwrap_or(self.font_size * 1.35);
         self.scroll_px += f32::from(ev.delta.pixel_delta(px(line_h)).y);
         let lines = (self.scroll_px / line_h).trunc() as i32;
         if lines == 0 {
@@ -693,9 +821,18 @@ impl TerminalPane {
         let mode = self.engine.mode();
         if self.mouse_mode(ev.modifiers.shift) {
             let (col, row, _) = self.cell(ev.position);
-            let button = if lines > 0 { TermButton::WheelUp } else { TermButton::WheelDown };
+            let button = if lines > 0 {
+                TermButton::WheelUp
+            } else {
+                TermButton::WheelDown
+            };
             for _ in 0..lines.unsigned_abs().min(10) {
-                self.report_mouse(button, MouseAction::Press, term_mods(&ev.modifiers), (col, row));
+                self.report_mouse(
+                    button,
+                    MouseAction::Press,
+                    term_mods(&ev.modifiers),
+                    (col, row),
+                );
             }
         } else if mode.contains(TermMode::ALT_SCREEN) {
             if mode.contains(TermMode::ALTERNATE_SCROLL) {
@@ -732,13 +869,31 @@ impl Render for TerminalPane {
             .overflow_hidden()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _w, cx| this.on_key_down(ev, cx)))
-            .on_mouse_down(MouseButton::Left, cx.listener(|this, ev, w, cx| this.on_mouse_down(ev, w, cx)))
-            .on_mouse_down(MouseButton::Middle, cx.listener(|this, ev, w, cx| this.on_mouse_down(ev, w, cx)))
-            .on_mouse_down(MouseButton::Right, cx.listener(|this, ev, w, cx| this.on_mouse_down(ev, w, cx)))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, ev, w, cx| this.on_mouse_down(ev, w, cx)),
+            )
+            .on_mouse_down(
+                MouseButton::Middle,
+                cx.listener(|this, ev, w, cx| this.on_mouse_down(ev, w, cx)),
+            )
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, ev, w, cx| this.on_mouse_down(ev, w, cx)),
+            )
             .on_mouse_move(cx.listener(|this, ev, _w, cx| this.on_mouse_move(ev, cx)))
-            .on_mouse_up(MouseButton::Left, cx.listener(|this, ev, _w, cx| this.on_mouse_up(ev, cx)))
-            .on_mouse_up(MouseButton::Middle, cx.listener(|this, ev, _w, cx| this.on_mouse_up(ev, cx)))
-            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, ev, _w, cx| this.on_mouse_up(ev, cx)))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, ev, _w, cx| this.on_mouse_up(ev, cx)),
+            )
+            .on_mouse_up(
+                MouseButton::Middle,
+                cx.listener(|this, ev, _w, cx| this.on_mouse_up(ev, cx)),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, ev, _w, cx| this.on_mouse_up(ev, cx)),
+            )
             .on_scroll_wheel(cx.listener(|this, ev, _w, cx| this.on_scroll(ev, cx)))
             .child(TerminalElement::new(cx.entity()))
     }
@@ -746,12 +901,26 @@ impl Render for TerminalPane {
 
 /// IME / text input: committed text is typed into the shell; composition is previewed at the cursor.
 impl EntityInputHandler for TerminalPane {
-    fn text_for_range(&mut self, _range: Range<usize>, _adjusted: &mut Option<Range<usize>>, _w: &mut Window, _cx: &mut Context<Self>) -> Option<String> {
+    fn text_for_range(
+        &mut self,
+        _range: Range<usize>,
+        _adjusted: &mut Option<Range<usize>>,
+        _w: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<String> {
         None
     }
 
-    fn selected_text_range(&mut self, _ignore_disabled_input: bool, _w: &mut Window, _cx: &mut Context<Self>) -> Option<UTF16Selection> {
-        Some(UTF16Selection { range: 0..0, reversed: false })
+    fn selected_text_range(
+        &mut self,
+        _ignore_disabled_input: bool,
+        _w: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<UTF16Selection> {
+        Some(UTF16Selection {
+            range: 0..0,
+            reversed: false,
+        })
     }
 
     fn marked_text_range(&self, _w: &mut Window, _cx: &mut Context<Self>) -> Option<Range<usize>> {
@@ -763,26 +932,53 @@ impl EntityInputHandler for TerminalPane {
         cx.notify();
     }
 
-    fn replace_text_in_range(&mut self, _range: Option<Range<usize>>, text: &str, _w: &mut Window, cx: &mut Context<Self>) {
+    fn replace_text_in_range(
+        &mut self,
+        _range: Option<Range<usize>>,
+        text: &str,
+        _w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.marked = None;
         self.send_user_text(text, cx);
     }
 
-    fn replace_and_mark_text_in_range(&mut self, _range: Option<Range<usize>>, new_text: &str, _sel: Option<Range<usize>>, _w: &mut Window, cx: &mut Context<Self>) {
+    fn replace_and_mark_text_in_range(
+        &mut self,
+        _range: Option<Range<usize>>,
+        new_text: &str,
+        _sel: Option<Range<usize>>,
+        _w: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.marked = (!new_text.is_empty()).then(|| new_text.to_string());
         cx.notify();
     }
 
-    fn bounds_for_range(&mut self, _range: Range<usize>, element_bounds: Bounds<Pixels>, _w: &mut Window, _cx: &mut Context<Self>) -> Option<Bounds<Pixels>> {
+    fn bounds_for_range(
+        &mut self,
+        _range: Range<usize>,
+        element_bounds: Bounds<Pixels>,
+        _w: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<Bounds<Pixels>> {
         let l = self.layout?;
         let (col, row) = self.engine.cursor();
         Some(Bounds::new(
-            point(element_bounds.origin.x + l.cell_w * col as f32, element_bounds.origin.y + l.line_h * row as f32),
+            point(
+                element_bounds.origin.x + l.cell_w * col as f32,
+                element_bounds.origin.y + l.line_h * row as f32,
+            ),
             size(l.cell_w, l.line_h),
         ))
     }
 
-    fn character_index_for_point(&mut self, _point: Point<Pixels>, _w: &mut Window, _cx: &mut Context<Self>) -> Option<usize> {
+    fn character_index_for_point(
+        &mut self,
+        _point: Point<Pixels>,
+        _w: &mut Window,
+        _cx: &mut Context<Self>,
+    ) -> Option<usize> {
         None
     }
 }

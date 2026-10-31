@@ -23,8 +23,12 @@ fn apply(mode: LanguageMode) {
 
 /// Read the stored mode (default: follow the system) and make it current.
 pub async fn load_mode(db: &ops_core::Database) -> LanguageMode {
-    let map = ops_core::settings::get_general_settings(db).await.unwrap_or_default();
-    map.get(KEY).and_then(|v| LanguageMode::parse(v)).unwrap_or(LanguageMode::System)
+    let map = ops_core::settings::get_general_settings(db)
+        .await
+        .unwrap_or_default();
+    map.get(KEY)
+        .and_then(|v| LanguageMode::parse(v))
+        .unwrap_or(LanguageMode::System)
 }
 
 pub fn init(mode: LanguageMode, cx: &mut App) {

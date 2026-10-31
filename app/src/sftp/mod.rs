@@ -3,5 +3,5 @@
 pub mod audio;
 pub mod drag_target;
 pub mod kinds;
-pub mod store;
 pub mod panel;
+pub mod store;

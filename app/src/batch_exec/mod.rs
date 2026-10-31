@@ -54,7 +54,15 @@ pub struct HostRun {
 
 impl HostRun {
     pub fn pending(host_id: &str, name: &str, ip: &str) -> Self {
-        Self { host_id: host_id.into(), host_name: name.into(), host_ip: ip.into(), status: Status::Pending, output: String::new(), exit_code: None, duration: None }
+        Self {
+            host_id: host_id.into(),
+            host_name: name.into(),
+            host_ip: ip.into(),
+            status: Status::Pending,
+            output: String::new(),
+            exit_code: None,
+            duration: None,
+        }
     }
     pub fn display_name(&self) -> &str {
         if !self.host_name.is_empty() {
@@ -95,7 +103,10 @@ pub struct DoneEvent {
 pub fn apply_start(runs: &mut Vec<HostRun>, host_id: &str) {
     match runs.iter_mut().find(|r| r.host_id == host_id) {
         Some(r) => r.status = Status::Running,
-        None => runs.push(HostRun { status: Status::Running, ..HostRun::pending(host_id, "", "") }),
+        None => runs.push(HostRun {
+            status: Status::Running,
+            ..HostRun::pending(host_id, "", "")
+        }),
     }
 }
 
@@ -111,7 +122,15 @@ pub fn apply_output(runs: &mut Vec<HostRun>, e: &OutputEvent) {
             r.exit_code = e.exit_code;
             r.duration = e.duration;
         }
-        None => runs.push(HostRun { host_id: e.host_id.clone(), host_name: e.host_name.clone(), host_ip: String::new(), status, output: e.output.clone(), exit_code: e.exit_code, duration: e.duration }),
+        None => runs.push(HostRun {
+            host_id: e.host_id.clone(),
+            host_name: e.host_name.clone(),
+            host_ip: String::new(),
+            status,
+            output: e.output.clone(),
+            exit_code: e.exit_code,
+            duration: e.duration,
+        }),
     }
 }
 
@@ -147,7 +166,14 @@ mod tests {
     use super::*;
 
     fn ev(id: &str, name: &str, status: &str, out: &str) -> OutputEvent {
-        OutputEvent { host_id: id.into(), host_name: name.into(), status: status.into(), output: out.into(), exit_code: Some(0), duration: Some(12) }
+        OutputEvent {
+            host_id: id.into(),
+            host_name: name.into(),
+            status: status.into(),
+            output: out.into(),
+            exit_code: Some(0),
+            duration: Some(12),
+        }
     }
 
     #[test]
@@ -156,7 +182,15 @@ mod tests {
         apply_start(&mut runs, "a");
         assert_eq!(runs[0].status, Status::Running);
         apply_output(&mut runs, &ev("a", "", "success", "hi"));
-        assert_eq!((runs[0].host_name.as_str(), runs[0].host_ip.as_str(), runs[0].status), ("web", "10.0.0.1", Status::Success), "name/ip survive an empty event name");
+        assert_eq!(
+            (
+                runs[0].host_name.as_str(),
+                runs[0].host_ip.as_str(),
+                runs[0].status
+            ),
+            ("web", "10.0.0.1", Status::Success),
+            "name/ip survive an empty event name"
+        );
         apply_output(&mut runs, &ev("b", "db", "failed", "boom"));
         apply_start(&mut runs, "c");
         assert_eq!(runs.len(), 3);
@@ -165,7 +199,11 @@ mod tests {
 
     #[test]
     fn timeouts_count_as_failures_and_cancel_marks_the_rest() {
-        let mut runs = vec![HostRun::pending("a", "", ""), HostRun::pending("b", "", ""), HostRun::pending("c", "", "")];
+        let mut runs = vec![
+            HostRun::pending("a", "", ""),
+            HostRun::pending("b", "", ""),
+            HostRun::pending("c", "", ""),
+        ];
         apply_output(&mut runs, &ev("a", "a", "timeout", ""));
         apply_start(&mut runs, "b");
         assert_eq!(stats(&runs), (3, 0, 1, 2));
@@ -180,13 +218,19 @@ mod tests {
         apply_output(&mut runs, &ev("a", "a", "failed", "x"));
         apply_output(&mut runs, &ev("b", "b", "success", "y"));
         reset_for_retry(&mut runs, &["a".to_string()]);
-        assert_eq!((runs[0].status, runs[0].output.as_str(), runs[0].duration), (Status::Pending, "", None));
+        assert_eq!(
+            (runs[0].status, runs[0].output.as_str(), runs[0].duration),
+            (Status::Pending, "", None)
+        );
         assert_eq!(runs[1].status, Status::Success);
     }
 
     #[test]
     fn done_payload_parses() {
-        let d: DoneEvent = serde_json::from_value(serde_json::json!({"successCount":2,"failCount":1,"duration":340})).unwrap();
+        let d: DoneEvent = serde_json::from_value(
+            serde_json::json!({"successCount":2,"failCount":1,"duration":340}),
+        )
+        .unwrap();
         assert_eq!((d.success_count, d.fail_count, d.duration), (2, 1, 340));
         assert_eq!(runs_name(&HostRun::pending("id", "", "")), "id");
     }

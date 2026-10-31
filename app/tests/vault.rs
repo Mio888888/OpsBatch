@@ -21,6 +21,10 @@ enum Mode {
     NeedsPassword(&'static str),
     /// The keychain key no longer opens the vault.
     Stale(&'static str),
+    /// The keychain cannot be used at all (no Secret Service): only the typed password opens it.
+    Unavailable(&'static str),
+    /// The keychain refuses with an error a password does not fix, for the first `n` tries.
+    Broken(usize),
 }
 
 struct Fake {
@@ -45,7 +49,14 @@ impl VaultBackend for Fake {
         self.attempts.lock().unwrap().push(key.clone());
         let open = match (&self.mode, key.as_deref()) {
             (Mode::Keychain, _) => true,
-            (Mode::NeedsPassword(p) | Mode::Stale(p), Some(k)) if k.trim() == *p => true,
+            (Mode::Broken(n), _) => {
+                if self.attempts.lock().unwrap().len() <= *n {
+                    return Err("keyring 读取失败: 安全存储不可访问".into());
+                }
+                true
+            }
+            (Mode::Unavailable(_), None) => return Err("系统钥匙串不可用，请输入启动密钥解锁，本次不会保存到钥匙串。详情: no Secret Service".into()),
+            (Mode::NeedsPassword(p) | Mode::Stale(p) | Mode::Unavailable(p), Some(k)) if k.trim() == *p => true,
             (Mode::NeedsPassword(_), None) => return Err("本地加密密钥不存在，请输入新的解锁密钥。".into()),
             (Mode::Stale(_), None) => return Err("系统钥匙串中的本地加密密钥无法解开现有 vault，请输入启动密钥。".into()),
             _ => return Err("启动密钥不正确".into()),
@@ -170,6 +181,77 @@ fn a_stale_keychain_key_gets_its_own_message(cx: &mut TestAppContext) {
     wait_until(cx, "password form", |cx| dialog.read_with(cx, |d, _| d.needs_password()));
     dialog.read_with(cx, |d, _| assert_eq!(d.error(), ops_i18n::template(ops_i18n::Language::ZhCn, "keychainNotice.staleMasterKey")));
     assert!(STALE_KEY.len() > 0);
+}
+
+#[gpui_kit::test]
+fn an_unusable_keychain_still_offers_the_startup_password_with_the_reason(cx: &mut TestAppContext) {
+    let _s = serial();
+    let fake = Fake::new(Mode::Unavailable("pw"));
+    let fx = setup(cx, fake.clone());
+    let mut rx = request(cx, &fx);
+    let dialog = loop {
+        if let Some(d) = cx.update(|cx| vault::dialog(cx)) {
+            break d;
+        }
+        cx.run_until_parked();
+    };
+    wait_until(cx, "password form", |cx| dialog.read_with(cx, |d, _| d.needs_password() && !d.loading()));
+    dialog.read_with(cx, |d, _| {
+        assert!(d.error().starts_with(&ops_i18n::template(ops_i18n::Language::ZhCn, "keychainNotice.keychainUnavailable")), "{}", d.error());
+        assert!(d.error().contains("no Secret Service"), "the reason is shown: {}", d.error());
+        assert!(!d.failed(), "a password helps here");
+    });
+    win(cx, &fx, |w, cx| {
+        w.render_frame(cx);
+        assert!(w.try_find("vault-password-form").is_some() && w.try_find("vault-retry").is_none());
+    });
+    // the password opens it
+    let input = dialog.read_with(cx, |d, _| d.password_input().clone());
+    win(cx, &fx, |w, cx| {
+        input.update(cx, |s, cx| s.set_value("pw".to_string(), w, cx));
+        dialog.update(cx, |d, cx| d.submit(w, cx));
+    });
+    wait_until(cx, "unlocked", |_| fake.is_unlocked());
+    cx.run_until_parked();
+    assert_eq!(rx.try_recv().ok().flatten(), Some(true));
+}
+
+#[gpui_kit::test]
+fn an_error_a_password_cannot_fix_offers_a_retry_instead_of_spinning(cx: &mut TestAppContext) {
+    let _s = serial();
+    // the keychain refuses twice (denied, then the prompt dismissed), then lets go
+    let fake = Fake::new(Mode::Broken(2));
+    let fx = setup(cx, fake.clone());
+    let mut rx = request(cx, &fx);
+    let dialog = loop {
+        if let Some(d) = cx.update(|cx| vault::dialog(cx)) {
+            break d;
+        }
+        cx.run_until_parked();
+    };
+    wait_until(cx, "first failure", |cx| dialog.read_with(cx, |d, _| d.failed() && !d.loading()));
+    dialog.read_with(cx, |d, _| {
+        assert!(d.error().contains("安全存储不可访问"), "{}", d.error());
+        assert!(!d.needs_password());
+    });
+    win(cx, &fx, |w, cx| {
+        w.render_frame(cx);
+        assert!(w.try_find("vault-retry").is_some(), "a retry button");
+        assert!(w.try_find("vault-password-form").is_none(), "no password field: it would not help");
+    });
+    assert!(rx.try_recv().ok().flatten().is_none());
+    // retry: still refused (second failure) ...
+    win(cx, &fx, |w, cx| w.click("vault-retry", cx));
+    wait_until(cx, "second failure", |cx| dialog.read_with(cx, |d, _| d.failed() && !d.loading()) && fake.attempts.lock().unwrap().len() == 2);
+    // ... and the third try goes through
+    win(cx, &fx, |w, cx| {
+        w.render_frame(cx);
+        w.click("vault-retry", cx);
+    });
+    wait_until(cx, "unlocked", |_| fake.is_unlocked());
+    cx.run_until_parked();
+    assert_eq!(rx.try_recv().ok().flatten(), Some(true));
+    assert_eq!(fake.attempts.lock().unwrap().len(), 3);
 }
 
 #[gpui_kit::test]

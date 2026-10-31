@@ -5,7 +5,10 @@
 //!
 //! Phases: `setup` (first start: no key, set a startup password, store / read / delete secrets), `restart` (unlock from
 //! the keychain alone, secrets survived), `stale` (the keychain key no longer opens the vault, the password does),
-//! `cleanup` (delete the throw-away keychain item). `scripts/verify-real-vault.sh` runs them in order and always cleans up.
+//! `nokeychain` / `nokeychain-restart` (a machine with no usable keychain, e.g. Linux without a Secret Service: the startup
+//! password is asked, opens the vault, and is asked again after a restart; on a machine whose keychain works they report
+//! SKIP), `cleanup` (delete the throw-away keychain item). `scripts/verify-real-vault.sh` runs them in order and always
+//! cleans up (`--no-keychain` runs the two `nokeychain` phases instead).
 //! It refuses to run against the default service: that item is shared with the Tauri build.
 
 #[cfg(not(feature = "real-vault"))]
@@ -78,6 +81,29 @@ fn main() {
                 check("a wrong startup password is refused", r.is_err() && !k::is_local_vault_unlocked(), format!("{r:?}"));
                 let r = k::unlock_local_vault(Some("pw-1".into()));
                 check("the startup password recovers it", r.is_ok() && k::get_host_password("h1").as_deref() == Ok("hp-secret"), format!("{r:?}"));
+            }
+            "nokeychain" | "nokeychain-restart" => {
+                let restart = phase == "nokeychain-restart";
+                let r = k::unlock_local_vault(None);
+                let works = r.as_ref().err().is_some_and(|e| e.contains("本地加密密钥不存在") || e.contains("无法解开")) || r.is_ok();
+                if works {
+                    println!("SKIP the system keychain works on this machine, nothing to check here");
+                } else {
+                    check("keychain unavailable: the startup password is asked, with the reason", r.as_ref().err().is_some_and(|e| e.contains(k::KEYCHAIN_UNAVAILABLE)), format!("{r:?}"));
+                    check("still locked after the refusal", !k::is_local_vault_unlocked(), String::new());
+                    if restart {
+                        let r = k::unlock_local_vault(Some("wrong-password".into()));
+                        check("a wrong startup password is refused", r.is_err() && !k::is_local_vault_unlocked(), format!("{r:?}"));
+                    }
+                    let r = k::unlock_local_vault(Some("pw-1".into()));
+                    check("the startup password unlocks without a keychain", r.is_ok() && k::is_local_vault_unlocked(), format!("{r:?}"));
+                    if restart {
+                        check("the secret survived the restart", k::get_host_password("h1").as_deref() == Ok("hp-secret"), String::new());
+                    } else {
+                        check("store host password", k::store_host_password("h1", "hp-secret").is_ok(), String::new());
+                        check("read it back", k::get_host_password("h1").as_deref() == Ok("hp-secret"), String::new());
+                    }
+                }
             }
             other => {
                 eprintln!("unknown phase {other}");

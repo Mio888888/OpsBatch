@@ -491,6 +491,44 @@ fn rdp_connector_skips_disabled_clipboard_and_audio_channels() {
 }
 
 #[test]
+fn rdp_connector_attaches_the_drive_channel_for_a_shared_folder() {
+    let folder = std::env::temp_dir().join(format!("opsbatch-rdp-share-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let mut options = test_rdp_options(false, false);
+    options.disk_path = Some(folder.clone());
+    let config = build_ironrdp_config(&options, &test_rdp_credentials()).unwrap();
+    let connector = build_client_connector(config, "127.0.0.1:50000".parse().unwrap(), &options).unwrap();
+    assert_eq!(rdp_static_channel_names(&connector), vec!["rdpdr".to_string()]);
+    let _ = std::fs::remove_dir_all(&folder);
+}
+
+#[test]
+fn rdp_connector_refuses_a_shared_folder_that_does_not_exist() {
+    let mut options = test_rdp_options(false, false);
+    options.disk_path = Some(std::env::temp_dir().join(format!("opsbatch-rdp-missing-{}", uuid::Uuid::new_v4())));
+    let config = build_ironrdp_config(&options, &test_rdp_credentials()).unwrap();
+    let error = build_client_connector(config, "127.0.0.1:50000".parse().unwrap(), &options).err().expect("a missing folder stops the connection");
+    assert!(error.contains("共享目录不可用"), "{error}");
+}
+
+#[test]
+fn a_shared_folder_needs_map_disk_and_a_path() {
+    let share = |map_disk: Option<bool>, disk_path: Option<&str>| {
+        shared_folder(&StoredRdpSettings { map_disk, disk_path: disk_path.map(str::to_string), ..StoredRdpSettings::default() })
+    };
+    assert_eq!(share(Some(true), Some(" /tmp/share ")), Some(std::path::PathBuf::from("/tmp/share")));
+    assert_eq!(share(Some(false), Some("/tmp/share")), None, "switched off");
+    assert_eq!(share(None, Some("/tmp/share")), None);
+    assert_eq!(share(Some(true), None), None, "switched on without a folder shares nothing");
+    assert_eq!(share(Some(true), Some("   ")), None);
+    if let Some(home) = std::env::var_os("HOME") {
+        assert_eq!(share(Some(true), Some("~/Share")), Some(std::path::PathBuf::from(&home).join("Share")));
+        assert_eq!(share(Some(true), Some("~")), Some(std::path::PathBuf::from(home).join("")));
+    }
+    assert_eq!(share(Some(true), Some("~other/x")), Some(std::path::PathBuf::from("~other/x")), "only the own home folder expands");
+}
+
+#[test]
 fn rdp_connector_attaches_egfx_dynamic_channel_for_h264_direct_mode() {
     let mut options = test_rdp_options(true, true);
     options.transport_mode = RdpTransportMode::H264Direct;
@@ -633,6 +671,7 @@ fn test_rdp_options(enable_clipboard: bool, enable_audio: bool) -> RdpConnection
         domain: None,
         enable_clipboard,
         enable_audio,
+        disk_path: None,
         transport_mode: RdpTransportMode::LegacyBitmap,
         proxy: None,
     }

@@ -11,7 +11,7 @@ publish.workspace = true
 ops-core.workspace = true
 ops-ssh.workspace = true
 # Same ironrdp stack and features as OpsBatch/src-tauri/Cargo.toml (resolved through the vendored [patch.crates-io]).
-ironrdp = { version = "0.15", features = ["connector", "session", "input", "graphics", "svc", "dvc", "displaycontrol", "cliprdr", "rdpsnd"] }
+ironrdp = { version = "0.15", features = ["connector", "session", "input", "graphics", "svc", "dvc", "displaycontrol", "cliprdr", "rdpsnd", "rdpdr"] }
 ironrdp-egfx = "0.1"
 ironrdp-dvc = { version = "0.6", features = ["opsbatch-diagnostics"] }
 ironrdp-tokio = { version = "0.9", features = ["reqwest"] }
@@ -29,6 +29,7 @@ dashmap = "6"
 rusqlite = { version = "0.31", features = ["bundled"] }
 bytes = "1"
 socket2 = { version = "0.6", features = ["all"] }
+fs4 = "1"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc = "0.2"

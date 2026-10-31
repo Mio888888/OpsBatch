@@ -34,6 +34,8 @@ pub(super) struct RdpConnectionOptions {
     pub domain: Option<String>,
     pub enable_clipboard: bool,
     pub enable_audio: bool,
+    /// A local folder shown to the remote machine as a drive.
+    pub disk_path: Option<std::path::PathBuf>,
     pub transport_mode: RdpTransportMode,
     pub proxy: Option<ProxySettings>,
 }

@@ -18,12 +18,17 @@ use ops_i18n::t;
 /// Messages of the vault that mean "ask the user for the startup password" (`KeychainNoticeModal.tsx`).
 pub const MISSING_KEY: &str = "本地加密密钥不存在";
 pub const STALE_KEY: &str = "系统钥匙串中的本地加密密钥无法解开";
+/// The keychain cannot be used at all (no Secret Service, access denied, locked): the startup password still unlocks.
+pub const KEYCHAIN_UNAVAILABLE: &str = "系统钥匙串不可用";
 
 pub struct VaultDialog {
     input: Entity<InputState>,
     loading: bool,
     /// The system keychain could not unlock it: the password field is shown.
     pending_input: bool,
+    /// The unlock failed for a reason a password does not help with (keychain refused, vault unreadable, migration
+    /// failed): the dialog offers to try again instead of spinning for ever.
+    failed: bool,
     error: String,
     _sub: Subscription,
 }
@@ -43,7 +48,7 @@ impl VaultDialog {
                 this.submit(window, cx);
             }
         });
-        let mut this = Self { input, loading: false, pending_input: false, error: String::new(), _sub: sub };
+        let mut this = Self { input, loading: false, pending_input: false, failed: false, error: String::new(), _sub: sub };
         this.try_unlock(None, window, cx);
         this
     }
@@ -56,6 +61,9 @@ impl VaultDialog {
     }
     pub fn needs_password(&self) -> bool {
         self.pending_input
+    }
+    pub fn failed(&self) -> bool {
+        self.failed
     }
     pub fn error(&self) -> &str {
         &self.error
@@ -72,6 +80,7 @@ impl VaultDialog {
             return;
         }
         self.loading = true;
+        self.failed = false;
         self.error.clear();
         cx.notify();
         let backend = crate::vault::backend(cx);
@@ -95,12 +104,24 @@ impl VaultDialog {
                         crate::vault::dialog_closed(cx);
                         crate::vault::unlocked(cx);
                     }
+                    Err(message) if message.contains(KEYCHAIN_UNAVAILABLE) => {
+                        this.pending_input = true;
+                        let detail = message.split_once("详情: ").map(|(_, d)| d.trim()).filter(|d| !d.is_empty());
+                        this.error = match detail {
+                            Some(detail) => format!("{} ({detail})", t!("keychainNotice.keychainUnavailable")),
+                            None => t!("keychainNotice.keychainUnavailable"),
+                        };
+                        this.input.update(cx, |s, cx| s.focus(window, cx));
+                    }
                     Err(message) if message.contains(MISSING_KEY) || message.contains(STALE_KEY) => {
                         this.pending_input = true;
                         this.error = if message.contains(STALE_KEY) { t!("keychainNotice.staleMasterKey") } else { t!("keychainNotice.needMasterKey") };
                         this.input.update(cx, |s, cx| s.focus(window, cx));
                     }
-                    Err(message) => this.error = message,
+                    Err(message) => {
+                        this.failed = true;
+                        this.error = message;
+                    }
                 }
                 cx.notify();
             });
@@ -146,6 +167,10 @@ impl Render for VaultDialog {
                 v_flex().id("vault-hints").test_support().gap(px(6.)).child(muted(t!("keychainNotice.autoUnlock"))).child(muted(t!("keychainNotice.lockedHint"))).into_any_element()
             })
             .when(!self.error.is_empty(), |d| d.child(div().id("vault-error").test_support().text_size(px(12.)).line_height(relative(1.5)).text_color(theme.danger).child(self.error.clone())))
-            .when(self.loading || !self.pending_input, |d| d.child(h_flex().gap(px(8.)).items_center().child(Spinner::new().small()).child(muted(t!("keychainNotice.waiting")))))
+            // nothing a password can fix: offer another go (the keychain may be unlocked or allowed by now)
+            .when(self.failed && !self.pending_input && !self.loading, |d| {
+                d.child(h_flex().child(Button::new("vault-retry").icon(Icon::new(IconName::RefreshCw)).label(t!("keychainNotice.retry")).on_click(cx.listener(|this, _, window, cx| this.try_unlock(None, window, cx)))))
+            })
+            .when(self.loading, |d| d.child(h_flex().gap(px(8.)).items_center().child(Spinner::new().small()).child(muted(t!("keychainNotice.waiting")))))
     }
 }

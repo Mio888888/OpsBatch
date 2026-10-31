@@ -187,6 +187,50 @@ async fn rfb33_type_chosen_by_server() {
     check_pixels(&run("RFB 003.003\n", SEC_VNC, AuthPreference::Vnc, "pw12").await.unwrap());
 }
 
+/// Connects to a server that plays `script` and then hangs up; returns the error text the user would see.
+async fn hang_up_after(script: impl FnOnce(DuplexStream) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + 'static) -> String {
+    let (client, server) = tokio::io::duplex(1 << 16);
+    tokio::spawn(script(server));
+    let opts = Options { username: None, password: Some("pw12".into()), prefer: AuthPreference::Vnc, shared: true };
+    format!("{:#}", connect(client, &opts).await.err().expect("the handshake must fail"))
+}
+
+#[tokio::test]
+async fn a_server_that_hangs_up_says_at_which_handshake_step() {
+    // closes right after accepting the connection
+    let e = hang_up_after(|_s| Box::pin(async {})).await;
+    assert!(e.contains("握手第 1 步") && e.contains("early eof"), "{e}");
+    // sends its version, then nothing
+    let e = hang_up_after(|mut s| Box::pin(async move {
+        s.write_all(b"RFB 003.008\n").await.unwrap();
+        read_exact_vec(&mut s, 12).await;
+    })).await;
+    assert!(e.contains("握手第 2 步") && e.contains("RFB 003.008"), "{e}");
+    // asks for a password, takes the answer and drops the line (what many servers do with a wrong password)
+    let e = hang_up_after(|mut s| {
+        Box::pin(async move {
+            s.write_all(b"RFB 003.008\n").await.unwrap();
+            read_exact_vec(&mut s, 12).await;
+            s.write_all(&[1, SEC_VNC]).await.unwrap();
+            read_exact_vec(&mut s, 1).await;
+            s.write_all(&[9u8; 16]).await.unwrap();
+            read_exact_vec(&mut s, 16).await;
+        })
+    })
+    .await;
+    assert!(e.contains("握手第 4 步") && e.contains("密码"), "{e}");
+    // only offers types we cannot speak (VeNCrypt = 19)
+    let e = hang_up_after(|mut s| {
+        Box::pin(async move {
+            s.write_all(b"RFB 003.008\n").await.unwrap();
+            read_exact_vec(&mut s, 12).await;
+            s.write_all(&[1, 19]).await.unwrap();
+        })
+    })
+    .await;
+    assert!(e.contains("[19]") && e.contains("不支持"), "{e}");
+}
+
 #[test]
 fn security_preference_order() {
     assert_eq!(choose_security(&[1, 2, 30], AuthPreference::Vnc, true), Some(SEC_VNC));
@@ -354,7 +398,7 @@ async fn a_session_streams_frames_forwards_input_and_honours_view_only() {
         })
         .await
         .unwrap();
-        assert!(matches!(&ev.0, VncEvent::Connected { width: 4, height: 2, name } if name == "mock"), "{:?}", ev.0);
+        assert!(matches!(&ev.0, VncEvent::Connected { width: 4, height: 2, name, apple: false } if name == "mock"), "{:?}", ev.0);
         let VncEvent::Frame(regions) = &ev.1 else { panic!("{:?}", ev.1) };
         assert_eq!(regions.len(), 1);
         assert_eq!(regions[0].1.len(), 4 * 2 * 4);
@@ -407,4 +451,50 @@ async fn connection_failures_are_reported_as_closed_events() {
     let events = session.events.clone();
     let ev = tokio::task::spawn_blocking(move || events.recv_timeout(Duration::from_secs(10)).unwrap()).await.unwrap();
     assert!(matches!(&ev, VncEvent::Closed { clean: false, reason: Some(r) } if r.contains("VNC TCP 连接失败")), "{ev:?}");
+}
+
+/// Decode speed over a real socket: one 1280x720 Hextile update made of raw 16x16 tiles (14.7 MB on the wire).
+/// `cargo test -p ops-vnc --release decode_speed -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn decode_speed_over_a_real_socket() {
+    use tokio::net::{TcpListener, TcpStream};
+    let (w, h) = (1280u16, 720u16);
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let (mut s, _) = listener.accept().await.unwrap();
+        s.write_all(b"RFB 003.008\n").await.unwrap();
+        let mut b = [0u8; 12];
+        s.read_exact(&mut b).await.unwrap();
+        s.write_all(&[1, SEC_NONE]).await.unwrap();
+        let mut c = [0u8; 1];
+        s.read_exact(&mut c).await.unwrap();
+        s.write_u32(0).await.unwrap();
+        s.read_exact(&mut c).await.unwrap();
+        s.write_u16(w).await.unwrap();
+        s.write_u16(h).await.unwrap();
+        s.write_all(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]).await.unwrap();
+        s.write_u32(5).await.unwrap();
+        s.write_all(b"bench").await.unwrap();
+        let mut setup = [0u8; 20 + 4 + 20];
+        s.read_exact(&mut setup).await.unwrap();
+        let mut m = vec![0u8, 0, 0, 1];
+        for v in [0u16, 0, w, h] {
+            m.extend_from_slice(&v.to_be_bytes());
+        }
+        m.extend_from_slice(&5i32.to_be_bytes());
+        for _ in 0..(w as usize / 16) * (h as usize).div_ceil(16) {
+            m.push(1);
+            m.extend((0..256 * 4).map(|i| i as u8));
+        }
+        s.write_all(&m).await.unwrap();
+        let mut sink = [0u8; 64];
+        while s.read(&mut sink).await.unwrap_or(0) > 0 {}
+    });
+    let opts = Options { username: None, password: None, prefer: AuthPreference::Vnc, shared: true };
+    let (_, mut reader, _writer) = connect(TcpStream::connect(addr).await.unwrap(), &opts).await.unwrap();
+    let started = std::time::Instant::now();
+    let ev = reader.next_event().await.unwrap();
+    println!("DECODE one 1280x720 hextile update: {:?} ({ev:?})", started.elapsed());
 }

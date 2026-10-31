@@ -13,7 +13,7 @@ pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone)]
 pub enum VncEvent {
-    Connected { width: u16, height: u16, name: String },
+    Connected { width: u16, height: u16, name: String, apple: bool },
     /// Updated rectangles with their BGRA pixels (row-major, tightly packed).
     Frame(Vec<(Rect, Vec<u8>)>),
     /// The desktop was resized; the next frame update covers the whole new area.
@@ -108,8 +108,8 @@ async fn run(config: VncHostConfig, mut commands: mpsc::UnboundedReceiver<VncCom
     let (info, mut reader, mut writer) = tokio::time::timeout(CONNECT_TIMEOUT, connect(tcp, &opts))
         .await
         .map_err(|_| "VNC 握手超时".to_string())?
-        .map_err(|e| e.to_string())?;
-    let _ = events.send(VncEvent::Connected { width: info.width, height: info.height, name: info.name });
+        .map_err(|e| format!("{e:#}"))?;
+    let _ = events.send(VncEvent::Connected { width: info.width, height: info.height, name: info.name, apple: info.apple });
     writer.request_update(false).await.map_err(|e| e.to_string())?;
 
     // The reader owns the framebuffer; it forwards what changed.

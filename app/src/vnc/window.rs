@@ -17,9 +17,10 @@ use gpui_kit::*;
 use crate::scale::px;
 use ops_i18n::t;
 use ops_vnc::keys::{keysym_for_key, modifier_changes, Mods};
-use ops_vnc::{start_session, VncCommand, VncEvent, VncSession};
+use ops_vnc::{start_session, VncAuthMethod, VncCommand, VncEvent, VncSession};
 
-use crate::remote::surface::{map_point, swap_image, RemoteSurface};
+use crate::rdp::input::{WheelAccumulator, NOTCH};
+use crate::remote::surface::{contain_rect, map_point, swap_image, RemoteSurface};
 use crate::window::{self, WindowKind};
 
 /// How long a connection attempt may take before the window gives up (`VNC_CONNECT_WATCHDOG_MS`).
@@ -88,8 +89,13 @@ pub struct VncWindow {
     move_scheduled: bool,
     down_keys: HashMap<String, u32>,
     last_clipboard: Option<String>,
+    /// The remote is a Mac (ARD login or Apple's RFB version): Command stays Command. Otherwise it is sent as Ctrl.
+    remote_is_mac: bool,
+    /// A trackpad sends many small scroll deltas; the remote wants whole notches.
+    wheel: WheelAccumulator,
     generation: u64,
     tasks: Vec<Task<()>>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl VncWindow {
@@ -106,6 +112,16 @@ impl VncWindow {
     }
 
     pub fn new(host: Option<VncHost>, query_host_id: String, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let focus = cx.focus_handle();
+        // Leaving the window (or the picture) must not leave keys and buttons held down on the remote machine.
+        let subscriptions = vec![
+            cx.on_blur(&focus, window, |this, _, _| this.release_all_input()),
+            cx.observe_window_activation(window, |this, window, _| {
+                if !window.is_window_active() {
+                    this.release_all_input();
+                }
+            }),
+        ];
         let mut this = Self {
             host,
             query_host_id,
@@ -116,7 +132,7 @@ impl VncWindow {
             desktop: (0, 0),
             surface: RemoteSurface::default(),
             image: None,
-            focus: cx.focus_handle(),
+            focus,
             stage_bounds: Rc::new(Cell::new((0.0, 0.0, 0.0, 0.0))),
             last_mods: Modifiers::default(),
             buttons: 0,
@@ -125,8 +141,11 @@ impl VncWindow {
             move_scheduled: false,
             down_keys: HashMap::new(),
             last_clipboard: None,
+            remote_is_mac: false,
+            wheel: WheelAccumulator::default(),
             generation: 0,
             tasks: Vec::new(),
+            _subscriptions: subscriptions,
         };
         if this.host.is_some() {
             this.connect(window, cx);
@@ -172,6 +191,7 @@ impl VncWindow {
         self.image = None;
         self.buttons = 0;
         self.down_keys.clear();
+        self.wheel.reset();
         self.last_clipboard = None;
         cx.notify();
 
@@ -221,6 +241,7 @@ impl VncWindow {
 
     fn start(&mut self, config: ops_vnc::VncHostConfig, generation: u64, window: &mut Window, cx: &mut Context<Self>) {
         self.view_only = config.view_only;
+        self.remote_is_mac = config.auth_method == VncAuthMethod::AppleRemoteDesktop;
         let session = start_session(config);
         let events = session.events.clone();
         self.session = Some(session);
@@ -253,7 +274,8 @@ impl VncWindow {
         }
         for event in batch {
             match event {
-                VncEvent::Connected { width, height, name } => {
+                VncEvent::Connected { width, height, name, apple } => {
+                    self.remote_is_mac |= apple;
                     self.desktop = (width, height);
                     self.surface.resize(width, height);
                     self.state = VncState::Connected;
@@ -292,6 +314,15 @@ impl VncWindow {
 
     fn sync_local_clipboard(&mut self, generation: u64, window: &mut Window, cx: &mut Context<Self>) {
         if self.generation != generation || self.state != VncState::Connected || self.view_only || !window.is_window_active() {
+            return;
+        }
+        self.push_local_clipboard(cx);
+    }
+
+    /// Sends the local clipboard text to the remote if it is new. Pasting calls this right before the key goes out,
+    /// so the remote never pastes what it had before (the poll above only runs every half second).
+    fn push_local_clipboard(&mut self, cx: &mut Context<Self>) {
+        if self.view_only {
             return;
         }
         let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) else { return };
@@ -370,9 +401,15 @@ impl VncWindow {
     fn wheel(&mut self, ev: &ScrollWheelEvent, cx: &mut Context<Self>) {
         let Some(point) = self.remote_point(ev.position) else { return };
         let delta = ev.delta.pixel_delta(px(20.));
-        let (dx, dy) = (f32::from(delta.x), f32::from(delta.y));
-        for bit in [if dy > 0.0 { WHEEL_UP } else if dy < 0.0 { WHEEL_DOWN } else { 0 }, if dx > 0.0 { WHEEL_LEFT } else if dx < 0.0 { WHEEL_RIGHT } else { 0 }] {
-            if bit != 0 {
+        // Same accumulator as the RDP window: a mouse wheel click is one notch, a trackpad adds up to whole notches.
+        for (vertical, amount) in self.wheel.push(f32::from(delta.x), f32::from(delta.y)) {
+            let bit = match (vertical, amount > 0) {
+                (true, true) => WHEEL_UP,
+                (true, false) => WHEEL_DOWN,
+                (false, false) => WHEEL_LEFT,
+                (false, true) => WHEEL_RIGHT,
+            };
+            for _ in 0..amount.unsigned_abs() / NOTCH as u16 {
                 // A wheel notch is a press and release of a virtual button.
                 self.send(VncCommand::Pointer { x: point.0, y: point.1, buttons: self.buttons | bit });
                 self.send(VncCommand::Pointer { x: point.0, y: point.1, buttons: self.buttons });
@@ -394,8 +431,17 @@ impl VncWindow {
             k.key_char.as_deref()
         };
         let Some(sym) = keysym_for_key(&k.key, text) else { return };
-        self.down_keys.insert(k.key.clone(), sym);
+        let pastes = (k.key == "v" && (m.platform || m.control)) || (k.key == "insert" && m.shift);
+        if pastes && self.can_send() {
+            self.push_local_clipboard(cx);
+        }
         self.send(VncCommand::Key { keysym: sym, down: true });
+        if m.platform {
+            // macOS swallows the key-up of a key pressed with Command held: release it now, or the remote keeps it down
+            self.send(VncCommand::Key { keysym: sym, down: false });
+        } else {
+            self.down_keys.insert(k.key.clone(), sym);
+        }
         cx.stop_propagation();
     }
 
@@ -406,11 +452,27 @@ impl VncWindow {
     }
 
     fn modifiers_changed(&mut self, now: Modifiers) {
-        let mods = |m: Modifiers| Mods { shift: m.shift, control: m.control, alt: m.alt, platform: m.platform };
+        let cmd_as_ctrl = !self.remote_is_mac;
+        let mods = |m: Modifiers| Mods { shift: m.shift, control: m.control, alt: m.alt, platform: m.platform }.for_remote(cmd_as_ctrl);
         for (sym, down) in modifier_changes(mods(self.last_mods), mods(now)) {
             self.send(VncCommand::Key { keysym: sym, down });
         }
         self.last_mods = now;
+    }
+
+    /// Lets go of everything held down: keys, modifiers and mouse buttons (focus left, or the mouse button was
+    /// released outside the picture, where no release event reaches it).
+    pub fn release_all_input(&mut self) {
+        let keys: Vec<u32> = self.down_keys.drain().map(|(_, sym)| sym).collect();
+        for sym in keys {
+            self.send(VncCommand::Key { keysym: sym, down: false });
+        }
+        self.modifiers_changed(Modifiers::default());
+        if self.buttons != 0 {
+            self.buttons = 0;
+            let p = self.pointer;
+            self.send_pointer(p);
+        }
     }
 
     pub fn send_ctrl_alt_del(&mut self) {
@@ -453,9 +515,6 @@ impl Render for VncWindow {
         if let Some(img) = self.surface.take_image() {
             swap_image(&mut self.image, img, window);
         }
-        if self.state == VncState::Connected {
-            window.request_animation_frame();
-        }
 
         let Some(host) = self.host.clone() else {
             return v_flex()
@@ -481,6 +540,11 @@ impl Render for VncWindow {
         let connecting = self.state == VncState::Connecting;
         let failed = self.state == VncState::Error;
         let pill = self.pill_color(cx);
+        let connected = self.state == VncState::Connected;
+        // How much the picture is scaled to fit the window, and what the remote machine calls itself.
+        let scale_percent = connected.then(|| contain_rect(self.stage_bounds.get(), self.desktop)).flatten().map(|(_, _, scale)| (scale * 100.0).round() as u32);
+        let server_name = connected.then(|| self.status_message.clone()).flatten();
+        let chip = |text: String| div().flex_none().px_1p5().rounded(px(4.)).bg(theme.muted).text_size(px(10.)).text_color(theme.muted_foreground).child(text);
         let target = if host.ip.is_empty() { host.name.clone() } else { host.ip.clone() };
         let bounds_cell = self.stage_bounds.clone();
 
@@ -500,6 +564,9 @@ impl Render for VncWindow {
             .on_mouse_up(MouseButton::Left, cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Left, ev.position, false, window, cx)))
             .on_mouse_up(MouseButton::Middle, cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Middle, ev.position, false, window, cx)))
             .on_mouse_up(MouseButton::Right, cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Right, ev.position, false, window, cx)))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Left, ev.position, false, window, cx)))
+            .on_mouse_up_out(MouseButton::Middle, cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Middle, ev.position, false, window, cx)))
+            .on_mouse_up_out(MouseButton::Right, cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Right, ev.position, false, window, cx)))
             .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, window, cx| this.mouse_moved(ev.position, window, cx)))
             .on_scroll_wheel(cx.listener(|this, ev: &ScrollWheelEvent, _, cx| this.wheel(ev, cx)))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| this.key_down(ev, cx)))
@@ -573,16 +640,33 @@ impl Render for VncWindow {
                 TitleBar::new().child(
                     h_flex()
                         .w_full()
+                        .min_w_0()
                         .gap_3()
                         .items_center()
                         .child(
                             v_flex()
-                                .child(div().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child(host.name.clone()))
-                                .child(div().text_size(px(10.)).text_color(theme.muted_foreground).child(format!("{}:{}", host.ip, host.port))),
+                                .min_w_0()
+                                .max_w(px(260.))
+                                .child(div().id("vnc-host-name").test_support().truncate().text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).child(host.name.clone()))
+                                .child(div().id("vnc-host-address").test_support().truncate().text_size(px(10.)).text_color(theme.muted_foreground).child(format!("{}:{}", host.ip, host.port))),
                         )
-                        .child(h_flex().id("vnc-status").test_support().gap_1().items_center().text_size(px(11.)).text_color(pill).child(div().size(px(6.)).rounded_full().bg(pill)).child(self.state.label()))
+                        .child(h_flex().id("vnc-status").test_support().flex_none().gap_1().items_center().text_size(px(11.)).text_color(pill).child(div().size(px(6.)).rounded_full().bg(pill)).child(self.state.label()))
+                        .when(connected, |bar| {
+                            bar.child(
+                                h_flex()
+                                    .id("vnc-info")
+                                    .test_support()
+                                    .min_w_0()
+                                    .gap_1p5()
+                                    .items_center()
+                                    .child(chip(format!("{} × {}", self.desktop.0, self.desktop.1)))
+                                    .when_some(scale_percent, |row, percent| row.child(chip(format!("{percent}%"))))
+                                    .when(self.view_only, |row| row.child(chip(t!("vnc.viewOnly")).text_color(theme.warning)))
+                                    .when_some(server_name.clone(), |row, name| row.child(div().id("vnc-server-name").test_support().truncate().max_w(px(200.)).text_size(px(10.)).text_color(theme.muted_foreground).child(name))),
+                            )
+                        })
                         .child(div().flex_1())
-                        .child(Button::new("vnc-reconnect").small().icon(Icon::new(IconName::RefreshCw)).label(t!("vnc.reconnect")).on_click(cx.listener(|this, _, window, cx| this.connect(window, cx))))
+                        .child(Button::new("vnc-reconnect").small().icon(Icon::new(IconName::RefreshCw)).label(t!("vnc.reconnect")).disabled(connecting).on_click(cx.listener(|this, _, window, cx| this.connect(window, cx))))
                         .child(Button::new("vnc-cad").small().label("Ctrl Alt Del").disabled(self.state != VncState::Connected || self.view_only).on_click(cx.listener(|this, _, _, _| this.send_ctrl_alt_del())))
                         .child(Button::new("vnc-disconnect").small().icon(Icon::new(IconName::X)).label(t!("vnc.disconnect")).on_click(cx.listener(|this, _, window, _| this.close_window(window)))),
                 ),

@@ -50,18 +50,19 @@ impl Global for Vault {}
 pub fn init(cx: &mut App) {
     #[allow(unused_mut)]
     let mut backend: Arc<dyn VaultBackend> = Arc::new(SystemVault);
-    // Debug builds only: `OPSBATCH_VAULT_DEMO=password|stale` shows the unlock dialog without touching the system
-    // keychain (the startup password is `demo`).
+    // Debug builds only: `OPSBATCH_VAULT_DEMO=password|stale|unavailable|broken` shows the unlock dialog without touching
+    // the system keychain (the startup password is `demo`; `broken` fails until the third try).
     #[cfg(debug_assertions)]
     if let Ok(mode) = std::env::var("OPSBATCH_VAULT_DEMO") {
-        backend = Arc::new(DemoVault { stale: mode == "stale", unlocked: std::sync::atomic::AtomicBool::new(false) });
+        backend = Arc::new(DemoVault { mode, tries: std::sync::atomic::AtomicUsize::new(0), unlocked: std::sync::atomic::AtomicBool::new(false) });
     }
     cx.set_global(Vault { backend, waiters: Vec::new(), requests: Vec::new(), dialog_open: false, dialog: None });
 }
 
 #[cfg(debug_assertions)]
 struct DemoVault {
-    stale: bool,
+    mode: String,
+    tries: std::sync::atomic::AtomicUsize,
     unlocked: std::sync::atomic::AtomicBool,
 }
 
@@ -72,8 +73,17 @@ impl VaultBackend for DemoVault {
     }
     fn unlock(&self, master_key: Option<String>) -> Result<(), String> {
         std::thread::sleep(std::time::Duration::from_millis(600));
+        let tries = self.tries.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+        if self.mode == "broken" && tries < 3 {
+            return Err(format!("macOS keychain 读取失败: 演示错误（第 {tries} 次）"));
+        }
         match master_key.as_deref().map(str::trim) {
-            None | Some("") if self.stale => Err("系统钥匙串中的本地加密密钥无法解开现有 vault，请输入启动密钥。".into()),
+            None | Some("") if self.mode == "broken" => {
+                self.unlocked.store(true, std::sync::atomic::Ordering::SeqCst);
+                Ok(())
+            }
+            None | Some("") if self.mode == "unavailable" => Err("系统钥匙串不可用，请输入启动密钥解锁，本次不会保存到钥匙串。详情: 演示: 没有 Secret Service".into()),
+            None | Some("") if self.mode == "stale" => Err("系统钥匙串中的本地加密密钥无法解开现有 vault，请输入启动密钥。".into()),
             None | Some("") => Err("本地加密密钥不存在，请输入新的解锁密钥。".into()),
             Some("demo") => {
                 self.unlocked.store(true, std::sync::atomic::Ordering::SeqCst);

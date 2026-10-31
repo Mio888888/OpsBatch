@@ -244,6 +244,132 @@ fn vnc_window_connects_paints_forwards_input_and_syncs_the_clipboard(cx: &mut Te
 }
 
 #[gpui_kit::test]
+fn pasting_sends_the_local_clipboard_first_and_releases_command_chords(cx: &mut TestAppContext) {
+    let _s = serial();
+    let fx = common::setup(cx, |_| {});
+    let mock = start_vnc_mock(false);
+    let id = add_host(&fx, new_remote_host("vnc-box", "vnc", Some(vnc_settings(mock.port, false)), None));
+    let (handle, view) = open_vnc(cx, &id, mock.port);
+    wait_until(cx, "connected", |cx| view.read_with(cx, |v, _| v.state() == VncState::Connected && v.surface().has_frame()));
+    win(cx, handle, |w, cx| w.click("vnc-stage", cx));
+    let _ = drain(&mock.received);
+
+    // Copy something locally and paste at once, well inside the half-second clipboard poll.
+    cx.update(|cx| cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("from the mac".into())));
+    win(cx, handle, |w, cx| w.press("cmd-v", cx));
+    let mut sent = Vec::new();
+    wait_until(cx, "clipboard and the v key reach the server", |_| {
+        sent.extend(drain(&mock.received));
+        contains(&sent, b"from the mac") && contains(&sent, &[4, 1, 0, 0, 0, 0, 0, 0x76]) && contains(&sent, &[4, 0, 0, 0, 0, 0, 0, 0x76])
+    });
+    let at = |needle: &[u8]| sent.windows(needle.len()).position(|w| w == needle).unwrap();
+    assert!(at(b"from the mac") < at(&[4, 1, 0, 0, 0, 0, 0, 0x76]), "the remote must have the text before the paste key arrives");
+    // a ClientCutText message: type 6, three padding bytes, the length
+    assert_eq!(&sent[at(b"from the mac") - 8..at(b"from the mac")], &[6, 0, 0, 0, 0, 0, 0, 12]);
+
+    // The same text is not sent twice by the poll afterwards.
+    cx.executor().advance_clock(Duration::from_millis(1200));
+    cx.run_until_parked();
+    assert!(!contains(&drain(&mock.received), b"from the mac"));
+
+    win(cx, handle, |w, cx| w.click("vnc-disconnect", cx));
+}
+
+/// The `(type, first byte)` of every client message in a stream of RFB client messages.
+fn rfb_messages(mut bytes: &[u8]) -> Vec<(u8, u8)> {
+    let mut out = Vec::new();
+    while let Some(&kind) = bytes.first() {
+        let len = match kind {
+            3 => 10,
+            4 | 6 if bytes.len() >= 8 && kind == 4 => 8,
+            5 => 6,
+            6 if bytes.len() >= 8 => 8 + u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]) as usize,
+            _ => break,
+        };
+        if bytes.len() < len {
+            break;
+        }
+        out.push((kind, bytes[1]));
+        bytes = &bytes[len..];
+    }
+    out
+}
+
+fn pointer_buttons(bytes: &[u8]) -> Vec<u8> {
+    rfb_messages(bytes).into_iter().filter(|(kind, _)| *kind == 5).map(|(_, buttons)| buttons).collect()
+}
+
+#[gpui_kit::test]
+fn vnc_scrolls_in_whole_notches_and_never_leaves_a_button_held(cx: &mut TestAppContext) {
+    use gpui_kit::{point, px, InputEvent as _, Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, ScrollDelta};
+    let _s = serial();
+    let fx = common::setup(cx, |_| {});
+    let mock = start_vnc_mock(false);
+    let id = add_host(&fx, new_remote_host("vnc-box", "vnc", Some(vnc_settings(mock.port, false)), None));
+    let (handle, view) = open_vnc(cx, &id, mock.port);
+    wait_until(cx, "connected", |cx| view.read_with(cx, |v, _| v.state() == VncState::Connected && v.surface().has_frame()));
+    win(cx, handle, |w, cx| {
+        w.render_frame(cx);
+        assert!(w.try_find("vnc-info").is_some(), "the bar shows the desktop size once connected");
+        w.click("vnc-stage", cx);
+    });
+    let settle = |cx: &mut TestAppContext| {
+        cx.executor().advance_clock(Duration::from_millis(200));
+        cx.run_until_parked();
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    settle(cx);
+    let _ = drain(&mock.received);
+
+    // A trackpad delivers small deltas: nothing goes out until they add up to one notch (20 px).
+    for _ in 0..3 {
+        win(cx, handle, |w, cx| w.scroll("vnc-stage", ScrollDelta::Pixels(point(px(0.), px(5.))), cx));
+    }
+    settle(cx);
+    assert!(!pointer_buttons(&drain(&mock.received)).contains(&8), "15 px is not a notch yet");
+    win(cx, handle, |w, cx| w.scroll("vnc-stage", ScrollDelta::Pixels(point(px(0.), px(5.))), cx));
+    let mut sent = Vec::new();
+    wait_until(cx, "one wheel-up notch", |_| {
+        sent.extend(drain(&mock.received));
+        pointer_buttons(&sent).windows(2).any(|w| w == [8, 0])
+    });
+    assert_eq!(pointer_buttons(&sent).iter().filter(|b| **b == 8).count(), 1, "exactly one notch");
+    // A mouse wheel click (one line) is one notch in the other direction; sideways goes to the horizontal buttons.
+    win(cx, handle, |w, cx| w.scroll("vnc-stage", ScrollDelta::Lines(point(0., -1.)), cx));
+    win(cx, handle, |w, cx| w.scroll("vnc-stage", ScrollDelta::Lines(point(1., 0.)), cx));
+    let mut wheel = Vec::new();
+    wait_until(cx, "down and left notches", |_| {
+        wheel.extend(drain(&mock.received));
+        let b = pointer_buttons(&wheel);
+        b.contains(&16) && b.contains(&32)
+    });
+
+    // Press inside the picture, let go outside of it: the remote still gets the release.
+    let centre = win(cx, handle, |w, _| w.find("vnc-stage").bounds().center());
+    let _ = drain(&mock.received);
+    win(cx, handle, |w, cx| w.dispatch_event(MouseDownEvent { button: MouseButton::Left, position: centre, modifiers: Modifiers::default(), click_count: 1, first_mouse: false }.to_platform_input(), cx));
+    win(cx, handle, |w, cx| w.dispatch_event(MouseUpEvent { button: MouseButton::Left, position: point(px(4.), px(4.)), modifiers: Modifiers::default(), click_count: 1 }.to_platform_input(), cx));
+    let mut drag = Vec::new();
+    wait_until(cx, "release outside the picture", |_| {
+        drag.extend(drain(&mock.received));
+        pointer_buttons(&drag).windows(2).any(|w| w == [1, 0])
+    });
+
+    // Press and lose focus (Cmd+Tab, another control): everything held is released too (the right button here).
+    let _ = drain(&mock.received);
+    win(cx, handle, |w, cx| w.dispatch_event(MouseDownEvent { button: MouseButton::Right, position: centre, modifiers: Modifiers::default(), click_count: 1, first_mouse: false }.to_platform_input(), cx));
+    // (GPUI reports focus loss only for an active window, which a headless test window never is: call what it calls)
+    view.update(cx, |v, _| v.release_all_input());
+    let mut blurred = Vec::new();
+    wait_until(cx, "release after losing focus", |_| {
+        blurred.extend(drain(&mock.received));
+        pointer_buttons(&blurred).windows(2).any(|w| w == [4, 0])
+    });
+
+    win(cx, handle, |w, cx| w.click("vnc-disconnect", cx));
+}
+
+#[gpui_kit::test]
 fn vnc_view_only_hosts_never_send_input(cx: &mut TestAppContext) {
     let _s = serial();
     let fx = common::setup(cx, |_| {});

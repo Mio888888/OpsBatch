@@ -8,6 +8,7 @@ mod audio;
 mod clipboard;
 mod clipboard_files;
 mod config;
+mod drive;
 mod dynamic_channels;
 mod egfx;
 mod file_transfer;
@@ -257,9 +258,30 @@ fn normalize_rdp_options(
         domain,
         enable_clipboard: settings.enable_clipboard.unwrap_or(true),
         enable_audio: settings.enable_audio.unwrap_or(default_enable_audio),
+        disk_path: shared_folder(settings),
         transport_mode,
         proxy,
     })
+}
+
+/// The folder to share with the remote machine: "map disk" is on and a folder is set (`~` stands for the home folder).
+/// Switched on without a folder, nothing is shared.
+fn shared_folder(settings: &StoredRdpSettings) -> Option<std::path::PathBuf> {
+    if settings.map_disk != Some(true) {
+        return None;
+    }
+    let path = settings.disk_path.as_deref()?.trim();
+    if path.is_empty() {
+        return None;
+    }
+    if let Some(rest) = path.strip_prefix('~') {
+        if rest.is_empty() || rest.starts_with(['/', '\\']) {
+            if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
+                return Some(std::path::PathBuf::from(home).join(rest.trim_start_matches(['/', '\\'])));
+            }
+        }
+    }
+    Some(std::path::PathBuf::from(path))
 }
 
 fn normalize_credentials(username: &str, password: Option<String>) -> Result<RdpCredentials, String> {

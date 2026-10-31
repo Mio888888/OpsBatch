@@ -8,6 +8,7 @@ use ironrdp::graphics::image_processing::PixelFormat;
 use ironrdp::input::Database as InputDatabase;
 #[cfg(test)]
 use ironrdp::pdu::nego::ResponseFlags;
+use ironrdp::rdpdr::Rdpdr;
 use ironrdp::rdpsnd::client::Rdpsnd;
 use ironrdp::session::image::DecodedImage;
 use ironrdp::session::{ActiveStage, ActiveStageOutput, GracefulDisconnectReason};
@@ -17,6 +18,7 @@ use tokio::net::TcpStream;
 use tokio::sync::{mpsc, oneshot};
 
 use super::audio::PcmAudioHandler;
+use super::drive::{DriveBackend, DRIVE_DEVICE_ID};
 use super::h264::H264Pipeline;
 use super::clipboard::{
     text_clipboard_formats, ClipboardAction, ClipboardBridge, TextClipboardBackend,
@@ -428,6 +430,12 @@ fn build_client_connector_with_clipboard(
     }
     if options.enable_audio {
         connector.attach_static_channel(Rdpsnd::new(Box::new(PcmAudioHandler::new())));
+    }
+    if let Some(folder) = &options.disk_path {
+        // a folder that cannot be shared stops the connection with the reason, instead of a drive that never shows up
+        let backend = DriveBackend::new(folder)?;
+        let label = backend.label().to_string();
+        connector.attach_static_channel(Rdpdr::new(Box::new(backend), "OpsBatch".to_string()).with_drives(Some(vec![(DRIVE_DEVICE_ID, label)])));
     }
     if options.transport_mode == RdpTransportMode::H264Direct {
         let (egfx_client, egfx_receiver, egfx_bitmap_rx, egfx_status_rx) =

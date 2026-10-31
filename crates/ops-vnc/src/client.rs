@@ -1,9 +1,9 @@
 //! Minimal async RFB client: handshake (3.3/3.7/3.8 incl. Apple's "003.889"), security None / VNC / ARD,
 //! 32-bit BGRX true-colour framebuffer, Raw + CopyRect + ZRLE + DesktopSize, input and clipboard messages.
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use flate2::{Decompress, FlushDecompress};
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadHalf, WriteHalf};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufReader, ReadHalf, WriteHalf};
 
 use crate::auth::{ard_client_response, vnc_auth_response, ArdServerHello};
 
@@ -69,12 +69,18 @@ impl Framebuffer {
 pub struct RfbInfo {
     pub name: String,
     pub version: (u32, u32),
+    /// The server announced Apple's "003.889": the remote machine is a Mac (Command is its shortcut key).
+    pub apple: bool,
     pub width: u16,
     pub height: u16,
 }
 
+/// The server's messages are made of many small fields (Hextile reads single bytes): reading them straight from the
+/// socket costs a system call each, so they go through a buffer.
+const READ_BUFFER: usize = 128 * 1024;
+
 pub struct RfbReader<R> {
-    stream: R,
+    stream: BufReader<R>,
     pub fb: Framebuffer,
     zrle: Decompress,
 }
@@ -110,8 +116,8 @@ pub async fn connect<S: AsyncRead + AsyncWrite + Unpin>(
 ) -> Result<(RfbInfo, RfbReader<ReadHalf<S>>, RfbWriter<WriteHalf<S>>)> {
     // --- version ---
     let mut ver = [0u8; 12];
-    s.read_exact(&mut ver).await?;
-    let text = std::str::from_utf8(&ver)?;
+    s.read_exact(&mut ver).await.context("握手第 1 步: 读取服务器 RFB 版本时连接被对端关闭(服务器接受了 TCP 连接但没有发出 VNC 欢迎信息; 请检查本机代理/VPN 是否接管了该地址, 以及服务器是否限制了来源 IP)")?;
+    let text = std::str::from_utf8(&ver).map_err(|_| anyhow!("握手第 1 步: 对端发来的不是 RFB 版本串 {ver:?}"))?;
     if !text.starts_with("RFB ") || ver[11] != b'\n' {
         bail!("not an RFB server: {text:?}");
     }
@@ -124,78 +130,82 @@ pub async fn connect<S: AsyncRead + AsyncWrite + Unpin>(
         (m, _) if m > 3 => (3, 8),
         _ => (3, 3),
     };
+    let server_version = text.trim_end().to_string();
     s.write_all(format!("RFB {cm:03}.{cn:03}\n").as_bytes()).await?;
 
     // --- security ---
     let has_pw = opts.password.as_deref().is_some_and(|p| !p.is_empty());
     let sec = if cn == 3 {
-        let t = s.read_u32().await?;
+        let t = s.read_u32().await.with_context(|| format!("握手第 2 步: 读取安全类型时连接被对端关闭(服务器 {server_version})"))?;
         if t == 0 {
             bail!("server refused: {}", read_reason(&mut s).await?);
         }
         t as u8
     } else {
-        let n = read_u8(&mut s).await? as usize;
+        let n = read_u8(&mut s).await.with_context(|| format!("握手第 2 步: 读取安全类型时连接被对端关闭(服务器 {server_version})"))? as usize;
         if n == 0 {
             bail!("server refused: {}", read_reason(&mut s).await?);
         }
         let mut types = vec![0u8; n];
-        s.read_exact(&mut types).await?;
+        s.read_exact(&mut types).await.with_context(|| format!("握手第 2 步: 读取安全类型列表时连接被对端关闭(服务器 {server_version})"))?;
         let chosen = choose_security(&types, opts.prefer, has_pw)
-            .ok_or_else(|| anyhow!("no supported security type in {types:?}"))?;
+            .ok_or_else(|| anyhow!("服务器 {server_version} 只提供了不支持的认证方式 {types:?}(支持 1=无、2=VNC 密码、30=Apple ARD)"))?;
         s.write_all(&[chosen]).await?;
         chosen
     };
 
+    let auth_stage = || format!("握手第 3 步: 认证({}, 服务器 {server_version})时连接被对端关闭", match sec { SEC_NONE => "无认证", SEC_VNC => "VNC 密码", SEC_ARD => "Apple ARD", _ => "其他" });
     match sec {
         SEC_NONE => {}
         SEC_VNC => {
             let mut ch = [0u8; 16];
-            s.read_exact(&mut ch).await?;
+            s.read_exact(&mut ch).await.with_context(auth_stage)?;
             let pw = opts.password.clone().unwrap_or_default();
-            s.write_all(&vnc_auth_response(&pw, &ch)).await?;
+            s.write_all(&vnc_auth_response(&pw, &ch)).await.with_context(auth_stage)?;
         }
         SEC_ARD => {
-            let generator = s.read_u16().await?;
-            let key_len = s.read_u16().await? as usize;
+            let generator = s.read_u16().await.with_context(auth_stage)?;
+            let key_len = s.read_u16().await.with_context(auth_stage)? as usize;
             if key_len == 0 || key_len > 1024 {
                 bail!("bad ARD key length {key_len}");
             }
             let mut prime = vec![0; key_len];
-            s.read_exact(&mut prime).await?;
+            s.read_exact(&mut prime).await.with_context(auth_stage)?;
             let mut server_public = vec![0; key_len];
-            s.read_exact(&mut server_public).await?;
+            s.read_exact(&mut server_public).await.with_context(auth_stage)?;
             let (enc, cpub) = ard_client_response(
                 &ArdServerHello { generator, prime, server_public },
                 opts.username.as_deref().unwrap_or(""),
                 opts.password.as_deref().unwrap_or(""),
             )?;
-            s.write_all(&enc).await?;
-            s.write_all(&cpub).await?;
+            s.write_all(&enc).await.with_context(auth_stage)?;
+            s.write_all(&cpub).await.with_context(auth_stage)?;
         }
         other => bail!("unsupported security type {other}"),
     }
     // SecurityResult is sent for every type in 3.8, and for non-None types in 3.3/3.7.
     if cn == 8 || sec != SEC_NONE {
-        if s.read_u32().await? != 0 {
+        let result = s.read_u32().await.with_context(|| format!("握手第 4 步: 等待认证结果时连接被对端关闭(服务器 {server_version}; 认证方式 {sec}; 常见原因: 密码不对而服务器直接断开, 或失败次数过多被临时封锁)"))?;
+        if result != 0 {
             let reason = if cn == 8 { read_reason(&mut s).await.unwrap_or_default() } else { String::new() };
             bail!("authentication failed{}", if reason.is_empty() { String::new() } else { format!(": {reason}") });
         }
     }
 
     // --- init ---
-    s.write_all(&[opts.shared as u8]).await?;
-    let width = s.read_u16().await?;
-    let height = s.read_u16().await?;
+    let init_stage = || format!("握手第 5 步: 读取桌面信息时连接被对端关闭(服务器 {server_version}; 认证已通过, 可能是服务器拒绝共享连接或当前没有可用桌面)");
+    s.write_all(&[opts.shared as u8]).await.with_context(init_stage)?;
+    let width = s.read_u16().await.with_context(init_stage)?;
+    let height = s.read_u16().await.with_context(init_stage)?;
     let mut _pf = [0u8; 16];
-    s.read_exact(&mut _pf).await?;
+    s.read_exact(&mut _pf).await.with_context(init_stage)?;
     let name = {
-        let len = s.read_u32().await? as usize;
+        let len = s.read_u32().await.with_context(init_stage)? as usize;
         if len > 1 << 16 {
             bail!("server name too long");
         }
         let mut b = vec![0; len];
-        s.read_exact(&mut b).await?;
+        s.read_exact(&mut b).await.with_context(init_stage)?;
         String::from_utf8_lossy(&b).into_owned()
     };
 
@@ -204,8 +214,8 @@ pub async fn connect<S: AsyncRead + AsyncWrite + Unpin>(
     s.write_all(&writer_msg).await?;
     let (r, w) = tokio::io::split(s);
     Ok((
-        RfbInfo { name, version: (cm, cn), width, height },
-        RfbReader { stream: r, fb: Framebuffer::new(width, height), zrle: Decompress::new(true) },
+        RfbInfo { name, version: (cm, cn), apple: server_version.starts_with("RFB 003.889"), width, height },
+        RfbReader { stream: BufReader::with_capacity(READ_BUFFER, r), fb: Framebuffer::new(width, height), zrle: Decompress::new(true) },
         RfbWriter { stream: w, width, height },
     ))
 }

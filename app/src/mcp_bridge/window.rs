@@ -20,6 +20,8 @@ const WIDTH: f32 = 380.;
 /// Lines of the terminal shown in the 16:10 view (10px text, 1.35 line height).
 const PREVIEW_LINES: usize = 15;
 const HEIGHT: f32 = 660.;
+/// The floating approval cards sit this far above the bottom edge, clear of the footer line.
+const APPROVALS_BOTTOM: f32 = 50.;
 
 fn options(cx: &App) -> WindowOptions {
     // top right of the primary display, under the menu bar
@@ -146,37 +148,51 @@ impl Render for McpActivityWindow {
             None => div().id("mcp-target-empty").test_support().w_full().aspect_ratio(16. / 10.).flex_none().flex().items_center().justify_center().rounded(px(10.)).border_1().border_color(ui.border).bg(ui.terminal_bg).text_size(px(12.)).text_color(ui.text_muted).child(t!("mcpwin.waiting")).into_any_element(),
         };
 
-        // approvals
-        let approvals = pending.iter().enumerate().map(|(ix, r)| {
-            let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
-            let (id1, id2, id3) = (r.id.clone(), r.id.clone(), r.id.clone());
-            v_flex()
-                .id(SharedString::from(format!("mcp-approval-{ix}")))
-                .test_support()
-                .gap(px(8.))
-                .p(px(12.))
-                .rounded(px(10.))
-                .border_1()
-                .border_color(crate::ai::settings::ui::amber().opacity(0.7))
-                .bg(crate::ai::settings::ui::amber().opacity(0.08))
-                .child(h_flex().gap(px(6.)).items_center().child(Icon::new(IconName::TriangleAlert).size_4().text_color(crate::ai::settings::ui::amber())).child(div().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).child(t!("mcpwin.approvalTitle"))))
-                .child(div().text_size(px(11.)).text_color(ui.text_muted).child(t!(&format!("mcpwin.tool.{}", r.tool))))
-                .child(div().px(px(8.)).py(px(6.)).rounded(px(6.)).bg(ui.terminal_bg).text_color(ui.term_fg).font_family("Menlo").text_size(px(11.)).line_height(relative(1.4)).child(r.summary.clone()))
-                .child(
-                    h_flex()
-                        .gap(px(6.))
-                        .child(Button::new(SharedString::from(format!("mcp-approve-{ix}"))).small().primary().label(t!("mcpwin.approve")).on_click(move |_, _, cx| {
-                            let _ = w1.update(cx, |this, cx| this.decide(&id1, Decision::Approve, cx));
-                        }))
-                        .child(Button::new(SharedString::from(format!("mcp-always-{ix}"))).small().label(t!("mcpwin.alwaysAllow")).on_click(move |_, _, cx| {
-                            let _ = w2.update(cx, |this, cx| this.decide(&id2, Decision::AlwaysAllow, cx));
-                        }))
-                        .child(Button::new(SharedString::from(format!("mcp-reject-{ix}"))).small().danger().label(t!("mcpwin.reject")).on_click(move |_, _, cx| {
-                            let _ = w3.update(cx, |this, cx| this.decide(&id3, Decision::Reject, cx));
-                        })),
-                )
-                .into_any_element()
-        });
+        // approvals: floating cards over the lower part of the records, so answering one (the card disappears) never
+        // pushes the records around
+        let card_base = ui.main.blend(crate::ai::settings::ui::amber().opacity(0.08));
+        let approvals: Vec<AnyElement> = pending
+            .iter()
+            .enumerate()
+            .map(|(ix, r)| {
+                let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
+                let (id1, id2, id3) = (r.id.clone(), r.id.clone(), r.id.clone());
+                let fade_key = {
+                    use std::hash::{Hash as _, Hasher as _};
+                    let mut h = std::collections::hash_map::DefaultHasher::new();
+                    r.id.hash(&mut h);
+                    h.finish() as usize
+                };
+                let card = v_flex()
+                    .id(SharedString::from(format!("mcp-approval-{ix}")))
+                    .test_support()
+                    .gap(px(8.))
+                    .p(px(12.))
+                    .rounded(px(10.))
+                    .border_1()
+                    .border_color(crate::ai::settings::ui::amber().opacity(0.7))
+                    .bg(card_base)
+                    .shadow_lg()
+                    .child(h_flex().gap(px(6.)).items_center().child(Icon::new(IconName::TriangleAlert).size_4().text_color(crate::ai::settings::ui::amber())).child(div().text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).child(t!("mcpwin.approvalTitle"))))
+                    .child(div().text_size(px(11.)).text_color(ui.text_muted).child(t!(&format!("mcpwin.tool.{}", r.tool))))
+                    .child(div().px(px(8.)).py(px(6.)).rounded(px(6.)).bg(ui.terminal_bg).text_color(ui.term_fg).font_family("Menlo").text_size(px(11.)).line_height(relative(1.4)).child(r.summary.clone()))
+                    .child(
+                        h_flex()
+                            .gap(px(6.))
+                            .child(Button::new(SharedString::from(format!("mcp-approve-{ix}"))).small().primary().label(t!("mcpwin.approve")).on_click(move |_, _, cx| {
+                                let _ = w1.update(cx, |this, cx| this.decide(&id1, Decision::Approve, cx));
+                            }))
+                            .child(Button::new(SharedString::from(format!("mcp-always-{ix}"))).small().label(t!("mcpwin.alwaysAllow")).on_click(move |_, _, cx| {
+                                let _ = w2.update(cx, |this, cx| this.decide(&id2, Decision::AlwaysAllow, cx));
+                            }))
+                            .child(Button::new(SharedString::from(format!("mcp-reject-{ix}"))).small().danger().label(t!("mcpwin.reject")).on_click(move |_, _, cx| {
+                                let _ = w3.update(cx, |this, cx| this.decide(&id3, Decision::Reject, cx));
+                            })),
+                    );
+                // a new card fades in (once per approval, not on every repaint)
+                crate::workbench::motion::fade_in(card, ("mcp-approval-fade", fade_key), cx)
+            })
+            .collect();
 
         // records, newest first
         let rows: Vec<AnyElement> = records
@@ -203,7 +219,8 @@ impl Render for McpActivityWindow {
                             .child(div().text_size(px(10.)).text_color(ui.text_muted).child(r.time.clone())),
                     )
                     .when(!r.summary.is_empty(), |d| d.child(div().font_family("Menlo").text_size(px(11.)).text_color(ui.text_secondary).truncate().child(r.summary.clone())))
-                    .when(!first.is_empty() && r.status != Status::Running, |d| d.child(div().text_size(px(11.)).text_color(ui.text_muted).truncate().child(first)))
+                    // the result line is always there (empty while the call runs) so a finished record keeps its height
+                    .child(div().h(px(18.)).flex_none().text_size(px(11.)).text_color(ui.text_muted).truncate().child(if r.status == Status::Running || r.status == Status::Pending { String::new() } else { first }))
                     .into_any_element()
             })
             .collect();
@@ -218,6 +235,7 @@ impl Render for McpActivityWindow {
         v_flex()
             .id("mcp-window")
             .test_support()
+            .relative()
             .size_full()
             .bg(ui.main)
             .text_color(ui.text)
@@ -227,7 +245,6 @@ impl Render for McpActivityWindow {
             // clear of the window buttons
             .pt(px(38.))
             .child(header)
-            .children(approvals)
             .child(
                 v_flex()
                     .id("mcp-records")
@@ -247,5 +264,6 @@ impl Render for McpActivityWindow {
                     .child(div().id("mcp-bridge-status").test_support().flex_1().min_w_0().truncate().text_size(px(10.)).font_family("Menlo").text_color(ui.text_muted).child(status_line))
                     .child(Button::new("mcp-clear").ghost().xsmall().label(t!("mcpwin.clear")).on_click(cx.listener(|this, _, _, cx| this.activity.update(cx, |a, cx| a.clear_finished(cx))))),
             )
+            .when(!approvals.is_empty(), |d| d.child(div().id("mcp-approvals").test_support().absolute().left(px(12.)).right(px(12.)).bottom(px(APPROVALS_BOTTOM)).flex().flex_col().gap(px(8.)).children(approvals)))
     }
 }

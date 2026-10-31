@@ -713,3 +713,48 @@ fn transfers_permissions_forward_changes_and_vault_writes_work_against_a_real_se
     });
     let _ = std::fs::remove_dir_all(&work);
 }
+
+#[gpui_kit::test]
+fn answering_an_approval_does_not_move_the_records(cx: &mut TestAppContext) {
+    let _s = serial();
+    let (_fx, port) = running_bridge(cx, PermissionMode::Confirm);
+    let activity = act(cx);
+    let reply = send(port, Some("test-token"), call("terminal_execute", json!({"command": "echo layout-probe; sleep 1; echo layout-done"})));
+    wait_until(cx, "approval requested", |cx| cx.update(|cx| activity.read(cx).pending().len() == 1));
+    let layout = |cx: &mut TestAppContext| {
+        in_activity_window(cx, |w, _| {
+            let b = |id: &str| w.try_find(id.to_string()).map(|e| e.bounds());
+            (b("mcp-target"), b("mcp-records"), b("mcp-record-0"), b("mcp-approvals"))
+        })
+        .unwrap()
+    };
+    let before = layout(cx);
+    assert!(before.3.is_some(), "the card is showing");
+    // the card floats over the records: it is not part of the layout that moves them
+    let (header, records, row, card) = (before.0.unwrap(), before.1.unwrap(), before.2.unwrap(), before.3.unwrap());
+    assert!(card.origin.y >= records.origin.y && card.origin.y + card.size.height <= records.origin.y + records.size.height + gpui_kit::px(60.), "the card sits over the lower part of the records: card {card:?} records {records:?}");
+
+    let id = cx.update(|cx| activity.read(cx).pending()[0].id.clone());
+    cx.update(|cx| activity.update(cx, |a, cx| a.decide(&id, Decision::Approve, cx)));
+    let mut frames = vec![layout(cx)];
+    for _ in 0..5 {
+        std::thread::sleep(Duration::from_millis(120));
+        cx.run_until_parked();
+        frames.push(layout(cx));
+    }
+    let v = wait_reply(cx, &reply).1;
+    assert_eq!(v["result"]["isError"], false);
+    for _ in 0..3 {
+        std::thread::sleep(Duration::from_millis(80));
+        cx.run_until_parked();
+        frames.push(layout(cx));
+    }
+    // the card is gone, and through approve -> running -> done nothing else moved or changed size
+    let last = frames.last().unwrap();
+    assert!(last.3.is_none(), "the card disappeared once answered");
+    for (i, f) in frames.iter().enumerate() {
+        assert_eq!(f.0, Some(header), "frame {i}: the header stays put");
+        assert_eq!(f.1, Some(records), "frame {i}: the records area stays put");
+        assert_eq!(f.2, Some(row), "frame {i}: the record row keeps its position and height");
+    }
+}

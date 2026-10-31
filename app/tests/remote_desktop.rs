@@ -511,6 +511,99 @@ fn rdp_frames_are_painted_mapped_and_input_is_forwarded(cx: &mut TestAppContext)
     manager.disconnect(sid).unwrap();
 }
 
+#[gpui_kit::test]
+fn rdp_side_buttons_the_wheel_and_the_input_method_reach_the_server(cx: &mut TestAppContext) {
+    use gpui_kit::test::ClickOptions;
+    use gpui_kit::{point, px, EntityInputHandler as _, MouseButton, NavigationDirection, ScrollDelta};
+    let _s = serial();
+    let _fx = common::setup(cx, |_| {});
+    let manager = opsbatch_app::rdp::global_manager();
+    let sid = "rdp-test-input-details";
+    let input = manager.register_test_session(sid);
+    let (handle, view) = open_view(cx, |window, cx| cx.new(|cx| RdpWindow::new(Some(HostRequest { host_id: "none".into(), name: "win-1".into(), ip: "10.0.0.5".into() }), String::new(), window, cx)));
+    wait_until(cx, "initial attempt finished", |cx| view.read_with(cx, |v, _| v.state() == RdpState::Error));
+    // before a session is attached the window takes no text from an input method
+    win(cx, handle, |w, cx| {
+        let accepts = view.update(cx, |v, cx| v.accepts_text_input(w, cx));
+        assert!(!accepts, "no input method while the window is not connected");
+    });
+    view.update(cx, |v, cx| v.debug_attach_test_session(sid.into(), cx));
+    let full: Vec<u8> = (0..800 * 600).flat_map(|_| [10u8, 20, 30, 255]).collect();
+    view.update(cx, |v, cx| v.inject_frame(frame_message((800, 600), 0, 0, 800, 600, &full), cx));
+    win(cx, handle, |w, cx| {
+        w.render_frame(cx);
+        w.render_frame(cx);
+    });
+    let drain_events = |cx: &mut TestAppContext, until: &dyn Fn(&[RdpInputEvent]) -> bool| -> Vec<RdpInputEvent> {
+        let mut seen = Vec::new();
+        wait_until(cx, "input events", |_| {
+            while let Ok(e) = input.try_recv() {
+                seen.push(e);
+            }
+            until(&seen)
+        });
+        seen
+    };
+
+    // the thumb buttons of a mouse are X1 (back) and X2 (forward)
+    for (direction, code) in [(NavigationDirection::Back, 3u8), (NavigationDirection::Forward, 4u8)] {
+        win(cx, handle, |w, cx| w.click_with_options("rdp-stage", ClickOptions::new().with_button(MouseButton::Navigate(direction)), cx));
+        let seen = drain_events(cx, &|seen| seen.iter().any(|e| matches!(e, RdpInputEvent::MouseButton { button, down: true, .. } if *button == code)) && seen.iter().any(|e| matches!(e, RdpInputEvent::MouseButton { button, down: false, .. } if *button == code)));
+        assert!(seen.iter().all(|e| !matches!(e, RdpInputEvent::MouseButton { button: 0..=2, .. })), "no left click is faked: {seen:?}");
+    }
+
+    // a mouse wheel click is one notch; sideways it is the other way round
+    win(cx, handle, |w, cx| w.scroll("rdp-stage", ScrollDelta::Lines(point(0., 1.)), cx));
+    let seen = drain_events(cx, &|s| s.iter().any(|e| matches!(e, RdpInputEvent::Wheel { .. })));
+    assert!(seen.iter().any(|e| matches!(e, RdpInputEvent::Wheel { delta: 120, vertical: true, .. })), "{seen:?}");
+    win(cx, handle, |w, cx| w.scroll("rdp-stage", ScrollDelta::Lines(point(1., 0.)), cx));
+    let seen = drain_events(cx, &|s| s.iter().any(|e| matches!(e, RdpInputEvent::Wheel { .. })));
+    assert!(seen.iter().any(|e| matches!(e, RdpInputEvent::Wheel { delta: -120, vertical: false, .. })), "{seen:?}");
+    // a trackpad: small movements add up to a notch instead of one notch each
+    for _ in 0..4 {
+        win(cx, handle, |w, cx| w.scroll("rdp-stage", ScrollDelta::Pixels(point(px(0.), px(-6.))), cx));
+    }
+    let seen = drain_events(cx, &|s| s.iter().any(|e| matches!(e, RdpInputEvent::Wheel { .. })));
+    let wheel: Vec<_> = seen.iter().filter(|e| matches!(e, RdpInputEvent::Wheel { .. })).collect();
+    assert_eq!(wheel.len(), 1, "4 x 6 px = one notch: {seen:?}");
+    assert!(matches!(wheel[0], RdpInputEvent::Wheel { delta: -120, vertical: true, .. }));
+
+    // the input method: composing text is shown, the committed text is typed as Unicode
+    win(cx, handle, |w, cx| {
+        assert!(view.update(cx, |v, cx| v.accepts_text_input(w, cx)));
+        view.update(cx, |v, cx| v.replace_and_mark_text_in_range(None, "ni hao", None, w, cx));
+        w.render_frame(cx);
+        assert!(w.try_find("rdp-composition").is_some(), "the composition is shown under the picture");
+        assert_eq!(view.update(cx, |v, cx| v.marked_text_range(w, cx)), Some(0..6));
+        assert_eq!(view.update(cx, |v, cx| v.text_for_range(0..2, &mut None, w, cx)), Some("ni".to_string()));
+        view.update(cx, |v, cx| v.replace_and_mark_text_in_range(None, "你好", None, w, cx));
+        assert_eq!(view.update(cx, |v, cx| v.marked_text_range(w, cx)), Some(0..2));
+        let bounds = view.update(cx, |v, cx| v.bounds_for_range(0..2, gpui_kit::Bounds::default(), w, cx));
+        assert!(bounds.is_some(), "the candidate list needs an anchor");
+    });
+    // nothing is sent while composing
+    cx.run_until_parked();
+    assert!(input.try_recv().is_err(), "the remote desktop sees nothing before the text is committed");
+    win(cx, handle, |w, cx| {
+        view.update(cx, |v, cx| v.replace_text_in_range(None, "你好", w, cx));
+        w.render_frame(cx);
+        assert!(w.try_find("rdp-composition").is_none(), "committing clears the composition");
+        assert_eq!(view.update(cx, |v, cx| v.marked_text_range(w, cx)), None);
+    });
+    let seen = drain_events(cx, &|s| s.len() >= 4);
+    assert_eq!(seen, vec![RdpInputEvent::Unicode { character: "你".into(), down: true }, RdpInputEvent::Unicode { character: "你".into(), down: false }, RdpInputEvent::Unicode { character: "好".into(), down: true }, RdpInputEvent::Unicode { character: "好".into(), down: false }]);
+    // cancelling a composition (Escape in the input method) leaves nothing behind
+    win(cx, handle, |w, cx| {
+        view.update(cx, |v, cx| v.replace_and_mark_text_in_range(None, "abc", None, w, cx));
+        view.update(cx, |v, cx| v.unmark_text(w, cx));
+        w.render_frame(cx);
+        assert!(w.try_find("rdp-composition").is_none());
+    });
+    cx.run_until_parked();
+    assert!(input.try_recv().is_err());
+    manager.disconnect(sid).unwrap();
+}
+
 // -- AI agent against a mock model ------------------------------------------------------------
 
 struct ModelMock {

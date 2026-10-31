@@ -2,6 +2,7 @@
 
 pub mod agent;
 pub mod ai_panel;
+pub mod input;
 pub mod window;
 
 use std::sync::{Arc, OnceLock};

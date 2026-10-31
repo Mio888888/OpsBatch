@@ -22,6 +22,7 @@ use ops_rdp::{RdpConnectRequest, RdpInputEvent, RdpMetricsPayload, RdpStatusPayl
 
 use super::agent::{execute_operations, wait_for_settle};
 use super::ai_panel::RdpAiPanel;
+use super::input::{button_code, text_events, utf16_len, WheelAccumulator};
 use super::rdp_manager;
 use crate::remote::surface::{fit_rect, map_point_fit, swap_image, RemoteSurface};
 use crate::window::{self, WindowKind};
@@ -158,6 +159,11 @@ pub struct RdpWindow {
     ai: Entity<RdpAiPanel>,
     toast: Option<String>,
     last_mods: Modifiers,
+    wheel: WheelAccumulator,
+    /// Text the input method is composing (shown under the picture until it is committed).
+    marked: Option<String>,
+    /// Where the pointer last was, in window coordinates: the input method puts its candidate list there.
+    pointer: Option<Point<Pixels>>,
     pending_move: Option<(u16, u16)>,
     move_scheduled: bool,
     generation: u64,
@@ -208,6 +214,9 @@ impl RdpWindow {
             ai,
             toast: None,
             last_mods: Modifiers::default(),
+            wheel: WheelAccumulator::default(),
+            marked: None,
+            pointer: None,
             pending_move: None,
             move_scheduled: false,
             generation: 0,
@@ -565,17 +574,14 @@ impl RdpWindow {
         if down {
             window.focus(&self.focus, cx);
         }
+        self.pointer = Some(pos);
         let Some((x, y)) = self.remote_point(pos) else { return };
-        let code = match button {
-            MouseButton::Left => 0,
-            MouseButton::Middle => 1,
-            MouseButton::Right => 2,
-            _ => return,
-        };
+        let Some(code) = button_code(button) else { return };
         self.send_input(RdpInputEvent::MouseButton { x, y, button: code, down }, cx);
     }
 
     fn mouse_moved(&mut self, pos: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+        self.pointer = Some(pos);
         let Some(point) = self.remote_point(pos) else { return };
         self.pending_move = Some(point);
         if self.move_scheduled {
@@ -595,13 +601,20 @@ impl RdpWindow {
     }
 
     fn wheel(&mut self, ev: &ScrollWheelEvent, cx: &mut Context<Self>) {
-        let Some((x, y)) = self.remote_point(ev.position) else { return };
-        let dy = f32::from(ev.delta.pixel_delta(px(20.)).y);
-        if dy == 0.0 {
+        let Some((x, y)) = self.remote_point(ev.position) else {
+            self.wheel.reset();
+            return;
+        };
+        let delta = ev.delta.pixel_delta(px(super::input::PIXELS_PER_NOTCH));
+        let (dx, dy) = (f32::from(delta.x), f32::from(delta.y));
+        if dx == 0.0 && dy == 0.0 {
             return;
         }
         // GPUI scrolls content down for positive deltas, i.e. the wheel turned "up"; RDP positive = up as well.
-        self.send_input(RdpInputEvent::Wheel { x, y, delta: if dy > 0.0 { 120 } else { -120 }, vertical: true }, cx);
+        // Sideways it is the other way round: content moving right means scrolling left.
+        for (vertical, delta) in self.wheel.push(dx, dy) {
+            self.send_input(RdpInputEvent::Wheel { x, y, delta, vertical }, cx);
+        }
         cx.stop_propagation();
     }
 
@@ -741,6 +754,62 @@ fn rdp_manager_for_drop() -> Arc<ops_rdp::RdpManager> {
     super::global_manager()
 }
 
+/// The local input method (Pinyin, Kana, Hangul...) composes text; what the user commits is typed on the remote
+/// desktop as Unicode. While composing, the text is shown under the picture (the remote has no notion of it).
+impl EntityInputHandler for RdpWindow {
+    fn text_for_range(&mut self, range: std::ops::Range<usize>, adjusted: &mut Option<std::ops::Range<usize>>, _: &mut Window, _: &mut Context<Self>) -> Option<String> {
+        // the only text this view holds is the composition
+        let text = self.marked.as_deref()?;
+        let units: Vec<u16> = text.encode_utf16().collect();
+        let (start, end) = (range.start.min(units.len()), range.end.min(units.len()));
+        *adjusted = Some(start..end);
+        String::from_utf16(&units[start..end]).ok()
+    }
+
+    fn selected_text_range(&mut self, _: bool, _: &mut Window, _: &mut Context<Self>) -> Option<UTF16Selection> {
+        let end = self.marked.as_deref().map(utf16_len).unwrap_or(0);
+        Some(UTF16Selection { range: end..end, reversed: false })
+    }
+
+    fn marked_text_range(&self, _: &mut Window, _: &mut Context<Self>) -> Option<std::ops::Range<usize>> {
+        self.marked.as_deref().filter(|m| !m.is_empty()).map(|m| 0..utf16_len(m))
+    }
+
+    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
+        if self.marked.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    fn replace_text_in_range(&mut self, _: Option<std::ops::Range<usize>>, text: &str, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked = None;
+        for e in text_events(text) {
+            self.send_input(e, cx);
+        }
+        cx.notify();
+    }
+
+    fn replace_and_mark_text_in_range(&mut self, _: Option<std::ops::Range<usize>>, new_text: &str, _: Option<std::ops::Range<usize>>, _: &mut Window, cx: &mut Context<Self>) {
+        self.marked = Some(new_text.to_string()).filter(|t| !t.is_empty());
+        cx.notify();
+    }
+
+    fn bounds_for_range(&mut self, _: std::ops::Range<usize>, element_bounds: Bounds<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<Bounds<Pixels>> {
+        // the candidate list opens next to the pointer (where the user is most likely typing), else at the bottom
+        let at = self.pointer.unwrap_or_else(|| point(element_bounds.origin.x + element_bounds.size.width / 2.0, element_bounds.origin.y + element_bounds.size.height - px(48.)));
+        Some(Bounds { origin: at, size: size(px(2.), px(20.)) })
+    }
+
+    fn character_index_for_point(&mut self, _: Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
+        Some(0)
+    }
+
+    /// Only a connected session takes text; otherwise the input method stays out of the way.
+    fn accepts_text_input(&self, _: &mut Window, _: &mut Context<Self>) -> bool {
+        self.state == RdpState::Connected
+    }
+}
+
 impl Drop for RdpWindow {
     fn drop(&mut self) {
         self.disconnect_active();
@@ -807,6 +876,7 @@ impl Render for RdpWindow {
         let stage_rect = self.stage_bounds.get();
         let picture = fit_rect(stage_rect, self.desktop, false).map(|(x, y, scale)| (x - stage_rect.0, y - stage_rect.1, f32::from(self.desktop.0) * scale, f32::from(self.desktop.1) * scale));
         let bounds_cell = self.stage_bounds.clone();
+        let (ime_focus, ime_view) = (self.focus.clone(), cx.entity());
 
         let stage = div()
             .id("rdp-stage")
@@ -826,6 +896,10 @@ impl Render for RdpWindow {
             .on_mouse_up(MouseButton::Left, cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Left, ev.position, false, window, cx)))
             .on_mouse_up(MouseButton::Middle, cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Middle, ev.position, false, window, cx)))
             .on_mouse_up(MouseButton::Right, cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Right, ev.position, false, window, cx)))
+            .on_mouse_down(MouseButton::Navigate(NavigationDirection::Back), cx.listener(|this, ev: &MouseDownEvent, window, cx| this.mouse_button(MouseButton::Navigate(NavigationDirection::Back), ev.position, true, window, cx)))
+            .on_mouse_down(MouseButton::Navigate(NavigationDirection::Forward), cx.listener(|this, ev: &MouseDownEvent, window, cx| this.mouse_button(MouseButton::Navigate(NavigationDirection::Forward), ev.position, true, window, cx)))
+            .on_mouse_up(MouseButton::Navigate(NavigationDirection::Back), cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Navigate(NavigationDirection::Back), ev.position, false, window, cx)))
+            .on_mouse_up(MouseButton::Navigate(NavigationDirection::Forward), cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Navigate(NavigationDirection::Forward), ev.position, false, window, cx)))
             .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, window, cx| this.mouse_moved(ev.position, window, cx)))
             .on_scroll_wheel(cx.listener(|this, ev: &ScrollWheelEvent, _, cx| this.wheel(ev, cx)))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| this.key(ev, true, cx)))
@@ -841,8 +915,23 @@ impl Render for RdpWindow {
             .drag_over::<ExternalPaths>(|s, _, _, cx| s.border_2().border_color(cx.theme().primary))
             .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| this.drop_files(paths, window, cx)))
             // Records where the stage is, for mouse mapping.
-            .child(canvas(move |bounds, _, _| bounds_cell.set((f32::from(bounds.origin.x), f32::from(bounds.origin.y), f32::from(bounds.size.width), f32::from(bounds.size.height))), |_, _, _, _| {}).absolute().size_full())
+            .child(
+                canvas(
+                    move |bounds, _, _| bounds_cell.set((f32::from(bounds.origin.x), f32::from(bounds.origin.y), f32::from(bounds.size.width), f32::from(bounds.size.height))),
+                    // the local input method composes text for the remote desktop through this handler
+                    move |bounds, _, window, cx| window.handle_input(&ime_focus, ElementInputHandler::new(bounds, ime_view.clone()), cx),
+                )
+                .absolute()
+                .size_full(),
+            )
             .child(stage_grid(grid_color))
+            .when_some(self.marked.clone().filter(|m| !m.is_empty()), |d, text| {
+                d.child(
+                    div().absolute().bottom(px(18.)).left_0().right_0().flex().justify_center().child(
+                        div().id("rdp-composition").test_support().px(px(10.)).py(px(4.)).rounded(px(6.)).bg(overlay_bg).border_1().border_color(grid_color).text_size(px(13.)).text_color(theme.foreground).child(text),
+                    ),
+                )
+            })
             .when_some(self.image.clone().zip(picture), |d, (image, (x, y, w, h))| {
                 d.child(
                     div()

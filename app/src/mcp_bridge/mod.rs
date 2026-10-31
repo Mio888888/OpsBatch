@@ -3,6 +3,8 @@
 //! settings) and reports everything to the activity window.
 
 pub mod activity;
+mod tools;
+mod vault;
 pub mod window;
 
 use std::time::{Duration, Instant};
@@ -225,6 +227,8 @@ struct Session {
     name: String,
     ip: String,
     local: bool,
+    /// The saved host behind an SSH session.
+    host_id: Option<String>,
     state: ConnState,
     active: bool,
     pane: Entity<TerminalPane>,
@@ -255,11 +259,11 @@ fn sessions(cx: &App) -> Vec<Session> {
         let is_active = active.as_deref() == Some(tab.key.as_str());
         let name = if tab.kind == TabKind::Local && tab.host_name.is_empty() { t!("mcpwin.target.local") } else { tab.host_name.clone() };
         if let Some(pane) = &tab.pane {
-            out.push(Session { id: pane.read(cx).session_id.clone(), name: name.clone(), ip: tab.host_ip.clone(), local: tab.kind == TabKind::Local, state: tab.state, active: is_active, pane: pane.clone() });
+            out.push(Session { id: pane.read(cx).session_id.clone(), name: name.clone(), ip: tab.host_ip.clone(), local: tab.kind == TabKind::Local, host_id: tab.host_id.clone(), state: tab.state, active: is_active, pane: pane.clone() });
         }
         if let Some(split) = &tab.split {
             if let Some(pane) = &split.pane {
-                out.push(Session { id: pane.read(cx).session_id.clone(), name: format!("{name} ({})", t!("mcpwin.target.split")), ip: tab.host_ip.clone(), local: tab.kind == TabKind::Local, state: split.state, active: false, pane: pane.clone() });
+                out.push(Session { id: pane.read(cx).session_id.clone(), name: format!("{name} ({})", t!("mcpwin.target.split")), ip: tab.host_ip.clone(), local: tab.kind == TabKind::Local, host_id: tab.host_id.clone(), state: split.state, active: false, pane: pane.clone() });
             }
         }
     }
@@ -439,6 +443,7 @@ fn dispatch(call: BridgeCall, cx: &mut App) {
             })
             .detach();
         }
+        other if tools::handles(other) => tools::dispatch(tool.clone(), arguments, reply, cx),
         other => {
             let _ = reply.send(ToolOutcome::error(format!("Unknown tool: {other}")));
         }

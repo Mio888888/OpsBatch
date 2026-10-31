@@ -70,6 +70,7 @@ pub struct Workbench {
 
 impl Workbench {
     pub fn new(assets: Entity<AssetsStore>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        cx.set_global(crate::stores::assets::AssetsHandle(assets.clone()));
         let asset_panel = cx.new(|cx| AssetPanel::new(assets.clone(), window, cx));
         let perf = cx.new(PerfMonitor::new);
         let subs = vec![cx.subscribe_in(&asset_panel, window, |this, _, ev: &AssetPanelEvent, window, cx| {

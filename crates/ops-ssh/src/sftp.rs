@@ -476,6 +476,13 @@ pub fn sftp_rename(
         .block_on(sftp.rename(&old_path, &new_path))
         .map_err(|e| format!("rename failed: {}", e))
 }
+/// Sets the permission bits (`0o644` style) of a remote file or directory.
+pub fn sftp_chmod(manager: &SftpManager, host_id: String, path: String, mode: u32) -> Result<(), String> {
+    let entry = manager.sessions.get(&host_id).ok_or("sftp session not found")?;
+    let sftp = entry.sftp.lock().map_err(|e| e.to_string())?;
+    let attrs = FileAttributes { permissions: Some(mode & 0o7777), ..Default::default() };
+    entry.lease.block_on(sftp.set_metadata(&path, attrs)).map_err(|e| format!("chmod failed: {}", e))
+}
 pub fn sftp_remove(
     manager: &SftpManager,
     host_id: String,

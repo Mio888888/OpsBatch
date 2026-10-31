@@ -70,7 +70,281 @@ pub fn tool_definitions() -> Vec<Value> {
                 "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 3600, "description": "Give up waiting after this many seconds (default: the command timeout of the safety settings)."}
             }, "required": ["command"], "additionalProperties": false}
         }),
+        json!({
+            "name": "sftp_list",
+            "description": "List a directory on the server of an SSH session over SFTP. Read only.",
+            "inputSchema": {"type": "object", "properties": {
+                "session_id": session_id_property(),
+                "path": {"type": "string", "description": "Absolute remote directory path."}
+            }, "required": ["path"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "sftp_stat",
+            "description": "Size, type, permissions and modification time of a remote file or directory. Read only.",
+            "inputSchema": {"type": "object", "properties": {
+                "session_id": session_id_property(),
+                "path": {"type": "string", "description": "Absolute remote path."}
+            }, "required": ["path"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "sftp_read",
+            "description": "Read a remote text file (UTF-8) over SFTP. Binary files and files over the size limit are refused. Read only.",
+            "inputSchema": {"type": "object", "properties": {
+                "session_id": session_id_property(),
+                "path": {"type": "string", "description": "Absolute remote file path."},
+                "max_bytes": {"type": "integer", "minimum": 1, "maximum": 1048576, "description": "Refuse files larger than this (default 262144)."}
+            }, "required": ["path"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "sftp_write",
+            "description": "Create or overwrite a remote text file over SFTP. Subject to the permission mode (observer refuses, confirm asks the user in OpsBatch, auto writes).",
+            "inputSchema": {"type": "object", "properties": {
+                "session_id": session_id_property(),
+                "path": {"type": "string", "description": "Absolute remote file path."},
+                "content": {"type": "string", "description": "The complete new file content."}
+            }, "required": ["path", "content"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "sftp_mkdir",
+            "description": "Create a remote directory over SFTP (the parent directory must exist). Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "session_id": session_id_property(),
+                "path": {"type": "string", "description": "Absolute remote directory path."}
+            }, "required": ["path"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "sftp_rename",
+            "description": "Rename or move a remote file or directory over SFTP. Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "session_id": session_id_property(),
+                "from": {"type": "string", "description": "Existing absolute remote path."},
+                "to": {"type": "string", "description": "New absolute remote path."}
+            }, "required": ["from", "to"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "sftp_delete",
+            "description": "Delete a remote file or an empty directory over SFTP. Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "session_id": session_id_property(),
+                "path": {"type": "string", "description": "Absolute remote path of a file or an empty directory."}
+            }, "required": ["path"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "sftp_upload",
+            "description": "Upload a file from this computer to the server of an SSH session over SFTP (an existing remote file is overwritten). Subject to the permission mode; the approval shows both paths.",
+            "inputSchema": {"type": "object", "properties": {
+                "session_id": session_id_property(),
+                "local_path": {"type": "string", "description": "Absolute path of an existing file on this computer."},
+                "remote_path": {"type": "string", "description": "Absolute remote file path to write."}
+            }, "required": ["local_path", "remote_path"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "sftp_download",
+            "description": "Download a remote file to this computer over SFTP. An existing local file is only replaced with overwrite=true. Subject to the permission mode; the approval shows both paths.",
+            "inputSchema": {"type": "object", "properties": {
+                "session_id": session_id_property(),
+                "remote_path": {"type": "string", "description": "Absolute remote file path."},
+                "local_path": {"type": "string", "description": "Absolute path on this computer; its folder must exist."},
+                "overwrite": {"type": "boolean", "description": "Replace the local file when it exists (default false)."}
+            }, "required": ["remote_path", "local_path"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "sftp_chmod",
+            "description": "Change the permission bits of a remote file or directory over SFTP. Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "session_id": session_id_property(),
+                "path": {"type": "string", "description": "Absolute remote path."},
+                "mode": {"type": "string", "description": "Octal permission bits such as \"644\", \"0755\" or \"2750\"."}
+            }, "required": ["path", "mode"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "portforward_list",
+            "description": "List the port forwards that exist for the open SSH sessions, with their status and traffic. Read only.",
+            "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}
+        }),
+        json!({
+            "name": "portforward_start",
+            "description": "Start a port forward through an SSH session: local (listen here, connect from the server), remote (listen on the server, connect from here) or dynamic (SOCKS5 proxy). Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "session_id": session_id_property(),
+                "type": {"type": "string", "enum": ["local", "remote", "dynamic"], "description": "Forward type."},
+                "local_address": {"type": "string", "description": "host:port on this machine (the listen side of a local or dynamic forward, the target of a remote one)."},
+                "remote_address": {"type": "string", "description": "host:port on the server side (the target of a local forward, the listen side of a remote one). Not used by dynamic forwards."},
+                "label": {"type": "string", "description": "Optional name shown in OpsBatch."}
+            }, "required": ["type", "local_address"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "portforward_stop",
+            "description": "Stop a running port forward. It stays in portforward_list as suspended; use portforward_delete to remove it. Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "forward_id": {"type": "string", "description": "A forward id from portforward_list."}
+            }, "required": ["forward_id"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "portforward_delete",
+            "description": "Stop a port forward and remove it from the list. Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "forward_id": {"type": "string", "description": "A forward id from portforward_list."}
+            }, "required": ["forward_id"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "portforward_update",
+            "description": "Change a port forward: it is stopped and started again with the changed settings (the forward gets a new forward_id, which is returned). Only the fields you pass change. Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "forward_id": {"type": "string", "description": "A forward id from portforward_list."},
+                "type": {"type": "string", "enum": ["local", "remote", "dynamic"]},
+                "local_address": {"type": "string", "description": "host:port"},
+                "remote_address": {"type": "string", "description": "host:port"},
+                "label": {"type": "string"}
+            }, "required": ["forward_id"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "portforward_duplicate",
+            "description": "Start another forward with the same settings as an existing one, optionally with changes (a local forward needs a different local_address, since the port is taken). Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "forward_id": {"type": "string", "description": "The forward to copy, from portforward_list."},
+                "local_address": {"type": "string", "description": "host:port"},
+                "remote_address": {"type": "string", "description": "host:port"},
+                "label": {"type": "string"}
+            }, "required": ["forward_id"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "vault_list_hosts",
+            "description": "List the hosts saved in OpsBatch (name, address, port, user, system, group, tags). Passwords and keys are never included. Read only.",
+            "inputSchema": {"type": "object", "properties": {
+                "query": {"type": "string", "description": "Only hosts whose name, address, group or tags contain this text (case-insensitive)."}
+            }, "additionalProperties": false}
+        }),
+        json!({
+            "name": "vault_list_scripts",
+            "description": "List the scripts in the OpsBatch library (name, language, category, risk, description; not the script text). Read only.",
+            "inputSchema": {"type": "object", "properties": {
+                "query": {"type": "string", "description": "Only scripts whose name, category, tags or description contain this text (case-insensitive)."}
+            }, "additionalProperties": false}
+        }),
+        json!({
+            "name": "vault_list_groups",
+            "description": "List the host groups (id, name, parent). Read only.",
+            "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false}
+        }),
+        json!({
+            "name": "vault_get_script",
+            "description": "Read one library script including its text. Read only.",
+            "inputSchema": {"type": "object", "properties": {
+                "script_id": {"type": "string", "description": "A script_id from vault_list_scripts."}
+            }, "required": ["script_id"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "vault_create_host",
+            "description": "Save a new host. Passwords and keys cannot be set through MCP: add them in OpsBatch afterwards. Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "name": {"type": "string"},
+                "address": {"type": "string", "description": "IP address or host name."},
+                "port": {"type": "integer", "minimum": 1, "maximum": 65535, "description": "Default 22."},
+                "username": {"type": "string", "description": "Default root."},
+                "auth_type": {"type": "string", "enum": ["password", "key"], "description": "How the host logs in (default password)."},
+                "system": {"type": "string", "description": "linux, windows, ... (default linux)."},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "group_id": {"type": "string", "description": "A group_id from vault_list_groups."},
+                "remark": {"type": "string"}
+            }, "required": ["name", "address"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "vault_update_host",
+            "description": "Change the settings of a saved host; only the fields you pass change and its credentials are kept. Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "host_id": {"type": "string", "description": "A host_id from vault_list_hosts."},
+                "name": {"type": "string"},
+                "address": {"type": "string"},
+                "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+                "username": {"type": "string"},
+                "auth_type": {"type": "string", "enum": ["password", "key"]},
+                "system": {"type": "string"},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "group_id": {"type": "string", "description": "A group_id, or an empty string for no group."},
+                "remark": {"type": "string"}
+            }, "required": ["host_id"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "vault_set_host_notes",
+            "description": "Set the notes (remark) of a saved host. Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "host_id": {"type": "string", "description": "A host_id from vault_list_hosts."},
+                "notes": {"type": "string"}
+            }, "required": ["host_id", "notes"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "vault_delete_host",
+            "description": "Delete a saved host together with its stored credentials. Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "host_id": {"type": "string", "description": "A host_id from vault_list_hosts."}
+            }, "required": ["host_id"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "vault_create_group",
+            "description": "Create a host group. Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "name": {"type": "string"},
+                "parent_id": {"type": "string", "description": "A group_id to nest it in."}
+            }, "required": ["name"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "vault_update_group",
+            "description": "Rename a host group or move it under another one. Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "group_id": {"type": "string", "description": "A group_id from vault_list_groups."},
+                "name": {"type": "string"},
+                "parent_id": {"type": "string", "description": "A group_id, or an empty string for the top level."}
+            }, "required": ["group_id"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "vault_delete_group",
+            "description": "Delete a host group; its hosts stay and become ungrouped. Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "group_id": {"type": "string", "description": "A group_id from vault_list_groups."}
+            }, "required": ["group_id"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "vault_create_script",
+            "description": "Add a script to the library. Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "name": {"type": "string"},
+                "content": {"type": "string", "description": "The script text."},
+                "language": {"type": "string", "description": "shell, powershell, python, ... (default shell)."},
+                "category": {"type": "string"},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "risk": {"type": "string", "enum": ["low", "medium", "high"], "description": "Default low."},
+                "description": {"type": "string"},
+                "platform": {"type": "string", "description": "linux, windows, ... (default linux)."}
+            }, "required": ["name", "content"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "vault_update_script",
+            "description": "Change a library script; only the fields you pass change. Built-in scripts cannot be changed. Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "script_id": {"type": "string", "description": "A script_id from vault_list_scripts."},
+                "name": {"type": "string"},
+                "content": {"type": "string"},
+                "language": {"type": "string"},
+                "category": {"type": "string"},
+                "tags": {"type": "array", "items": {"type": "string"}},
+                "risk": {"type": "string", "enum": ["low", "medium", "high"]},
+                "description": {"type": "string"},
+                "platform": {"type": "string"}
+            }, "required": ["script_id"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "vault_delete_script",
+            "description": "Delete a library script. Built-in scripts cannot be deleted. Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "script_id": {"type": "string", "description": "A script_id from vault_list_scripts."}
+            }, "required": ["script_id"], "additionalProperties": false}
+        }),
     ]
+}
+
+fn session_id_property() -> Value {
+    json!({"type": "string", "description": "A session_id of an SSH session from list_sessions. Defaults to the active SSH session."})
 }
 
 /// Answers one JSON-RPC message. `None` is for notifications (no response body).
@@ -427,7 +701,15 @@ mod tests {
     #[test]
     fn every_tool_has_a_schema() {
         let tools = tool_definitions();
-        assert_eq!(tools.iter().map(|t| t["name"].as_str().unwrap()).collect::<Vec<_>>(), vec!["get_environment", "list_sessions", "terminal_read", "terminal_execute"]);
+        let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
+        // the terminal tools come first; every name is unique and snake_case
+        assert_eq!(&names[..4], ["get_environment", "list_sessions", "terminal_read", "terminal_execute"]);
+        let mut unique = names.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), names.len());
+        assert!(names.iter().all(|n| n.chars().all(|c| c.is_ascii_lowercase() || c == '_')));
+        assert_eq!(names.len(), 34);
         assert!(tools.iter().all(|t| t["inputSchema"]["type"] == "object" && t["description"].as_str().is_some_and(|d| !d.is_empty())));
         assert_eq!(tools[3]["inputSchema"]["required"][0], "command");
     }
@@ -445,7 +727,7 @@ mod tests {
         let (status, text) = post(h.addr, Some("tok"), None, "POST", "/mcp", r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#).await;
         assert_eq!((status, text.as_str()), (202, ""));
         let (_, list) = rpc(h.addr, json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})).await;
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 4);
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), tool_definitions().len());
         let (_, ping) = rpc(h.addr, json!({"jsonrpc": "2.0", "id": 3, "method": "ping"})).await;
         assert_eq!(ping["result"], json!({}));
         let (_, unknown) = rpc(h.addr, json!({"jsonrpc": "2.0", "id": 4, "method": "nope"})).await;
@@ -550,7 +832,7 @@ mod tests {
         let out = run(path.clone(), session.clone()).await.unwrap();
         assert_eq!(out.len(), 3, "the notification is forwarded and answered with 202, which prints nothing");
         assert_eq!(out[0]["result"]["serverInfo"]["name"], SERVER_NAME);
-        assert_eq!(out[1]["result"]["tools"].as_array().unwrap().len(), 4);
+        assert_eq!(out[1]["result"]["tools"].as_array().unwrap().len(), tool_definitions().len());
         assert_eq!(out[2]["result"]["content"][0]["text"], "echo:hi");
 
         // a wrong token and a stopped server are explained

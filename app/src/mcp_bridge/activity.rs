@@ -104,6 +104,14 @@ impl McpActivity {
         id
     }
 
+    /// Replaces the summary of a running record (once the call's ids are resolved to names).
+    pub fn set_summary(&mut self, id: &str, summary: String, cx: &mut Context<Self>) {
+        if let Some(r) = self.records.iter_mut().find(|r| r.id == id) {
+            r.summary = summary;
+            cx.notify();
+        }
+    }
+
     pub fn finish(&mut self, id: &str, status: Status, detail: String, cx: &mut Context<Self>) {
         if let Some(r) = self.records.iter_mut().find(|r| r.id == id) {
             r.status = status;

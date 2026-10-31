@@ -2,6 +2,8 @@
 //! records everything in the activity window and asks for approval according to the permission mode.
 
 mod common;
+#[path = "../../crates/ops-ssh/tests/support/mod.rs"]
+mod ssh_support;
 
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -68,7 +70,12 @@ fn text_of(v: &Value) -> String {
 
 /// A connected local shell, the bridge switched on over HTTP with the given permission mode; returns (fixture, port).
 fn running_bridge(cx: &mut TestAppContext, mode: PermissionMode) -> (Fixture, u16) {
-    let fx = common::setup(cx, |_| {});
+    running_bridge_seeded(cx, mode, |_| {})
+}
+
+/// Same, with `seed` run against the services before the UI exists (hosts the test needs).
+fn running_bridge_seeded(cx: &mut TestAppContext, mode: PermissionMode, seed: impl FnOnce(&ops_core::Core)) -> (Fixture, u16) {
+    let fx = common::setup(cx, seed);
     win(cx, &fx, |w, cx| w.click("terminal-reopen-local", cx));
     let wsp = cx.update(|cx| workspace(cx));
     wait_until(cx, "local tab connected", |cx| cx.update(|cx| wsp.read(cx).active_tab().is_some_and(|t| t.state == ConnState::Connected)));
@@ -113,7 +120,7 @@ fn the_bridge_authenticates_lists_tools_and_describes_the_environment(cx: &mut T
     let init = send(port, Some("test-token"), json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-03-26"}}));
     assert_eq!(wait_reply(cx, &init).1["result"]["serverInfo"]["name"], "opsbatch-external");
     let list = send(port, Some("test-token"), json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}));
-    assert_eq!(wait_reply(cx, &list).1["result"]["tools"].as_array().unwrap().len(), 4);
+    assert_eq!(wait_reply(cx, &list).1["result"]["tools"].as_array().unwrap().len(), ops_ai::mcp_bridge::tool_definitions().len());
 
     // no window until a tool is called
     assert!(in_activity_window(cx, |_, _| ()).is_none());
@@ -305,7 +312,7 @@ fn the_real_stdio_launcher_talks_to_the_running_app(cx: &mut TestAppContext) {
     wait_until(cx, "three answers through stdio", |_| lines.lock().unwrap().len() >= 3);
     let got = lines.lock().unwrap().clone();
     assert_eq!(got[0]["result"]["serverInfo"]["name"], "opsbatch-external");
-    assert_eq!(got[1]["result"]["tools"].as_array().unwrap().len(), 4);
+    assert_eq!(got[1]["result"]["tools"].as_array().unwrap().len(), ops_ai::mcp_bridge::tool_definitions().len());
     assert!(text_of(&got[2]).contains("stdio-mark-3"), "{}", text_of(&got[2]));
     // the call shows up in the activity records like any other
     assert!(cx.update(|cx| activity(cx).read(cx).records().iter().any(|r| r.summary == "echo stdio-mark-3")));
@@ -320,4 +327,389 @@ fn the_real_stdio_launcher_talks_to_the_running_app(cx: &mut TestAppContext) {
     drop(stdin);
     let status = child.wait().unwrap();
     assert!(status.success(), "the launcher exits cleanly when its input closes");
+}
+
+// ---------------------------------------------------------------------------
+// SFTP, port forward and host-list tools against a private sshd
+// ---------------------------------------------------------------------------
+
+/// Calls a changing tool and approves it in the activity window.
+fn call_approved(cx: &mut TestAppContext, port: u16, tool: &str, args: Value) -> Value {
+    let activity = act(cx);
+    let reply = send(port, Some("test-token"), call(tool, args));
+    wait_until(cx, "approval requested", |cx| cx.update(|cx| activity.read(cx).pending().len() == 1));
+    let id = cx.update(|cx| activity.read(cx).pending()[0].id.clone());
+    cx.update(|cx| activity.update(cx, |a, cx| a.decide(&id, Decision::Approve, cx)));
+    wait_reply(cx, &reply).1
+}
+
+fn call_plain(cx: &mut TestAppContext, port: u16, tool: &str, args: Value) -> Value {
+    let reply = send(port, Some("test-token"), call(tool, args));
+    wait_reply(cx, &reply).1
+}
+
+#[gpui_kit::test]
+fn sftp_forward_and_host_tools_work_against_a_real_server(cx: &mut TestAppContext) {
+    let _s = serial();
+    let Some(sshd) = ssh_support::Sshd::start() else {
+        eprintln!("SKIP: no sshd");
+        return;
+    };
+    let user = std::env::var("USER").unwrap_or_else(|_| "root".into());
+    let (ssh_port, key) = (sshd.port as i32, sshd.private_key.clone());
+    let mut host_id = String::new();
+    let (_fx, port) = running_bridge_seeded(cx, PermissionMode::Confirm, |core| {
+        host_id = ops_core::rt::block_on(ops_ssh::hosts::add_host(
+            &core.db,
+            ops_ssh::hosts::NewHost { name: "mcp-srv".into(), ip: "127.0.0.1".into(), port: Some(ssh_port), auth_type: Some("key".into()), username: Some(user.clone()), password: None, private_key: Some(key.clone()), os: Some("linux".into()), tags: Some(r#"["prod","web"]"#.into()), group_id: None, remark: None, jump_chain: None, rdp_settings: None, proxy_settings: None },
+        ))
+        .unwrap()
+        .id;
+    });
+    let wsp = cx.update(|cx| workspace(cx));
+    let hid = host_id.clone();
+    cx.update(|cx| wsp.update(cx, |w, cx| w.open_host(&hid, "mcp-srv", "127.0.0.1", cx)));
+    wait_until(cx, "ssh tab connected", |cx| cx.update(|cx| wsp.read(cx).tabs().iter().any(|t| t.host_id.is_some() && t.state == ConnState::Connected)));
+    cx.run_until_parked();
+
+    let sessions: Value = serde_json::from_str(&text_of(&call_plain(cx, port, "list_sessions", json!({})))).unwrap();
+    let ssh_session = sessions.as_array().unwrap().iter().find(|s| s["type"] == "ssh").expect("an ssh session")["session_id"].as_str().unwrap().to_string();
+    let activity = act(cx);
+
+    let work = std::env::temp_dir().join(format!("opsbatch-mcp-tools-{}", uuid::Uuid::new_v4()));
+    let dir = work.display().to_string();
+    let file = format!("{dir}/notes.txt");
+    let moved = format!("{dir}/moved.txt");
+
+    // changing tools ask first: a rejected write leaves nothing behind
+    let reply = send(port, Some("test-token"), call("sftp_mkdir", json!({"path": dir})));
+    wait_until(cx, "mkdir approval requested", |cx| cx.update(|cx| activity.read(cx).pending().len() == 1));
+    let id = cx.update(|cx| activity.read(cx).pending()[0].id.clone());
+    cx.update(|cx| activity.update(cx, |a, cx| a.decide(&id, Decision::Reject, cx)));
+    let v = wait_reply(cx, &reply).1;
+    assert!(v["result"]["isError"] == true && text_of(&v).starts_with("Rejected"), "{}", text_of(&v));
+    assert!(!work.exists());
+
+    // approved: directory, file, listing, stat, read
+    assert_eq!(call_approved(cx, port, "sftp_mkdir", json!({"path": dir}))["result"]["isError"], false, "mkdir");
+    assert!(work.is_dir());
+    let v = call_approved(cx, port, "sftp_write", json!({"path": file, "content": "hello\nwörld\n", "session_id": ssh_session}));
+    assert_eq!(v["result"]["isError"], false, "{}", text_of(&v));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "hello\nwörld\n");
+    let list: Value = serde_json::from_str(&text_of(&call_plain(cx, port, "sftp_list", json!({"path": dir})))).unwrap();
+    assert_eq!((list[0]["name"].as_str(), list[0]["type"].as_str(), list[0]["size"].as_u64()), (Some("notes.txt"), Some("file"), Some(13)));
+    let stat: Value = serde_json::from_str(&text_of(&call_plain(cx, port, "sftp_stat", json!({"path": file})))).unwrap();
+    assert_eq!(stat["size"], 13);
+    assert_eq!(text_of(&call_plain(cx, port, "sftp_read", json!({"path": file}))), "hello\nwörld\n");
+    // reads are refused for binary files and for files over the limit
+    std::fs::write(work.join("blob.bin"), [0xffu8, 0xfe, 0x00]).unwrap();
+    let v = call_plain(cx, port, "sftp_read", json!({"path": format!("{dir}/blob.bin")}));
+    assert!(v["result"]["isError"] == true && text_of(&v).contains("UTF-8"), "{}", text_of(&v));
+    let v = call_plain(cx, port, "sftp_read", json!({"path": file, "max_bytes": 5}));
+    assert_eq!(v["result"]["isError"], true);
+
+    // rename and delete (a file, then the now empty directory after clearing it)
+    assert_eq!(call_approved(cx, port, "sftp_rename", json!({"from": file, "to": moved}))["result"]["isError"], false);
+    assert!(!std::path::Path::new(&file).exists() && std::path::Path::new(&moved).exists());
+    assert_eq!(call_approved(cx, port, "sftp_delete", json!({"path": moved}))["result"]["isError"], false);
+    let v = call_approved(cx, port, "sftp_delete", json!({"path": dir}));
+    assert!(v["result"]["isError"] == true && text_of(&v).contains("empty"), "a directory with content is not deleted: {}", text_of(&v));
+    std::fs::remove_file(work.join("blob.bin")).unwrap();
+    assert_eq!(call_approved(cx, port, "sftp_delete", json!({"path": dir}))["result"]["isError"], false);
+    assert!(!work.exists());
+
+    // "always allow" remembers a capability grant: the next write needs no approval
+    std::fs::create_dir_all(&work).unwrap();
+    let reply = send(port, Some("test-token"), call("sftp_write", json!({"path": file, "content": "one"})));
+    wait_until(cx, "write approval requested", |cx| cx.update(|cx| activity.read(cx).pending().len() == 1));
+    let id = cx.update(|cx| activity.read(cx).pending()[0].id.clone());
+    cx.update(|cx| activity.update(cx, |a, cx| a.decide(&id, Decision::AlwaysAllow, cx)));
+    assert_eq!(wait_reply(cx, &reply).1["result"]["isError"], false);
+    let store = cx.update(|cx| prefs_store::shared(cx));
+    assert_eq!(store.read_with(cx, |s, _| s.prefs().permission_grants.iter().map(|g| g.capability_id.clone()).collect::<Vec<_>>()), vec!["sftp.write"]);
+    assert_eq!(call_plain(cx, port, "sftp_write", json!({"path": file, "content": "two"}))["result"]["isError"], false, "granted");
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "two");
+
+    // observer mode keeps the reads and refuses the changes
+    cx.update(|cx| store.update(cx, |s, cx| s.update(cx, |p| p.global_permission_mode = PermissionMode::Observer)));
+    let v = call_plain(cx, port, "sftp_write", json!({"path": file, "content": "three"}));
+    assert!(text_of(&v).starts_with("Refused by OpsBatch"), "{}", text_of(&v));
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "two");
+    assert_eq!(call_plain(cx, port, "sftp_read", json!({"path": file}))["result"]["isError"], false);
+    cx.update(|cx| store.update(cx, |s, cx| s.update(cx, |p| p.global_permission_mode = PermissionMode::Auto)));
+
+    // a local forward really carries traffic, shows in the list and is removed again
+    let echo = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let echo_port = echo.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        for conn in echo.incoming().flatten() {
+            let mut conn = conn;
+            let mut buf = [0u8; 64];
+            if let Ok(n) = conn.read(&mut buf) {
+                let _ = conn.write_all(&buf[..n]);
+            }
+        }
+    });
+    let local_port = free_port();
+    let v = call_plain(cx, port, "portforward_start", json!({"type": "local", "local_address": format!("127.0.0.1:{local_port}"), "remote_address": format!("127.0.0.1:{echo_port}"), "label": "mcp-test"}));
+    assert_eq!(v["result"]["isError"], false, "{}", text_of(&v));
+    let started: Value = serde_json::from_str(&text_of(&v)).unwrap();
+    let forward_id = started["forward_id"].as_str().unwrap().to_string();
+    let reached = Arc::new(Mutex::new(None::<String>));
+    let r2 = reached.clone();
+    std::thread::spawn(move || {
+        for _ in 0..50 {
+            if let Ok(mut c) = TcpStream::connect(("127.0.0.1", local_port)) {
+                let _ = c.set_read_timeout(Some(Duration::from_secs(3)));
+                let _ = c.write_all(b"ping");
+                let mut buf = [0u8; 8];
+                if let Ok(n) = c.read(&mut buf) {
+                    *r2.lock().unwrap() = Some(String::from_utf8_lossy(&buf[..n]).into_owned());
+                    return;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    });
+    wait_until(cx, "traffic through the forward", |_| reached.lock().unwrap().is_some());
+    assert_eq!(reached.lock().unwrap().as_deref(), Some("ping"));
+    let forwards: Value = serde_json::from_str(&text_of(&call_plain(cx, port, "portforward_list", json!({})))).unwrap();
+    assert_eq!((forwards[0]["forward_id"].as_str(), forwards[0]["type"].as_str(), forwards[0]["label"].as_str()), (Some(forward_id.as_str()), Some("local"), Some("mcp-test")));
+    let v = call_plain(cx, port, "portforward_start", json!({"type": "local", "local_address": "nonsense"}));
+    assert!(text_of(&v).contains("host:port"), "{}", text_of(&v));
+    let stopped = call_plain(cx, port, "portforward_stop", json!({"forward_id": forward_id}));
+    assert_eq!(stopped["result"]["isError"], false, "{}", text_of(&stopped));
+    let after: Value = serde_json::from_str(&text_of(&call_plain(cx, port, "portforward_list", json!({})))).unwrap();
+    assert_eq!((after.as_array().unwrap().len(), after[0]["status"].as_str()), (1, Some("suspended")), "a stopped forward stays listed");
+    assert_eq!(call_plain(cx, port, "portforward_delete", json!({"forward_id": forward_id}))["result"]["isError"], false);
+    assert_eq!(text_of(&call_plain(cx, port, "portforward_list", json!({}))).trim(), "[]");
+    let v = call_plain(cx, port, "portforward_stop", json!({"forward_id": "nope"}));
+    assert!(text_of(&v).contains("Unknown forward_id"));
+
+    // the host list names the host and never carries credentials
+    let text = text_of(&call_plain(cx, port, "vault_list_hosts", json!({})));
+    let hosts: Value = serde_json::from_str(&text).unwrap();
+    assert_eq!((hosts[0]["name"].as_str(), hosts[0]["address"].as_str(), hosts[0]["username"].as_str(), hosts[0]["tags"].to_string()), (Some("mcp-srv"), Some("127.0.0.1"), Some(user.as_str()), r#"["prod","web"]"#.to_string()));
+    assert!(!text.contains("PRIVATE KEY") && !text.contains("password") && !text.contains("private_key"), "{text}");
+    assert_eq!(text_of(&call_plain(cx, port, "vault_list_hosts", json!({"query": "PROD"}))).matches("host_id").count(), 1);
+    assert_eq!(text_of(&call_plain(cx, port, "vault_list_hosts", json!({"query": "nothing-like-this"}))).trim(), "[]");
+    let scripts = call_plain(cx, port, "vault_list_scripts", json!({}));
+    assert_eq!(scripts["result"]["isError"], false);
+    assert!(serde_json::from_str::<Value>(&text_of(&scripts)).unwrap().is_array());
+
+    // every call is in the records; nothing is left pending
+    cx.update(|cx| {
+        let a = activity.read(cx);
+        assert!(a.pending().is_empty());
+        assert!(a.records().iter().any(|r| r.tool == "sftp_write" && r.status == Status::Done && r.summary.ends_with("(3 bytes)")));
+        assert!(a.records().iter().any(|r| r.tool == "sftp_mkdir" && r.status == Status::Denied));
+        assert!(a.records().iter().all(|r| !r.summary.contains("wörld") && !r.detail.contains("wörld")), "file content never shows in a record");
+    });
+    let _ = std::fs::remove_dir_all(&work);
+}
+
+#[gpui_kit::test]
+fn sftp_and_forward_tools_need_an_ssh_session(cx: &mut TestAppContext) {
+    let _s = serial();
+    let (_fx, port) = running_bridge(cx, PermissionMode::Auto);
+    for (tool, args) in [("sftp_list", json!({"path": "/"})), ("sftp_write", json!({"path": "/tmp/x", "content": "x"})), ("portforward_start", json!({"type": "dynamic", "local_address": "127.0.0.1:1080"}))] {
+        let v = call_plain(cx, port, tool, args);
+        assert_eq!(v["result"]["isError"], true, "{tool}");
+        assert!(text_of(&v).contains("SSH session"), "{tool}: {}", text_of(&v));
+    }
+    let v = call_plain(cx, port, "sftp_list", json!({"path": "/", "session_id": "nope"}));
+    assert!(text_of(&v).contains("Unknown session_id"));
+    // reading the saved hosts needs no session
+    assert_eq!(text_of(&call_plain(cx, port, "vault_list_hosts", json!({}))).trim(), "[]");
+}
+
+#[gpui_kit::test]
+fn transfers_permissions_forward_changes_and_vault_writes_work_against_a_real_server(cx: &mut TestAppContext) {
+    let _s = serial();
+    let Some(sshd) = ssh_support::Sshd::start() else {
+        eprintln!("SKIP: no sshd");
+        return;
+    };
+    let user = std::env::var("USER").unwrap_or_else(|_| "root".into());
+    let (ssh_port, key) = (sshd.port as i32, sshd.private_key.clone());
+    let mut host_id = String::new();
+    let (fx, port) = running_bridge_seeded(cx, PermissionMode::Confirm, |core| {
+        host_id = ops_core::rt::block_on(ops_ssh::hosts::add_host(
+            &core.db,
+            ops_ssh::hosts::NewHost { name: "mcp-srv".into(), ip: "127.0.0.1".into(), port: Some(ssh_port), auth_type: Some("key".into()), username: Some(user.clone()), password: None, private_key: Some(key.clone()), os: Some("linux".into()), tags: None, group_id: None, remark: None, jump_chain: None, rdp_settings: None, proxy_settings: None },
+        ))
+        .unwrap()
+        .id;
+    });
+    let wsp = cx.update(|cx| workspace(cx));
+    let hid = host_id.clone();
+    cx.update(|cx| wsp.update(cx, |w, cx| w.open_host(&hid, "mcp-srv", "127.0.0.1", cx)));
+    wait_until(cx, "ssh tab connected", |cx| cx.update(|cx| wsp.read(cx).tabs().iter().any(|t| t.host_id.is_some() && t.state == ConnState::Connected)));
+    cx.run_until_parked();
+    let activity = act(cx);
+    let store = cx.update(|cx| prefs_store::shared(cx));
+    let set_mode = |cx: &mut TestAppContext, mode: PermissionMode| cx.update(|cx| store.update(cx, |s, cx| s.update(cx, |p| p.global_permission_mode = mode)));
+
+    let work = std::env::temp_dir().join(format!("opsbatch-mcp-xfer-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&work).unwrap();
+    let dir = work.display().to_string();
+
+    // ---- upload: the approval names both paths; bad local paths are refused before anything is asked
+    let local_src = format!("{dir}/local-src.txt");
+    std::fs::write(&local_src, "uploaded bytes").unwrap();
+    let remote = format!("{dir}/remote-dst.txt");
+    let reply = send(port, Some("test-token"), call("sftp_upload", json!({"local_path": local_src, "remote_path": remote})));
+    wait_until(cx, "upload approval requested", |cx| cx.update(|cx| activity.read(cx).pending().len() == 1));
+    let pending = cx.update(|cx| activity.read(cx).pending()[0].clone());
+    assert_eq!(pending.summary, format!("{local_src} → {remote}"));
+    cx.update(|cx| activity.update(cx, |a, cx| a.decide(&pending.id, Decision::Approve, cx)));
+    let v = wait_reply(cx, &reply).1;
+    assert_eq!(v["result"]["isError"], false, "{}", text_of(&v));
+    assert_eq!(std::fs::read_to_string(&remote).unwrap(), "uploaded bytes");
+    set_mode(cx, PermissionMode::Auto);
+    for (args, needle) in [(json!({"local_path": "relative.txt", "remote_path": remote}), "absolute"), (json!({"local_path": dir, "remote_path": remote}), "regular file"), (json!({"local_path": format!("{dir}/missing"), "remote_path": remote}), "Cannot read")] {
+        let v = call_plain(cx, port, "sftp_upload", args);
+        assert!(v["result"]["isError"] == true && text_of(&v).contains(needle), "{needle}: {}", text_of(&v));
+    }
+
+    // ---- download: never replaces a local file unless told to
+    let target = format!("{dir}/downloaded.txt");
+    assert_eq!(call_plain(cx, port, "sftp_download", json!({"remote_path": remote, "local_path": target}))["result"]["isError"], false);
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "uploaded bytes");
+    std::fs::write(&target, "keep me").unwrap();
+    let v = call_plain(cx, port, "sftp_download", json!({"remote_path": remote, "local_path": target}));
+    assert!(text_of(&v).contains("overwrite=true"), "{}", text_of(&v));
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep me");
+    assert_eq!(call_plain(cx, port, "sftp_download", json!({"remote_path": remote, "local_path": target, "overwrite": true}))["result"]["isError"], false);
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "uploaded bytes");
+    let v = call_plain(cx, port, "sftp_download", json!({"remote_path": remote, "local_path": format!("{dir}/no-such-folder/x")}));
+    assert!(text_of(&v).contains("existing folder"), "{}", text_of(&v));
+    let v = call_plain(cx, port, "sftp_download", json!({"remote_path": format!("{dir}/absent"), "local_path": format!("{dir}/absent.txt")}));
+    assert_eq!(v["result"]["isError"], true);
+
+    // ---- permissions
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(call_plain(cx, port, "sftp_chmod", json!({"path": remote, "mode": "0600"}))["result"]["isError"], false);
+    assert_eq!(std::fs::metadata(&remote).unwrap().permissions().mode() & 0o7777, 0o600);
+    let v = call_plain(cx, port, "sftp_chmod", json!({"path": remote, "mode": "rwx"}));
+    assert!(text_of(&v).contains("octal"), "{}", text_of(&v));
+    // observer mode refuses all three
+    set_mode(cx, PermissionMode::Observer);
+    for (tool, args) in [("sftp_upload", json!({"local_path": local_src, "remote_path": remote})), ("sftp_download", json!({"remote_path": remote, "local_path": format!("{dir}/o.txt")})), ("sftp_chmod", json!({"path": remote, "mode": "777"}))] {
+        let v = call_plain(cx, port, tool, args);
+        assert!(text_of(&v).starts_with("Refused by OpsBatch"), "{tool}: {}", text_of(&v));
+    }
+    assert_eq!(std::fs::metadata(&remote).unwrap().permissions().mode() & 0o7777, 0o600);
+    set_mode(cx, PermissionMode::Auto);
+
+    // ---- forward changes: update replaces, duplicate adds, delete removes; bad input leaves things alone
+    let (p1, p2, p3) = (free_port(), free_port(), free_port());
+    let started = call_plain(cx, port, "portforward_start", json!({"type": "local", "local_address": format!("127.0.0.1:{p1}"), "remote_address": "127.0.0.1:9", "label": "first"}));
+    let first: Value = serde_json::from_str(&text_of(&started)).unwrap();
+    let id1 = first["forward_id"].as_str().unwrap().to_string();
+    let updated = call_plain(cx, port, "portforward_update", json!({"forward_id": id1, "local_address": format!("127.0.0.1:{p2}"), "label": "renamed"}));
+    assert_eq!(updated["result"]["isError"], false, "{}", text_of(&updated));
+    let moved: Value = serde_json::from_str(&text_of(&updated)).unwrap();
+    let id2 = moved["forward_id"].as_str().unwrap().to_string();
+    assert_ne!(id1, id2, "an update starts a new forward");
+    assert_eq!((moved["label"].as_str(), moved["remote_address"].as_str()), (Some("renamed"), Some("127.0.0.1:9")), "unchanged fields are kept");
+    let v = call_plain(cx, port, "portforward_update", json!({"forward_id": id2, "local_address": "nonsense"}));
+    assert!(text_of(&v).contains("host:port"));
+    let v = call_plain(cx, port, "portforward_update", json!({"forward_id": id1}));
+    assert!(text_of(&v).contains("Unknown forward_id"), "the replaced forward is gone: {}", text_of(&v));
+    let copy = call_plain(cx, port, "portforward_duplicate", json!({"forward_id": id2, "local_address": format!("127.0.0.1:{p3}"), "label": "copy"}));
+    assert_eq!(copy["result"]["isError"], false, "{}", text_of(&copy));
+    let copy: Value = serde_json::from_str(&text_of(&copy)).unwrap();
+    let list: Value = serde_json::from_str(&text_of(&call_plain(cx, port, "portforward_list", json!({})))).unwrap();
+    assert_eq!(list.as_array().unwrap().len(), 2);
+    for id in [id2.as_str(), copy["forward_id"].as_str().unwrap()] {
+        assert_eq!(call_plain(cx, port, "portforward_delete", json!({"forward_id": id}))["result"]["isError"], false);
+    }
+    assert_eq!(text_of(&call_plain(cx, port, "portforward_list", json!({}))).trim(), "[]");
+
+    // ---- vault: groups, hosts, scripts. The approval names the object, not its id
+    set_mode(cx, PermissionMode::Confirm);
+    let group: Value = serde_json::from_str(&text_of(&call_approved(cx, port, "vault_create_group", json!({"name": "Production"})))).unwrap();
+    let group_id = group["group_id"].as_str().unwrap().to_string();
+    let sub: Value = serde_json::from_str(&text_of(&call_approved(cx, port, "vault_create_group", json!({"name": "Web", "parent_id": group_id})))).unwrap();
+    let sub_id = sub["group_id"].as_str().unwrap().to_string();
+    assert_eq!(sub["parent_id"], group_id.as_str());
+    let v = call_approved(cx, port, "vault_update_group", json!({"group_id": group_id, "parent_id": sub_id}));
+    assert!(text_of(&v).contains("below itself"), "{}", text_of(&v));
+    assert_eq!(call_approved(cx, port, "vault_update_group", json!({"group_id": sub_id, "name": "Frontend"}))["result"]["isError"], false);
+    let groups: Value = serde_json::from_str(&text_of(&call_plain(cx, port, "vault_list_groups", json!({})))).unwrap();
+    assert!(groups.as_array().unwrap().iter().any(|g| g["name"] == "Frontend" && g["parent_id"] == group_id.as_str()));
+
+    let created: Value = serde_json::from_str(&text_of(&call_approved(cx, port, "vault_create_host", json!({"name": "db-1", "address": "10.0.0.5", "port": 2222, "username": "deploy", "tags": ["db", "prod"], "group_id": group_id, "remark": "primary"})))).unwrap();
+    let new_host = created["host_id"].as_str().unwrap().to_string();
+    assert_eq!((created["port"].as_i64(), created["username"].as_str(), created["auth_type"].as_str()), (Some(2222), Some("deploy"), Some("password")));
+    // the sidebar knows about it without a manual refresh
+    wait_until(cx, "the sidebar shows the new host", |cx| cx.update(|cx| opsbatch_app::stores::assets::shared(cx).is_some_and(|a| a.read(cx).host(&new_host).is_some())));
+    set_mode(cx, PermissionMode::Auto);
+    for bad in [json!({"name": "x", "address": "y", "port": 0}), json!({"name": "x", "address": "y", "auth_type": "magic"}), json!({"name": "x", "address": "y", "group_id": "nope"}), json!({"name": "x", "address": "y", "tags": "a"}), json!({"name": " ", "address": "y"})] {
+        let v = call_plain(cx, port, "vault_create_host", bad.clone());
+        assert_eq!(v["result"]["isError"], true, "{bad}");
+    }
+    let hosts: Value = serde_json::from_str(&text_of(&call_plain(cx, port, "vault_list_hosts", json!({"query": "production"})))).unwrap();
+    assert_eq!((hosts.as_array().unwrap().len(), hosts[0]["name"].as_str(), hosts[0]["group"].as_str()), (1, Some("db-1"), Some("Production")));
+
+    // an update changes only what it names and never touches the credentials
+    let before = ops_core::rt::block_on(ops_ssh::hosts::list_hosts(&fx.ctx.db)).unwrap().into_iter().find(|h| h.id == host_id).unwrap();
+    let v = call_plain(cx, port, "vault_update_host", json!({"host_id": host_id, "remark": "managed by MCP", "tags": ["x"], "group_id": group_id}));
+    assert_eq!(v["result"]["isError"], false, "{}", text_of(&v));
+    let notes = call_plain(cx, port, "vault_set_host_notes", json!({"host_id": host_id, "notes": "second note"}));
+    assert_eq!(notes["result"]["isError"], false, "{}", text_of(&notes));
+    let after = ops_core::rt::block_on(ops_ssh::hosts::list_hosts(&fx.ctx.db)).unwrap().into_iter().find(|h| h.id == host_id).unwrap();
+    assert_eq!((after.remark.as_str(), after.group_id.as_deref(), after.tags.as_str()), ("second note", Some(group_id.as_str()), r#"["x"]"#));
+    assert_eq!((after.port, after.username.as_str(), after.auth_type.as_str(), after.ip.as_str()), (before.port, before.username.as_str(), before.auth_type.as_str(), before.ip.as_str()));
+    assert!(after.private_key.is_some() && after.private_key == before.private_key, "the stored key is kept");
+    assert!(!text_of(&v).contains("PRIVATE KEY"));
+    let v = call_plain(cx, port, "vault_update_host", json!({"host_id": host_id, "group_id": ""}));
+    assert_eq!(v["result"]["isError"], false);
+    assert!(call_plain(cx, port, "vault_update_host", json!({"host_id": "nope", "name": "x"}))["result"]["isError"] == true);
+
+    // deleting asks first, and the approval shows the host's name
+    set_mode(cx, PermissionMode::Confirm);
+    let reply = send(port, Some("test-token"), call("vault_delete_host", json!({"host_id": new_host})));
+    wait_until(cx, "delete approval requested", |cx| cx.update(|cx| activity.read(cx).pending().len() == 1));
+    let pending = cx.update(|cx| activity.read(cx).pending()[0].clone());
+    assert!(pending.summary.contains("db-1") && pending.summary.contains("deploy@10.0.0.5"), "{}", pending.summary);
+    cx.update(|cx| activity.update(cx, |a, cx| a.decide(&pending.id, Decision::Reject, cx)));
+    assert!(text_of(&wait_reply(cx, &reply).1).starts_with("Rejected"));
+    assert!(ops_core::rt::block_on(ops_ssh::hosts::list_hosts(&fx.ctx.db)).unwrap().iter().any(|h| h.id == new_host), "a rejected delete keeps the host");
+    assert_eq!(call_approved(cx, port, "vault_delete_host", json!({"host_id": new_host}))["result"]["isError"], false);
+    assert!(!ops_core::rt::block_on(ops_ssh::hosts::list_hosts(&fx.ctx.db)).unwrap().iter().any(|h| h.id == new_host));
+    wait_until(cx, "the sidebar drops the host", |cx| cx.update(|cx| opsbatch_app::stores::assets::shared(cx).is_some_and(|a| a.read(cx).host(&new_host).is_none())));
+    // deleting a group keeps its hosts, now ungrouped
+    assert_eq!(call_approved(cx, port, "vault_delete_group", json!({"group_id": group_id}))["result"]["isError"], false);
+    let still = ops_core::rt::block_on(ops_ssh::hosts::list_hosts(&fx.ctx.db)).unwrap().into_iter().find(|h| h.id == host_id).unwrap();
+    assert_eq!(still.group_id, None);
+
+    // scripts: the library keeps the text, records and approvals never show it
+    set_mode(cx, PermissionMode::Auto);
+    let made: Value = serde_json::from_str(&text_of(&call_plain(cx, port, "vault_create_script", json!({"name": "Restart web", "content": "systemctl restart nginx\n", "language": "shell", "risk": "medium", "tags": ["ops"], "description": "restarts nginx"})))).unwrap();
+    let sid = made["script_id"].as_str().unwrap().to_string();
+    assert_eq!((made["risk"].as_str(), made["language"].as_str(), made["builtin"].as_bool()), (Some("medium"), Some("shell"), Some(false)));
+    let got: Value = serde_json::from_str(&text_of(&call_plain(cx, port, "vault_get_script", json!({"script_id": sid})))).unwrap();
+    assert_eq!(got["content"], "systemctl restart nginx\n");
+    assert!(!text_of(&call_plain(cx, port, "vault_list_scripts", json!({"query": "restart"}))).contains("systemctl"), "the list has no script text");
+    let v = call_plain(cx, port, "vault_update_script", json!({"script_id": sid, "content": "systemctl reload nginx\n", "risk": "low"}));
+    assert_eq!(v["result"]["isError"], false, "{}", text_of(&v));
+    let got: Value = serde_json::from_str(&text_of(&call_plain(cx, port, "vault_get_script", json!({"script_id": sid})))).unwrap();
+    assert_eq!((got["content"].as_str(), got["risk"].as_str(), got["name"].as_str()), (Some("systemctl reload nginx\n"), Some("low"), Some("Restart web")));
+    assert!(call_plain(cx, port, "vault_update_script", json!({"script_id": sid, "risk": "extreme"}))["result"]["isError"] == true);
+    assert_eq!(call_plain(cx, port, "vault_delete_script", json!({"script_id": sid}))["result"]["isError"], false);
+    assert!(call_plain(cx, port, "vault_get_script", json!({"script_id": sid}))["result"]["isError"] == true);
+    let all: Value = serde_json::from_str(&text_of(&call_plain(cx, port, "vault_list_scripts", json!({})))).unwrap();
+    if let Some(builtin) = all.as_array().unwrap().iter().find(|s| s["builtin"] == true) {
+        let bid = builtin["script_id"].as_str().unwrap();
+        assert!(text_of(&call_plain(cx, port, "vault_update_script", json!({"script_id": bid, "name": "x"}))).contains("Built-in"));
+        assert!(text_of(&call_plain(cx, port, "vault_delete_script", json!({"script_id": bid}))).contains("Built-in"));
+    }
+    cx.update(|cx| {
+        let a = activity.read(cx);
+        assert!(a.pending().is_empty());
+        assert!(a.records().iter().all(|r| !r.summary.contains("systemctl") && !r.detail.contains("systemctl") && !r.summary.contains("second note")), "text and notes never show in a record");
+    });
+    let _ = std::fs::remove_dir_all(&work);
 }

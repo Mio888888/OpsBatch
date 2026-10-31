@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use gpui_kit::{Context, EventEmitter, Task};
+use gpui_kit::{App, Context, Entity, EventEmitter, Global, Task};
 use ops_ssh::hosts::{NewHost, UpdateHost};
 use ops_ssh::groups::HostGroup;
 use ops_ssh::hosts::Host;
@@ -13,6 +13,14 @@ use crate::asset_tree::{group_host_ids, selected_linux_host_ids};
 pub enum AssetsEvent {
     Loaded,
     SelectionChanged,
+}
+
+/// The workbench's store, so code outside the window (the MCP bridge) can ask it to reload after changing the database.
+pub struct AssetsHandle(pub Entity<AssetsStore>);
+impl Global for AssetsHandle {}
+
+pub fn shared(cx: &App) -> Option<Entity<AssetsStore>> {
+    cx.try_global::<AssetsHandle>().map(|h| h.0.clone())
 }
 
 pub struct AssetsStore {

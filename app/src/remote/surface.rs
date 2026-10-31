@@ -1,11 +1,15 @@
-//! The remote desktop as a BGRA framebuffer that is presented as one GPUI image per UI frame, plus the geometry of
-//! the "contain" fit used to map mouse positions back to desktop pixels.
+//! The remote desktop as a BGRA framebuffer that is presented as GPUI images (one whole image, or tiles of which
+//! only the changed ones are rebuilt and uploaded), plus the geometry of the "contain" fit used to map mouse
+//! positions back to desktop pixels.
 
 use std::sync::Arc;
 
 use base64::Engine as _;
-use gpui_kit::{RenderImage, Window};
+use gpui_kit::{point, px, size, Bounds, Corners, RenderImage, Window};
 use image::{Frame, RgbaImage};
+
+/// Edge of a square tile, in desktop pixels.
+pub const TILE: usize = 256;
 
 #[derive(Default)]
 pub struct RemoteSurface {
@@ -13,7 +17,8 @@ pub struct RemoteSurface {
     height: u16,
     /// BGRA, tightly packed (the byte order `RenderImage` expects).
     buf: Vec<u8>,
-    dirty: bool,
+    /// Per tile (row-major over [`tile_grid`](Self::tile_grid)): changed since it was last taken.
+    tile_dirty: Vec<bool>,
     has_frame: bool,
 }
 
@@ -36,8 +41,72 @@ impl RemoteSurface {
             self.width = width;
             self.height = height;
             self.buf = vec![0; usize::from(width) * usize::from(height) * 4];
-            self.dirty = true;
+            let (cols, rows) = self.tile_grid();
+            self.tile_dirty = vec![true; cols * rows];
         }
+    }
+
+    /// Tiles across and down.
+    pub fn tile_grid(&self) -> (usize, usize) {
+        (usize::from(self.width).div_ceil(TILE), usize::from(self.height).div_ceil(TILE))
+    }
+
+    fn mark_tiles(&mut self, x: u16, y: u16, w: u16, h: u16) {
+        if w == 0 || h == 0 {
+            return;
+        }
+        let (cols, _) = self.tile_grid();
+        let (x0, x1) = (usize::from(x) / TILE, (usize::from(x) + usize::from(w) - 1) / TILE);
+        let (y0, y1) = (usize::from(y) / TILE, (usize::from(y) + usize::from(h) - 1) / TILE);
+        for ty in y0..=y1 {
+            self.tile_dirty[ty * cols + x0..=ty * cols + x1].fill(true);
+        }
+    }
+
+    /// Images for the tiles that changed since the last call, as `(tile index, image)`. A tile image is the tile plus a
+    /// one pixel border copied from its neighbours (edges repeat the outermost pixel), so that drawing it scaled
+    /// samples the neighbouring picture at the seams instead of whatever sits next to it in the GPU atlas.
+    pub fn take_dirty_tiles(&mut self) -> Vec<(usize, Arc<RenderImage>)> {
+        let (cols, _) = self.tile_grid();
+        let mut out = Vec::new();
+        for index in 0..self.tile_dirty.len() {
+            if std::mem::take(&mut self.tile_dirty[index]) {
+                if let Some(image) = self.tile_image(index % cols, index / cols) {
+                    out.push((index, image));
+                }
+            }
+        }
+        out
+    }
+
+    /// The bytes of tile `(tx, ty)` with the one pixel border, and the size of that padded image.
+    fn tile_pixels(&self, tx: usize, ty: usize) -> Option<(Vec<u8>, usize, usize)> {
+        let (dw, dh) = (usize::from(self.width), usize::from(self.height));
+        if self.buf.len() != dw * dh * 4 || tx * TILE >= dw || ty * TILE >= dh {
+            return None;
+        }
+        let (x0, y0) = (tx * TILE, ty * TILE);
+        let (w, h) = ((dw - x0).min(TILE), (dh - y0).min(TILE));
+        let (pw, ph) = (w + 2, h + 2);
+        let mut out = vec![0u8; pw * ph * 4];
+        let pixel = |x: usize, y: usize| -> &[u8] {
+            let o = (y * dw + x) * 4;
+            &self.buf[o..o + 4]
+        };
+        for py in 0..ph {
+            let sy = (y0 + py).saturating_sub(1).min(dh - 1);
+            let row = &mut out[py * pw * 4..(py + 1) * pw * 4];
+            row[4..4 + w * 4].copy_from_slice(&self.buf[(sy * dw + x0) * 4..(sy * dw + x0 + w) * 4]);
+            row[..4].copy_from_slice(pixel(x0.saturating_sub(1), sy));
+            row[(w + 1) * 4..].copy_from_slice(pixel((x0 + w).min(dw - 1), sy));
+        }
+        Some((out, pw, ph))
+    }
+
+    fn tile_image(&self, tx: usize, ty: usize) -> Option<Arc<RenderImage>> {
+        let (bytes, pw, ph) = self.tile_pixels(tx, ty)?;
+        let img = RgbaImage::from_raw(pw as u32, ph as u32, bytes)?;
+        Some(Arc::new(RenderImage::new(vec![Frame::new(img)])))
     }
 
     /// Copy a region (`bgra`, `w`×`h`, row-major) to `(x, y)`; the surface grows to `desktop` if needed.
@@ -76,19 +145,9 @@ impl RemoteSurface {
                 to.copy_from_slice(from);
             }
         }
-        self.dirty = true;
+        self.mark_tiles(x, y, w, h);
         self.has_frame = true;
         Ok(())
-    }
-
-    /// A fresh image when something changed since the last call.
-    pub fn take_image(&mut self) -> Option<Arc<RenderImage>> {
-        if !self.dirty || self.buf.is_empty() {
-            return None;
-        }
-        self.dirty = false;
-        let img = RgbaImage::from_raw(u32::from(self.width), u32::from(self.height), self.buf.clone())?;
-        Some(Arc::new(RenderImage::new(vec![Frame::new(img)])))
     }
 
     pub fn pixel(&self, x: u16, y: u16) -> Option<[u8; 4]> {
@@ -116,10 +175,63 @@ impl RemoteSurface {
     }
 }
 
-/// Drop the previous image from the GPU atlas when presenting a new one.
-pub fn swap_image(current: &mut Option<Arc<RenderImage>>, new: Arc<RenderImage>, window: &mut Window) {
-    if let Some(old) = current.replace(new) {
-        let _ = window.drop_image(old);
+/// The tile images currently on screen for one remote picture: changed tiles are rebuilt from the surface each frame
+/// and the images they replace are freed from the GPU atlas.
+#[derive(Default)]
+pub struct TileLayer {
+    tiles: Vec<Option<Arc<RenderImage>>>,
+    grid: (usize, usize),
+}
+
+impl TileLayer {
+    /// Tiles that have an image (all of them once a frame has been drawn).
+    pub fn count(&self) -> usize {
+        self.tiles.iter().flatten().count()
+    }
+
+    pub fn clear(&mut self, window: &mut Window) {
+        for old in self.tiles.drain(..).flatten() {
+            let _ = window.drop_image(old);
+        }
+        self.grid = (0, 0);
+    }
+
+    pub fn refresh(&mut self, surface: &mut RemoteSurface, window: &mut Window) {
+        let grid = surface.tile_grid();
+        if grid != self.grid {
+            self.clear(window);
+            self.grid = grid;
+            self.tiles = vec![None; grid.0 * grid.1];
+        }
+        for (index, image) in surface.take_dirty_tiles() {
+            if let Some(old) = self.tiles[index].replace(image) {
+                let _ = window.drop_image(old);
+            }
+        }
+    }
+
+    /// What a paint closure needs (cheap: the images are shared).
+    pub fn snapshot(&self) -> TileSnapshot {
+        TileSnapshot { tiles: self.tiles.clone(), grid: self.grid }
+    }
+}
+
+pub struct TileSnapshot {
+    tiles: Vec<Option<Arc<RenderImage>>>,
+    grid: (usize, usize),
+}
+
+impl TileSnapshot {
+    /// Draws the picture with its top-left corner at `(ox, oy)`, `scale` window pixels per desktop pixel. Each tile image
+    /// has a one pixel border (see [`RemoteSurface::take_dirty_tiles`]): it is drawn one desktop pixel larger on every
+    /// side and clipped to the tile's own rectangle, so scaled tiles blend into their neighbours instead of showing seams.
+    pub fn paint(&self, window: &mut Window, desktop: (u16, u16), ox: f32, oy: f32, scale: f32) {
+        let rect = |(x, y, w, h): (f32, f32, f32, f32)| Bounds::new(point(px(x), px(y)), size(px(w), px(h)));
+        for (index, tile) in self.tiles.iter().enumerate() {
+            let Some(image) = tile else { continue };
+            let (clip, padded) = tile_rects(index, self.grid.0, desktop, ox, oy, scale);
+            let _ = window.paint_image(rect(clip), rect(padded), Corners::default(), image.clone(), 0, false);
+        }
     }
 }
 
@@ -142,6 +254,19 @@ pub fn fit_rect(stage: (f32, f32, f32, f32), desktop: (u16, u16), upscale: bool)
     }
     let (w, h) = (dw * scale, dh * scale);
     Some((sx + (sw - w) / 2.0, sy + (sh - h) / 2.0, scale))
+}
+
+/// Where tile `index` of a `grid`-wide tiling of `desktop` goes when the picture is drawn at `(ox, oy)` scaled by
+/// `scale`: the tile's own rectangle `(x, y, w, h)` and the rectangle `(x, y, w, h)` its one-pixel-padded image covers.
+/// Neighbouring tiles share their edge coordinates exactly, so they leave neither gaps nor overlaps.
+pub fn tile_rects(index: usize, cols: usize, desktop: (u16, u16), ox: f32, oy: f32, scale: f32) -> ((f32, f32, f32, f32), (f32, f32, f32, f32)) {
+    let (tx, ty) = (index % cols, index / cols);
+    let (x0, y0) = (tx * TILE, ty * TILE);
+    let (x1, y1) = ((x0 + TILE).min(usize::from(desktop.0)), (y0 + TILE).min(usize::from(desktop.1)));
+    let edge = |v: usize, o: f32| o + v as f32 * scale;
+    let tile = (edge(x0, ox), edge(y0, oy), edge(x1, ox) - edge(x0, ox), edge(y1, oy) - edge(y0, oy));
+    let padded = (tile.0 - scale, tile.1 - scale, tile.2 + 2.0 * scale, tile.3 + 2.0 * scale);
+    (tile, padded)
 }
 
 /// Window position → desktop pixel, clamped to the desktop (like the original `getRemotePoint`).
@@ -185,12 +310,72 @@ mod tests {
     }
 
     #[test]
-    fn dirty_flag_gates_new_images() {
+    fn only_the_tiles_a_region_touches_are_rebuilt() {
         let mut s = RemoteSurface::default();
-        assert!(s.take_image().is_none());
-        s.apply_bgra((2, 2), 0, 0, 2, 2, &[0; 16]).unwrap();
-        assert!(s.take_image().is_some());
-        assert!(s.take_image().is_none());
+        s.resize(600, 300);
+        assert_eq!(s.tile_grid(), (3, 2));
+        assert_eq!(s.take_dirty_tiles().len(), 6, "a new surface starts with every tile to build");
+        assert!(s.take_dirty_tiles().is_empty());
+        // a 2x2 patch inside the second tile
+        s.apply_bgra((600, 300), 300, 10, 2, 2, &[1; 16]).unwrap();
+        assert_eq!(s.take_dirty_tiles().iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![1]);
+        // a region across a tile corner touches all four
+        s.apply_bgra((600, 300), 255, 255, 2, 2, &[1; 16]).unwrap();
+        assert_eq!(s.take_dirty_tiles().iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![0, 1, 3, 4]);
+        // a region ending exactly on a tile edge does not spill into the next tile
+        s.apply_bgra((600, 300), 0, 0, 256, 256, &vec![2; 256 * 256 * 4]).unwrap();
+        assert_eq!(s.take_dirty_tiles().iter().map(|(i, _)| *i).collect::<Vec<_>>(), vec![0]);
+    }
+
+    #[test]
+    fn a_tile_carries_a_border_from_its_neighbours() {
+        let (w, h) = (300u16, 260u16);
+        let mut s = RemoteSurface::default();
+        s.resize(w, h);
+        // every pixel holds its own x and y (mod 256) so the border can be checked
+        let mut all = Vec::new();
+        for y in 0..h {
+            for x in 0..w {
+                all.extend_from_slice(&[x as u8, y as u8, (x >> 8) as u8, 255]);
+            }
+        }
+        s.apply_bgra((w, h), 0, 0, w, h, &all).unwrap();
+        // tile (1, 0): x 256..300, y 0..256 -> padded 46 x 258
+        let (bytes, pw, ph) = s.tile_pixels(1, 0).unwrap();
+        assert_eq!((pw, ph), (46, 258));
+        let at = |x: usize, y: usize| &bytes[(y * pw + x) * 4..(y * pw + x) * 4 + 2];
+        assert_eq!(at(1, 1), &[0, 0], "first real pixel is desktop (256, 0)");
+        assert_eq!(at(0, 1), &[255, 0], "left border is desktop x = 255, the neighbour tile's last column");
+        assert_eq!(at(45, 1), &[43, 0], "right border repeats the last desktop column (299)");
+        assert_eq!(at(1, 0), &[0, 0], "top border repeats row 0");
+        assert_eq!(at(1, 257), &[0, 0], "bottom border is desktop y = 256, the next tile row");
+        let (bytes, _, ph) = s.tile_pixels(1, 1).unwrap();
+        assert_eq!(ph, 4 + 2, "last tile row is 4 pixels high");
+        assert_eq!(&bytes[(46 * 0 + 1) * 4 + 1], &255, "its top border is desktop row 255");
+    }
+
+    #[test]
+    fn neighbouring_tiles_share_their_edges() {
+        let desktop = (700, 300);
+        let (ox, oy, scale) = (13.5, 7.25, 0.8);
+        let rect = |i| tile_rects(i, 3, desktop, ox, oy, scale).0;
+        for i in [0usize, 1, 3, 4] {
+            let (a, right) = (rect(i), rect(i + 1));
+            if i % 3 != 2 {
+                assert_eq!(a.0 + a.2, right.0, "tile {i} ends where its right neighbour starts");
+            }
+        }
+        for i in 0..3 {
+            let (a, below) = (rect(i), rect(i + 3));
+            assert_eq!(a.1 + a.3, below.1, "tile {i} ends where the tile below starts");
+        }
+        // the whole tiling covers exactly the scaled desktop
+        let last = rect(5);
+        assert!((last.0 + last.2 - (ox + 700.0 * scale)).abs() < 1e-3);
+        assert!((last.1 + last.3 - (oy + 300.0 * scale)).abs() < 1e-3);
+        // the padded image reaches one desktop pixel past the tile on every side
+        let (tile, padded) = tile_rects(4, 3, desktop, ox, oy, scale);
+        assert!((padded.0 - (tile.0 - scale)).abs() < 1e-6 && (padded.2 - (tile.2 + 2.0 * scale)).abs() < 1e-6);
     }
 
     #[test]

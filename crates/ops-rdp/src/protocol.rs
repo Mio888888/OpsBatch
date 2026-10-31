@@ -42,6 +42,8 @@ use super::{RdpSessionCommand, RDP_CONNECT_TIMEOUT};
 
 type RdpFramed = MovableTokioFramed<ironrdp_tls::TlsStream<TcpStream>>;
 const RDP_FRAME_INTERVAL: Duration = Duration::from_millis(16);
+/// Input events encoded into one write at most.
+const MAX_INPUT_BATCH: usize = 256;
 const RDP_METRICS_INTERVAL: Duration = Duration::from_secs(1);
 const RDP_CLIPBOARD_POLL_INTERVAL: Duration = Duration::from_millis(300);
 
@@ -505,23 +507,38 @@ async fn run_active_session(
         let frame_deadline = frame_pacer.next_deadline();
         tokio::select! {
             command = command_rx.recv() => {
-                match command {
-                    Some(RdpSessionCommand::Input(event)) => {
-                        if !process_input_event(app, session_id, session, &frame_channel, &mut frame_pacer, &mut metrics, event).await? {
+                // Input that queued up while the last write was in flight is encoded and sent together.
+                let Some(first_command) = command else {
+                    flush_pending_graphics_update(&frame_channel, session, &mut frame_pacer, &mut metrics)?;
+                    return Ok(());
+                };
+                let mut next = Some(first_command);
+                while let Some(command) = next.take() {
+                    match command {
+                        RdpSessionCommand::Input(first) => {
+                            let mut events = vec![first];
+                            while events.len() < MAX_INPUT_BATCH {
+                                match command_rx.try_recv() {
+                                    Ok(RdpSessionCommand::Input(event)) => events.push(event),
+                                    Ok(other) => {
+                                        next = Some(other);
+                                        break;
+                                    }
+                                    Err(_) => break,
+                                }
+                            }
+                            if !process_input_events(app, session_id, session, &frame_channel, &mut frame_pacer, &mut metrics, collapse_mouse_moves(events)).await? {
+                                return Ok(());
+                            }
+                        }
+                        RdpSessionCommand::UploadFiles(paths, position) => {
+                            process_upload_files(session, paths, position);
+                            flush_clipboard_actions(app, session_id, session).await?;
+                        }
+                        RdpSessionCommand::Disconnect => {
+                            flush_pending_graphics_update(&frame_channel, session, &mut frame_pacer, &mut metrics)?;
                             return Ok(());
                         }
-                    }
-                    Some(RdpSessionCommand::UploadFiles(paths, position)) => {
-                        process_upload_files(session, paths, position);
-                        flush_clipboard_actions(app, session_id, session).await?;
-                    }
-                    Some(RdpSessionCommand::Disconnect) => {
-                        flush_pending_graphics_update(&frame_channel, session, &mut frame_pacer, &mut metrics)?;
-                        return Ok(());
-                    }
-                    None => {
-                        flush_pending_graphics_update(&frame_channel, session, &mut frame_pacer, &mut metrics)?;
-                        return Ok(());
                     }
                 }
             }
@@ -957,53 +974,72 @@ pub(super) fn input_trace_enabled() -> bool {
     *ON.get_or_init(|| std::env::var("OPSBATCH_RDP_TRACE").is_ok_and(|v| v == "1"))
 }
 
-async fn process_input_event(
+/// Most input events that can queue up at once are mouse moves, and only the last one of a run matters: the remote
+/// pointer ends up there either way, while every skipped one saves encoding and a trip over a link that may be slow.
+/// Everything else (buttons, wheel, keys) keeps its order.
+pub(super) fn collapse_mouse_moves(events: Vec<super::types::RdpInputEvent>) -> Vec<super::types::RdpInputEvent> {
+    use super::types::RdpInputEvent::MouseMove;
+    let mut out: Vec<super::types::RdpInputEvent> = Vec::with_capacity(events.len());
+    for event in events {
+        if matches!(event, MouseMove { .. }) && matches!(out.last(), Some(MouseMove { .. })) {
+            out.pop();
+        }
+        out.push(event);
+    }
+    out
+}
+
+async fn process_input_events(
     app: &ops_core::Core,
     session_id: &str,
     session: &mut ConnectedRdpSession,
     frame_channel: &super::FrameChannel,
     frame_pacer: &mut FramePacer,
     metrics: &mut RdpMetrics,
-    event: super::types::RdpInputEvent,
+    input_events: Vec<super::types::RdpInputEvent>,
 ) -> Result<bool, String> {
     let trace = input_trace_enabled();
-    let event_summary = if trace { super::input::input_event_summary(&event) } else { String::new() };
-    if trace {
-        ops_core::log::emit_log(
-            app,
-            "info",
-            "rdp.input",
-            &format!("stage=protocol_received sessionId={session_id} size={}x{} event={event_summary}", session.width, session.height),
-            "backend",
-        );
+    let mut events = Vec::new();
+    for event in input_events {
+        let event_summary = if trace { super::input::input_event_summary(&event) } else { String::new() };
+        if trace {
+            ops_core::log::emit_log(
+                app,
+                "info",
+                "rdp.input",
+                &format!("stage=protocol_received sessionId={session_id} size={}x{} event={event_summary}", session.width, session.height),
+                "backend",
+            );
+        }
+        let operations = input_operations(event, session.width, session.height).map_err(|error| {
+            ops_core::log::emit_log(
+                app,
+                "warn",
+                "rdp.input",
+                &format!("stage=input_operations_failed sessionId={session_id} event={event_summary} error={error}"),
+                "backend",
+            );
+            error
+        })?;
+        let operation_count = operations.len();
+        let operation_preview = if trace { format!("{operations:?}") } else { String::new() };
+        let encoded = session.input.apply(operations);
+        if trace {
+            ops_core::log::emit_log(
+                app,
+                "info",
+                "rdp.input",
+                &format!(
+                    "stage=fastpath_encode_start sessionId={session_id} event={event_summary} operationCount={operation_count} fastpathEventCount={} operations={operation_preview}",
+                    encoded.len()
+                ),
+                "backend",
+            );
+        }
+        events.extend(encoded);
     }
-
-    let operations = input_operations(event, session.width, session.height).map_err(|error| {
-        ops_core::log::emit_log(
-            app,
-            "warn",
-            "rdp.input",
-            &format!(
-                "stage=input_operations_failed sessionId={session_id} event={event_summary} error={error}"
-            ),
-            "backend",
-        );
-        error
-    })?;
-    let operation_count = operations.len();
-    let operation_preview = if trace { format!("{operations:?}") } else { String::new() };
-    let events = session.input.apply(operations);
-    let fastpath_event_count = events.len();
-    if trace {
-        ops_core::log::emit_log(
-            app,
-            "info",
-            "rdp.input",
-            &format!(
-                "stage=fastpath_encode_start sessionId={session_id} event={event_summary} operationCount={operation_count} fastpathEventCount={fastpath_event_count} operations={operation_preview}"
-            ),
-            "backend",
-        );
+    if events.is_empty() {
+        return Ok(true);
     }
 
     let outputs = session
@@ -1011,35 +1047,14 @@ async fn process_input_event(
         .process_fastpath_input(&mut session.image, events.as_slice())
         .map_err(|e| {
             let error = format!("编码 RDP 输入失败: {e}");
-            ops_core::log::emit_log(
-                app,
-                "warn",
-                "rdp.input",
-                &format!("stage=fastpath_encode_failed sessionId={session_id} event={event_summary} error={error}"),
-                "backend",
-            );
+            ops_core::log::emit_log(app, "warn", "rdp.input", &format!("stage=fastpath_encode_failed sessionId={session_id} error={error}"), "backend");
             error
         })?;
     if trace {
         let output_count = outputs.len();
-        ops_core::log::emit_log(
-            app,
-            "info",
-            "rdp.input",
-            &format!("stage=fastpath_encode_done sessionId={session_id} event={event_summary} outputCount={output_count}"),
-            "backend",
-        );
+        ops_core::log::emit_log(app, "info", "rdp.input", &format!("stage=fastpath_encode_done sessionId={session_id} outputCount={output_count}"), "backend");
     }
-    handle_stage_outputs(
-        app,
-        session_id,
-        session,
-        frame_channel,
-        frame_pacer,
-        metrics,
-        outputs,
-    )
-    .await
+    handle_stage_outputs(app, session_id, session, frame_channel, frame_pacer, metrics, outputs).await
 }
 
 async fn handle_stage_outputs(

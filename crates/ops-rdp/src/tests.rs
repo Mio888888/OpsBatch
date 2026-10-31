@@ -683,3 +683,28 @@ fn test_rdp_credentials() -> RdpCredentials {
         password: "secret".to_string(),
     }
 }
+
+#[test]
+fn queued_mouse_moves_collapse_to_the_last_one_of_each_run() {
+    use super::protocol::collapse_mouse_moves;
+    use super::types::RdpInputEvent::*;
+    let moved = |x: u16| MouseMove { x, y: 1 };
+    let events = vec![
+        moved(1),
+        moved(2),
+        moved(3),
+        MouseButton { x: 3, y: 1, button: 0, down: true },
+        moved(4),
+        moved(5),
+        KeyScancode { code: 0x1e, extended: false, down: true },
+        moved(6),
+    ];
+    assert_eq!(
+        collapse_mouse_moves(events),
+        vec![moved(3), MouseButton { x: 3, y: 1, button: 0, down: true }, moved(5), KeyScancode { code: 0x1e, extended: false, down: true }, moved(6)]
+    );
+    // wheel notches and key presses are never merged
+    let keys = vec![KeyScancode { code: 1, extended: false, down: true }, KeyScancode { code: 1, extended: false, down: true }];
+    assert_eq!(collapse_mouse_moves(keys.clone()), keys);
+    assert!(collapse_mouse_moves(Vec::new()).is_empty());
+}

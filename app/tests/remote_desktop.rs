@@ -370,6 +370,55 @@ fn vnc_scrolls_in_whole_notches_and_never_leaves_a_button_held(cx: &mut TestAppC
 }
 
 #[gpui_kit::test]
+fn vnc_pointer_moves_go_out_at_once_and_only_changed_tiles_are_rebuilt(cx: &mut TestAppContext) {
+    use gpui_kit::{point, px, InputEvent as _, Modifiers, MouseMoveEvent};
+    let _s = serial();
+    let fx = common::setup(cx, |_| {});
+    let mock = start_vnc_mock(false);
+    let id = add_host(&fx, new_remote_host("vnc-box", "vnc", Some(vnc_settings(mock.port, false)), None));
+    let (handle, view) = open_vnc(cx, &id, mock.port);
+    wait_until(cx, "connected", |cx| view.read_with(cx, |v, _| v.state() == VncState::Connected && v.surface().has_frame()));
+    win(cx, handle, |w, cx| w.render_frame(cx));
+    assert_eq!(view.read_with(cx, |v, _| v.tile_images()), 1, "a 64x32 desktop is one tile");
+
+    // A move is on the wire without any frame being drawn in between, and a stream of them ends where the mouse ends.
+    let _ = drain(&mock.received);
+    let bounds = win(cx, handle, |w, _| w.find("vnc-stage").bounds());
+    for i in 0..20 {
+        let position = point(bounds.origin.x + px(10. + i as f32), bounds.origin.y + px(10.));
+        win(cx, handle, |w, cx| w.dispatch_event(MouseMoveEvent { position, pressed_button: None, modifiers: Modifiers::default() }.to_platform_input(), cx));
+    }
+    let mut sent = Vec::new();
+    wait_until(cx, "moves reach the server", |_| {
+        sent.extend(drain(&mock.received));
+        pointer_buttons(&sent).len() >= 1
+    });
+    let positions = |bytes: &[u8]| {
+        let (mut at, mut out) = (0, Vec::new());
+        while at < bytes.len() {
+            match bytes[at] {
+                3 => at += 10,
+                4 => at += 8,
+                5 if at + 6 <= bytes.len() => {
+                    out.push(u16::from_be_bytes([bytes[at + 2], bytes[at + 3]]));
+                    at += 6;
+                }
+                _ => break,
+            }
+        }
+        out
+    };
+    std::thread::sleep(Duration::from_millis(300));
+    cx.run_until_parked();
+    sent.extend(drain(&mock.received));
+    let xs = positions(&sent);
+    assert!(!xs.is_empty() && xs.len() <= 20, "{xs:?}");
+    assert_eq!(xs.last(), xs.iter().max(), "the last position is where the mouse ended: {xs:?}");
+    assert!(xs.windows(2).all(|w| w[0] <= w[1]), "positions only move forward: {xs:?}");
+    win(cx, handle, |w, cx| w.click("vnc-disconnect", cx));
+}
+
+#[gpui_kit::test]
 fn vnc_view_only_hosts_never_send_input(cx: &mut TestAppContext) {
     let _s = serial();
     let fx = common::setup(cx, |_| {});
@@ -613,6 +662,7 @@ fn rdp_frames_are_painted_mapped_and_input_is_forwarded(cx: &mut TestAppContext)
         assert!(w.try_find("rdp-overlay-title").is_none(), "the first picture hides the waiting overlay");
         w.click("rdp-stage", cx);
     });
+    assert_eq!(view.read_with(cx, |v, _| v.tile_images()), 12, "an 800x600 picture is 4 x 3 tiles of 256 pixels");
     // The click (stage centre) is forwarded as press + release at the middle of the desktop area.
     let mut seen = Vec::new();
     wait_until(cx, "mouse events", |_| {

@@ -303,20 +303,20 @@ fn region_area(region: RectRegion) -> u64 {
     u64::from(region.width) * u64::from(region.height)
 }
 
-/// A decoded frame message: a region of the desktop plus the full desktop size.
+/// A decoded frame message: a region of the desktop plus the full desktop size. The pixels stay in the message.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DecodedFrame {
+pub struct DecodedFrame<'a> {
     pub width: u16,
     pub height: u16,
     pub x: u16,
     pub y: u16,
     pub region_width: u16,
     pub region_height: u16,
-    pub rgba: Vec<u8>,
+    pub rgba: &'a [u8],
 }
 
 /// Port of `decodeRdpFramePayload`.
-pub fn decode_frame_payload(message: &[u8]) -> Result<DecodedFrame, String> {
+pub fn decode_frame_payload(message: &[u8]) -> Result<DecodedFrame<'_>, String> {
     if message.len() < FRAME_HEADER_LEN {
         return Err("RDP frame header is incomplete".into());
     }
@@ -326,7 +326,7 @@ pub fn decode_frame_payload(message: &[u8]) -> Result<DecodedFrame, String> {
     if rgba_len != usize::from(region_width) * usize::from(region_height) * 4 || message.len() != FRAME_HEADER_LEN + rgba_len {
         return Err("RDP frame payload size is invalid".into());
     }
-    Ok(DecodedFrame { width: u16_at(0), height: u16_at(2), x: u16_at(4), y: u16_at(6), region_width, region_height, rgba: message[FRAME_HEADER_LEN..].to_vec() })
+    Ok(DecodedFrame { width: u16_at(0), height: u16_at(2), x: u16_at(4), y: u16_at(6), region_width, region_height, rgba: &message[FRAME_HEADER_LEN..] })
 }
 
 const BASE_FRAME_PAINT_BUDGET: usize = 8;
@@ -369,9 +369,10 @@ mod decode_tests {
     #[test]
     fn frames_round_trip_and_bad_sizes_are_rejected() {
         let body: Vec<u8> = (0..16).collect();
-        let f = decode_frame_payload(&message(100, 50, 3, 4, 2, 2, &body)).unwrap();
+        let msg = message(100, 50, 3, 4, 2, 2, &body);
+        let f = decode_frame_payload(&msg).unwrap();
         assert_eq!((f.width, f.height, f.x, f.y, f.region_width, f.region_height), (100, 50, 3, 4, 2, 2));
-        assert_eq!(f.rgba, body);
+        assert_eq!(f.rgba, &body[..]);
         assert!(decode_frame_payload(&message(100, 50, 0, 0, 2, 2, &body[..12])).is_err());
         assert!(decode_frame_payload(&[0; 8]).is_err());
         let mut long = message(100, 50, 0, 0, 2, 2, &body);

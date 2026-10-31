@@ -453,15 +453,132 @@ async fn connection_failures_are_reported_as_closed_events() {
     assert!(matches!(&ev, VncEvent::Closed { clean: false, reason: Some(r) } if r.contains("VNC TCP 连接失败")), "{ev:?}");
 }
 
-/// Decode speed over a real socket: one 1280x720 Hextile update made of raw 16x16 tiles (14.7 MB on the wire).
-/// `cargo test -p ops-vnc --release decode_speed -- --ignored --nocapture`
 #[tokio::test]
-#[ignore]
-async fn decode_speed_over_a_real_socket() {
+async fn copyrect_moves_overlapping_rows_without_smearing_them() {
+    // A 4x4 raw block (row y has colour y+1) at rows 4..8, copied to rows 6..10 (overlapping, downwards), then the
+    // block now at rows 4..8 is copied to rows 2..6 (overlapping, upwards).
+    let mut u = vec![0u8, 0, 0, 3];
+    u.extend(rect_header(0, 4, 4, 4, 0));
+    for y in 0..4u8 {
+        for _ in 0..4 {
+            u.extend_from_slice(&[y + 1, 0, 0, 0]);
+        }
+    }
+    u.extend(rect_header(0, 6, 4, 4, 1));
+    u.extend_from_slice(&[0, 0, 0, 4]);
+    u.extend(rect_header(0, 2, 4, 4, 1));
+    u.extend_from_slice(&[0, 0, 0, 6]);
+    let (cs, ss) = tokio::io::duplex(1 << 16);
+    tokio::spawn(simple_server(ss, u));
+    let (_info, mut r, mut w) = connect(cs, &opts("", "", AuthPreference::Vnc)).await.unwrap();
+    w.request_update(false).await.unwrap();
+    assert!(matches!(r.next_event().await.unwrap(), ServerEvent::Update(v) if v.len() == 3));
+    let col = |y| px(&r, 0, y)[0];
+    // after the first copy rows 4..10 are 1,2,1,2,3,4; the second copy takes rows 6..10 (1,2,3,4) up to rows 2..6
+    assert_eq!([col(6), col(7), col(8), col(9)], [1, 2, 3, 4], "copied down");
+    assert_eq!([col(2), col(3), col(4), col(5)], [1, 2, 3, 4], "copied up from rows that overlap the target");
+}
+
+#[tokio::test]
+async fn the_next_update_is_requested_while_the_current_one_is_still_arriving() {
+    let (cs, mut ss) = tokio::io::duplex(1 << 16);
+    let server = tokio::spawn(async move {
+        ss.write_all(b"RFB 003.008\n").await.unwrap();
+        read_exact_vec(&mut ss, 12).await;
+        ss.write_all(&[1, SEC_NONE]).await.unwrap();
+        read_exact_vec(&mut ss, 1).await;
+        ss.write_u32(0).await.unwrap();
+        read_exact_vec(&mut ss, 1).await;
+        ss.write_u16(32).await.unwrap();
+        ss.write_u16(32).await.unwrap();
+        ss.write_all(&[32, 24, 0, 1, 0, 255, 0, 255, 0, 255, 16, 8, 0, 0, 0, 0]).await.unwrap();
+        ss.write_u32(1).await.unwrap();
+        ss.write_all(b"s").await.unwrap();
+        read_exact_vec(&mut ss, 20 + 4 + 20).await;
+        // the start of an update whose pixels never come until the test says so
+        let mut u = vec![0u8, 0, 0, 1];
+        u.extend(rect_header(0, 0, 4, 4, 0));
+        ss.write_all(&u).await.unwrap();
+        ss
+    });
+    let (_info, mut r, _w) = connect(cs, &opts("", "", AuthPreference::Vnc)).await.unwrap();
+    let (tx, mut started) = tokio::sync::mpsc::unbounded_channel();
+    r.set_update_hook(move || {
+        let _ = tx.send(());
+    });
+    let decode = tokio::spawn(async move { r.next_event().await.map(|_| ()) });
+    tokio::time::timeout(std::time::Duration::from_secs(2), started.recv()).await.expect("the hook fires when the update starts").unwrap();
+    assert!(!decode.is_finished(), "the pixels have not arrived yet");
+    let mut ss = server.await.unwrap();
+    ss.write_all(&[0u8; 64]).await.unwrap();
+    decode.await.unwrap().unwrap();
+}
+
+#[test]
+fn queued_pointer_moves_collapse_but_button_changes_and_keys_keep_their_order() {
+    use crate::session::{encode_commands, VncCommand::*};
+    let req = |inc: bool| [3, inc as u8, 0, 0, 0, 0, 0, 4, 0, 2];
+    let ptr = |x: u16, y: u16, b: u8| [5, b, (x >> 8) as u8, x as u8, (y >> 8) as u8, y as u8];
+    let (bytes, disconnect) = encode_commands(
+        vec![
+            Pointer { x: 1, y: 1, buttons: 0 },
+            Pointer { x: 2, y: 2, buttons: 0 },
+            Pointer { x: 3, y: 3, buttons: 0 },
+            Pointer { x: 3, y: 3, buttons: 1 },
+            Pointer { x: 4, y: 4, buttons: 1 },
+            Key { keysym: 0x61, down: true },
+            Pointer { x: 5, y: 5, buttons: 1 },
+            Refresh,
+        ],
+        req,
+        false,
+    );
+    assert!(!disconnect);
+    let mut want = Vec::new();
+    want.extend(ptr(3, 3, 0));
+    want.extend(ptr(4, 4, 1));
+    want.extend([4, 1, 0, 0, 0, 0, 0, 0x61]);
+    want.extend(ptr(5, 5, 1));
+    want.extend(req(false));
+    assert_eq!(bytes, want);
+
+    // Wheel notches are press+release pairs with different buttons: none of them may be merged away.
+    let (bytes, _) = encode_commands(vec![Pointer { x: 9, y: 9, buttons: 8 }, Pointer { x: 9, y: 9, buttons: 0 }, Pointer { x: 9, y: 9, buttons: 8 }, Pointer { x: 9, y: 9, buttons: 0 }], req, false);
+    assert_eq!(bytes.len(), 4 * 6);
+
+    // View-only drops input but still refreshes; a disconnect ends the run and drops what follows it.
+    let (bytes, _) = encode_commands(vec![Pointer { x: 1, y: 1, buttons: 0 }, Key { keysym: 1, down: true }, Clipboard("x".into()), Refresh], req, true);
+    assert_eq!(bytes, req(false));
+    let (bytes, disconnect) = encode_commands(vec![Key { keysym: 0x61, down: false }, Disconnect, Key { keysym: 0x62, down: true }], req, false);
+    assert!(disconnect);
+    assert_eq!(bytes, [4, 0, 0, 0, 0, 0, 0, 0x61]);
+}
+
+#[test]
+fn many_small_rectangles_become_one_box_but_scattered_ones_stay_apart() {
+    use crate::client::Rect;
+    use crate::session::merge_rects;
+    let r = |x, y, w, h| Rect { x, y, w, h };
+    // a handful of rectangles is left alone
+    assert_eq!(merge_rects(vec![r(0, 0, 10, 10), r(20, 0, 10, 10)]).len(), 2);
+    // a row of text-sized rectangles is one box
+    let row: Vec<Rect> = (0..10).map(|i| r(i * 12, 0, 10, 16)).collect();
+    assert_eq!(merge_rects(row), vec![r(0, 0, 118, 16)]);
+    // four corners of a big screen would cost far more as one box
+    let corners = vec![r(0, 0, 10, 10), r(1900, 0, 10, 10), r(0, 1060, 10, 10), r(1900, 1060, 10, 10)];
+    assert_eq!(merge_rects(corners.clone()), corners);
+    // too many rectangles are merged whatever the cost
+    let many: Vec<Rect> = (0..65).map(|i| r((i % 60) * 30, (i / 60) * 900, 4, 4)).collect();
+    assert_eq!(merge_rects(many).len(), 1);
+}
+
+/// Serves one update (`payload`: everything after the 4-byte update header, rect headers included) of a `w`×`h`
+/// desktop over a real socket and reports how long the client takes to decode it.
+async fn decode_bench(label: &str, w: u16, h: u16, rects: u16, payload: Vec<u8>) {
     use tokio::net::{TcpListener, TcpStream};
-    let (w, h) = (1280u16, 720u16);
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    let wire = payload.len();
     tokio::spawn(async move {
         let (mut s, _) = listener.accept().await.unwrap();
         s.write_all(b"RFB 003.008\n").await.unwrap();
@@ -479,15 +596,9 @@ async fn decode_speed_over_a_real_socket() {
         s.write_all(b"bench").await.unwrap();
         let mut setup = [0u8; 20 + 4 + 20];
         s.read_exact(&mut setup).await.unwrap();
-        let mut m = vec![0u8, 0, 0, 1];
-        for v in [0u16, 0, w, h] {
-            m.extend_from_slice(&v.to_be_bytes());
-        }
-        m.extend_from_slice(&5i32.to_be_bytes());
-        for _ in 0..(w as usize / 16) * (h as usize).div_ceil(16) {
-            m.push(1);
-            m.extend((0..256 * 4).map(|i| i as u8));
-        }
+        let mut m = vec![0u8, 0];
+        m.extend_from_slice(&rects.to_be_bytes());
+        m.extend(payload);
         s.write_all(&m).await.unwrap();
         let mut sink = [0u8; 64];
         while s.read(&mut sink).await.unwrap_or(0) > 0 {}
@@ -496,5 +607,71 @@ async fn decode_speed_over_a_real_socket() {
     let (_, mut reader, _writer) = connect(TcpStream::connect(addr).await.unwrap(), &opts).await.unwrap();
     let started = std::time::Instant::now();
     let ev = reader.next_event().await.unwrap();
-    println!("DECODE one 1280x720 hextile update: {:?} ({ev:?})", started.elapsed());
+    println!("DECODE {label} {w}x{h}: {:?} ({wire} bytes on the wire, {})", started.elapsed(), if matches!(ev, ServerEvent::Update(_)) { "ok" } else { "unexpected event" });
+}
+
+/// `cargo test -p ops-vnc --release decode_speed -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn decode_speed_over_a_real_socket() {
+    let (w, h) = (1920u16, 1080u16);
+    // Hextile: raw 16x16 tiles.
+    let mut m = rect_header(0, 0, w, h, 5);
+    for _ in 0..(w as usize / 16) * (h as usize).div_ceil(16) {
+        m.push(1);
+        m.extend((0..256 * 4).map(|i| i as u8));
+    }
+    decode_bench("hextile raw tiles", w, h, 1, m).await;
+
+    // Hextile: background + a few coloured subrects per tile (what a text desktop looks like).
+    let mut m = rect_header(0, 0, w, h, 5);
+    for _ in 0..(w as usize / 16) * (h as usize).div_ceil(16) {
+        m.push(2 | 8 | 16);
+        m.extend_from_slice(&[240, 240, 240, 0]);
+        m.push(6);
+        for k in 0..6u8 {
+            m.extend_from_slice(&[k * 20, 10, 10, 0, (k << 4) | 2, 0x33]);
+        }
+    }
+    decode_bench("hextile subrects", w, h, 1, m).await;
+
+    // Raw.
+    let mut m = rect_header(0, 0, w, h, 0);
+    m.extend((0..w as usize * h as usize * 4).map(|i| i as u8));
+    decode_bench("raw", w, h, 1, m).await;
+
+    // ZRLE: a mix of raw, solid, packed-palette and plain-RLE tiles, one zlib stream.
+    let mut tiles = Vec::new();
+    let mut n = 0usize;
+    for ty in 0..(h as usize).div_ceil(64) {
+        for tx in 0..(w as usize).div_ceil(64) {
+            let (tw, th) = ((w as usize - tx * 64).min(64), (h as usize - ty * 64).min(64));
+            match n % 4 {
+                0 => {
+                    tiles.push(0);
+                    tiles.extend((0..tw * th * 3).map(|i| (i / 3 + i % 3 * 7) as u8));
+                }
+                1 => tiles.extend_from_slice(&[1, 20, 30, 40]),
+                2 => {
+                    tiles.push(4);
+                    tiles.extend_from_slice(&[0, 0, 0, 255, 0, 0, 0, 255, 0, 0, 0, 255]);
+                    tiles.extend((0..(tw * 2).div_ceil(8) * th).map(|i| (i * 37) as u8));
+                }
+                _ => {
+                    tiles.push(128);
+                    for k in 0..(tw * th).div_ceil(256) {
+                        tiles.extend_from_slice(&[k as u8, 1, 2, 255, 0]);
+                    }
+                }
+            }
+            n += 1;
+        }
+    }
+    let mut z = flate2::Compress::new(flate2::Compression::fast(), true);
+    let mut comp = Vec::with_capacity(tiles.len());
+    z.compress_vec(&tiles, &mut comp, flate2::FlushCompress::Sync).unwrap();
+    let mut m = rect_header(0, 0, w, h, 16);
+    m.extend_from_slice(&(comp.len() as u32).to_be_bytes());
+    m.extend(comp);
+    decode_bench("zrle mixed", w, h, 1, m).await;
 }

@@ -83,6 +83,8 @@ pub struct RfbReader<R> {
     stream: BufReader<R>,
     pub fb: Framebuffer,
     zrle: Decompress,
+    /// Called as soon as a FramebufferUpdate starts arriving, before its rectangles are read and decoded.
+    update_started: Option<Box<dyn FnMut() + Send>>,
 }
 
 /// Write side: all client-to-server messages. Kept separate from the reader so a read in progress is never
@@ -215,7 +217,7 @@ pub async fn connect<S: AsyncRead + AsyncWrite + Unpin>(
     let (r, w) = tokio::io::split(s);
     Ok((
         RfbInfo { name, version: (cm, cn), apple: server_version.starts_with("RFB 003.889"), width, height },
-        RfbReader { stream: BufReader::with_capacity(READ_BUFFER, r), fb: Framebuffer::new(width, height), zrle: Decompress::new(true) },
+        RfbReader { stream: BufReader::with_capacity(READ_BUFFER, r), fb: Framebuffer::new(width, height), zrle: Decompress::new(true), update_started: None },
         RfbWriter { stream: w, width, height },
     ))
 }
@@ -248,47 +250,69 @@ impl<W: AsyncWrite + Unpin> RfbWriter<W> {
     }
 
     pub async fn request_update(&mut self, incremental: bool) -> Result<()> {
-        let mut m = vec![3u8, incremental as u8];
-        for v in [0u16, 0, self.width, self.height] {
-            m.extend_from_slice(&v.to_be_bytes());
-        }
-        self.stream.write_all(&m).await?;
-        Ok(())
+        self.send_raw(&self.update_request(incremental)).await
+    }
+
+    /// FramebufferUpdateRequest for the whole desktop, for batching with [`Self::send_raw`].
+    pub fn update_request(&self, incremental: bool) -> [u8; 10] {
+        let (w, h) = (self.width.to_be_bytes(), self.height.to_be_bytes());
+        [3, incremental as u8, 0, 0, 0, 0, w[0], w[1], h[0], h[1]]
     }
 
     pub async fn send_key(&mut self, keysym: u32, down: bool) -> Result<()> {
-        let mut m = vec![4u8, down as u8, 0, 0];
-        m.extend_from_slice(&keysym.to_be_bytes());
-        self.stream.write_all(&m).await?;
-        Ok(())
+        self.send_raw(&key_message(keysym, down)).await
     }
 
     pub async fn send_pointer(&mut self, x: u16, y: u16, buttons: u8) -> Result<()> {
-        let mut m = vec![5u8, buttons];
-        m.extend_from_slice(&x.to_be_bytes());
-        m.extend_from_slice(&y.to_be_bytes());
-        self.stream.write_all(&m).await?;
-        Ok(())
+        self.send_raw(&pointer_message(x, y, buttons)).await
     }
 
     pub async fn send_cut_text(&mut self, text: &str) -> Result<()> {
-        // Latin-1 only per RFC 6143; characters outside it become '?'.
-        let bytes: Vec<u8> = text.chars().map(|c| if (c as u32) < 256 { c as u8 } else { b'?' }).collect();
-        let mut m = vec![6u8, 0, 0, 0];
-        m.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
-        m.extend_from_slice(&bytes);
-        self.stream.write_all(&m).await?;
+        self.send_raw(&cut_text_message(text)).await
+    }
+
+    /// Several messages built with the `*_message` helpers go out in one write.
+    pub async fn send_raw(&mut self, bytes: &[u8]) -> Result<()> {
+        self.stream.write_all(bytes).await?;
         Ok(())
     }
 }
 
+pub fn key_message(keysym: u32, down: bool) -> [u8; 8] {
+    let k = keysym.to_be_bytes();
+    [4, down as u8, 0, 0, k[0], k[1], k[2], k[3]]
+}
+
+pub fn pointer_message(x: u16, y: u16, buttons: u8) -> [u8; 6] {
+    let (x, y) = (x.to_be_bytes(), y.to_be_bytes());
+    [5, buttons, x[0], x[1], y[0], y[1]]
+}
+
+pub fn cut_text_message(text: &str) -> Vec<u8> {
+    // Latin-1 only per RFC 6143; characters outside it become '?'.
+    let bytes: Vec<u8> = text.chars().map(|c| if (c as u32) < 256 { c as u8 } else { b'?' }).collect();
+    let mut m = vec![6u8, 0, 0, 0];
+    m.extend_from_slice(&(bytes.len() as u32).to_be_bytes());
+    m.extend_from_slice(&bytes);
+    m
+}
+
 impl<R: AsyncRead + Unpin> RfbReader<R> {
+    /// `hook` runs when a FramebufferUpdate starts arriving. Asking for the next update right then (instead of after
+    /// the whole one is read and decoded) keeps the server sending while this side is still busy.
+    pub fn set_update_hook(&mut self, hook: impl FnMut() + Send + 'static) {
+        self.update_started = Some(Box::new(hook));
+    }
+
     /// Read one server message and apply it to the framebuffer.
     pub async fn next_event(&mut self) -> Result<ServerEvent> {
         match read_u8(&mut self.stream).await? {
             0 => {
                 let _pad = read_u8(&mut self.stream).await?;
                 let n = self.stream.read_u16().await?;
+                if let Some(hook) = self.update_started.as_mut() {
+                    hook();
+                }
                 let mut rects = Vec::new();
                 let mut resized = None;
                 for _ in 0..n {
@@ -350,14 +374,13 @@ impl<R: AsyncRead + Unpin> RfbReader<R> {
 
     async fn read_raw(&mut self, r: Rect) -> Result<()> {
         self.clip(r)?;
-        let mut row = vec![0u8; r.w as usize * 4];
+        let row_len = r.w as usize * 4;
         for y in 0..r.h as usize {
-            self.stream.read_exact(&mut row).await?;
             let o = ((r.y as usize + y) * self.fb.width as usize + r.x as usize) * 4;
-            for (i, px) in row.chunks_exact(4).enumerate() {
-                self.fb.data[o + i * 4..o + i * 4 + 3].copy_from_slice(&px[..3]);
-                self.fb.data[o + i * 4 + 3] = 255;
-            }
+            let row = &mut self.fb.data[o..o + row_len];
+            self.stream.read_exact(row).await?;
+            // the fourth byte of a 32-bit pixel is padding
+            row.chunks_exact_mut(4).for_each(|px| px[3] = 255);
         }
         Ok(())
     }
@@ -369,15 +392,18 @@ impl<R: AsyncRead + Unpin> RfbReader<R> {
         let src = Rect { x: sx as u16, y: sy as u16, w: r.w, h: r.h };
         self.clip(src)?;
         let stride = self.fb.width as usize * 4;
-        let tmp: Vec<u8> = (0..r.h as usize)
-            .flat_map(|y| {
-                let o = (sy + y) * stride + sx * 4;
-                self.fb.data[o..o + r.w as usize * 4].to_vec()
-            })
-            .collect();
-        for y in 0..r.h as usize {
-            let o = (r.y as usize + y) * stride + r.x as usize * 4;
-            self.fb.data[o..o + r.w as usize * 4].copy_from_slice(&tmp[y * r.w as usize * 4..(y + 1) * r.w as usize * 4]);
+        let row_len = r.w as usize * 4;
+        // Rows move in place (memmove per row); the order keeps overlapping source rows intact.
+        let rows = 0..r.h as usize;
+        let mut copy = |y: usize| {
+            let from = (sy + y) * stride + sx * 4;
+            let to = (r.y as usize + y) * stride + r.x as usize * 4;
+            self.fb.data.copy_within(from..from + row_len, to);
+        };
+        if r.y as usize > sy {
+            rows.rev().for_each(&mut copy);
+        } else {
+            rows.for_each(&mut copy);
         }
         Ok(())
     }
@@ -387,6 +413,7 @@ impl<R: AsyncRead + Unpin> RfbReader<R> {
         let stride = self.fb.width as usize * 4;
         let mut background = [0u8, 0, 0, 255];
         let mut foreground = [0u8, 0, 0, 255];
+        let mut tile = [0u8; 16 * 16 * 4];
         let mut ty = 0u16;
         while ty < r.h {
             let th = (r.h - ty).min(16) as usize;
@@ -395,21 +422,25 @@ impl<R: AsyncRead + Unpin> RfbReader<R> {
                 let tw = (r.w - tx).min(16) as usize;
                 let sub = self.stream.read_u8().await?;
                 let origin = (r.y as usize + ty as usize) * stride + (r.x as usize + tx as usize) * 4;
+                // fills the part of a tile's sub-rectangle that lies inside the tile
                 let put = |fb: &mut Framebuffer, x: usize, y: usize, w: usize, h: usize, c: [u8; 4]| {
+                    if x >= tw {
+                        return;
+                    }
                     for yy in y..(y + h).min(th) {
-                        for xx in x..(x + w).min(tw) {
-                            let o = origin + yy * stride + xx * 4;
-                            fb.data[o..o + 4].copy_from_slice(&c);
-                        }
+                        let o = origin + yy * stride + x * 4;
+                        fb.data[o..o + ((x + w).min(tw) - x) * 4].chunks_exact_mut(4).for_each(|px| px.copy_from_slice(&c));
                     }
                 };
                 if sub & 1 != 0 {
-                    let mut px = [0u8; 4];
-                    for y in 0..th {
-                        for x in 0..tw {
-                            self.stream.read_exact(&mut px).await?;
-                            put(&mut self.fb, x, y, 1, 1, [px[0], px[1], px[2], 255]);
-                        }
+                    // raw tile: one read, then row copies
+                    let bytes = &mut tile[..tw * th * 4];
+                    self.stream.read_exact(bytes).await?;
+                    for (y, src) in bytes.chunks_exact(tw * 4).enumerate() {
+                        let o = origin + y * stride;
+                        let row = &mut self.fb.data[o..o + tw * 4];
+                        row.copy_from_slice(src);
+                        row.chunks_exact_mut(4).for_each(|px| px[3] = 255);
                     }
                 } else {
                     if sub & 2 != 0 {
@@ -489,6 +520,7 @@ fn decode_zrle_tiles(data: &[u8], r: Rect, fb: &mut Framebuffer) -> Result<()> {
     };
     let cpix = |d: &[u8]| -> [u8; 4] { [d[0], d[1], d[2], 255] }; // CPIXEL = B,G,R (3 bytes) for our format
     let stride = fb.width as usize * 4;
+    let mut scratch = vec![[0u8; 4]; 64 * 64];
     let mut ty = 0u16;
     while ty < r.h {
         let th = (r.h - ty).min(64) as usize;
@@ -500,7 +532,7 @@ fn decode_zrle_tiles(data: &[u8], r: Rect, fb: &mut Framebuffer) -> Result<()> {
             p += 1;
             let packed = sub & 0x80 != 0; // RLE
             let pal_size = (sub & 0x7f) as usize;
-            let mut pixels = vec![[0u8; 4]; tw * th];
+            let pixels = &mut scratch[..tw * th];
             match (packed, pal_size) {
                 (false, 0) => {
                     need(p, tw * th * 3)?;
@@ -573,9 +605,7 @@ fn decode_zrle_tiles(data: &[u8], r: Rect, fb: &mut Framebuffer) -> Result<()> {
             }
             for y in 0..th {
                 let o = (r.y as usize + ty as usize + y) * stride + (r.x as usize + tx as usize) * 4;
-                for x in 0..tw {
-                    fb.data[o + x * 4..o + x * 4 + 4].copy_from_slice(&pixels[y * tw + x]);
-                }
+                fb.data[o..o + tw * 4].copy_from_slice(pixels[y * tw..(y + 1) * tw].as_flattened());
             }
             tx += 64;
         }

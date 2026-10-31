@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 
-use crate::client::{connect, AuthPreference, Options, Rect, ServerEvent};
+use crate::client::{connect, cut_text_message, key_message, pointer_message, AuthPreference, Options, Rect, ServerEvent};
 use crate::config::{VncAuthMethod, VncHostConfig};
 use crate::keys;
 
@@ -112,14 +112,19 @@ async fn run(config: VncHostConfig, mut commands: mpsc::UnboundedReceiver<VncCom
     let _ = events.send(VncEvent::Connected { width: info.width, height: info.height, name: info.name, apple: info.apple });
     writer.request_update(false).await.map_err(|e| e.to_string())?;
 
-    // The reader owns the framebuffer; it forwards what changed.
+    // The reader owns the framebuffer; it forwards what changed. It also tells this loop the moment an update starts
+    // arriving, and the next request goes out right then, so the server does not wait for decoding and the UI.
+    let (want_tx, mut want_rx) = mpsc::unbounded_channel::<()>();
+    reader.set_update_hook(move || {
+        let _ = want_tx.send(());
+    });
     let (read_tx, mut read_rx) = mpsc::unbounded_channel::<Result<VncEvent, String>>();
     let _reader_guard = AbortOnDrop(tokio::spawn(async move {
         loop {
             let event = match reader.next_event().await {
                 Ok(ServerEvent::Update(rects)) => {
                     let fb = &reader.fb;
-                    let regions = rects
+                    let regions = merge_rects(rects)
                         .into_iter()
                         .filter(|r| r.w > 0 && r.h > 0)
                         .map(|r| {
@@ -153,13 +158,9 @@ async fn run(config: VncHostConfig, mut commands: mpsc::UnboundedReceiver<VncCom
         tokio::select! {
             msg = read_rx.recv() => match msg {
                 Some(Ok(event)) => {
-                    match &event {
-                        VncEvent::Resized { width, height } => {
-                            writer.set_size(*width, *height);
-                            writer.request_update(false).await.map_err(|e| e.to_string())?;
-                        }
-                        VncEvent::Frame(_) => writer.request_update(true).await.map_err(|e| e.to_string())?,
-                        _ => {}
+                    if let VncEvent::Resized { width, height } = &event {
+                        writer.set_size(*width, *height);
+                        writer.request_update(false).await.map_err(|e| e.to_string())?;
                     }
                     if events.send(event).is_err() {
                         break Ok(());
@@ -168,31 +169,108 @@ async fn run(config: VncHostConfig, mut commands: mpsc::UnboundedReceiver<VncCom
                 Some(Err(e)) => break Err(e),
                 None => break Err("VNC 连接已断开".to_string()),
             },
+            Some(()) = want_rx.recv() => {
+                while want_rx.try_recv().is_ok() {}
+                writer.request_update(true).await.map_err(|e| e.to_string())?;
+            }
             cmd = commands.recv() => {
-                let Some(cmd) = cmd else { break Ok(()) };
-                let sent = match cmd {
-                    VncCommand::Disconnect => break Ok(()),
-                    VncCommand::Refresh => writer.request_update(false).await,
-                    _ if view_only => Ok(()),
-                    VncCommand::Pointer { x, y, buttons } => writer.send_pointer(x, y, buttons).await,
-                    VncCommand::Key { keysym, down } => writer.send_key(keysym, down).await,
-                    VncCommand::CtrlAltDel => {
-                        let mut r = Ok(());
-                        for (sym, down) in keys::ctrl_alt_del() {
-                            r = writer.send_key(sym, down).await;
-                            if r.is_err() {
-                                break;
-                            }
-                        }
-                        r
+                let Some(first) = cmd else { break Ok(()) };
+                // Everything that queued up while the last write was in flight goes out together.
+                let mut queued = vec![first];
+                while queued.len() < 512 {
+                    match commands.try_recv() {
+                        Ok(c) => queued.push(c),
+                        Err(_) => break,
                     }
-                    VncCommand::Clipboard(text) => writer.send_cut_text(&text).await,
-                };
-                if let Err(e) = sent {
-                    break Err(e.to_string());
+                }
+                let (bytes, disconnect) = encode_commands(queued, |incremental| writer.update_request(incremental), view_only);
+                if !bytes.is_empty() {
+                    if let Err(e) = writer.send_raw(&bytes).await {
+                        break Err(e.to_string());
+                    }
+                }
+                if disconnect {
+                    break Ok(());
                 }
             }
         }
     };
     result
+}
+
+/// The wire bytes for a run of UI commands, and whether one of them asked to disconnect (anything after it is
+/// dropped). Consecutive pointer moves with the same buttons collapse into the last one: the remote only needs to
+/// know where the pointer ended up, and a slow link must not be left replaying every intermediate position.
+pub(crate) fn encode_commands(commands: Vec<VncCommand>, update_request: impl Fn(bool) -> [u8; 10], view_only: bool) -> (Vec<u8>, bool) {
+    let mut out = Vec::new();
+    let mut pointer: Option<(u16, u16, u8)> = None;
+    let flush = |out: &mut Vec<u8>, pointer: &mut Option<(u16, u16, u8)>| {
+        if let Some((x, y, buttons)) = pointer.take() {
+            out.extend_from_slice(&pointer_message(x, y, buttons));
+        }
+    };
+    let mut disconnect = false;
+    for command in commands {
+        match command {
+            VncCommand::Disconnect => {
+                disconnect = true;
+                break;
+            }
+            VncCommand::Refresh => {
+                flush(&mut out, &mut pointer);
+                out.extend_from_slice(&update_request(false));
+            }
+            _ if view_only => {}
+            VncCommand::Pointer { x, y, buttons } => match pointer {
+                Some((_, _, b)) if b == buttons => pointer = Some((x, y, buttons)),
+                _ => {
+                    flush(&mut out, &mut pointer);
+                    pointer = Some((x, y, buttons));
+                }
+            },
+            VncCommand::Key { keysym, down } => {
+                flush(&mut out, &mut pointer);
+                out.extend_from_slice(&key_message(keysym, down));
+            }
+            VncCommand::CtrlAltDel => {
+                flush(&mut out, &mut pointer);
+                for (sym, down) in keys::ctrl_alt_del() {
+                    out.extend_from_slice(&key_message(sym, down));
+                }
+            }
+            VncCommand::Clipboard(text) => {
+                flush(&mut out, &mut pointer);
+                out.extend_from_slice(&cut_text_message(&text));
+            }
+        }
+    }
+    flush(&mut out, &mut pointer);
+    (out, disconnect)
+}
+
+/// An update made of many small rectangles is forwarded as their bounding box when that costs little extra: one copy
+/// and one UI patch instead of dozens. The pixels between the rectangles are already in the framebuffer, so the
+/// box is always correct.
+pub(crate) fn merge_rects(rects: Vec<Rect>) -> Vec<Rect> {
+    if rects.len() < 4 {
+        return rects;
+    }
+    let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0u32, 0u32);
+    let mut covered = 0u64;
+    for r in rects.iter().filter(|r| r.w > 0 && r.h > 0) {
+        x0 = x0.min(u32::from(r.x));
+        y0 = y0.min(u32::from(r.y));
+        x1 = x1.max(u32::from(r.x) + u32::from(r.w));
+        y1 = y1.max(u32::from(r.y) + u32::from(r.h));
+        covered += u64::from(r.w) * u64::from(r.h);
+    }
+    if x1 <= x0 || y1 <= y0 {
+        return rects;
+    }
+    let bounding = u64::from(x1 - x0) * u64::from(y1 - y0);
+    if rects.len() > 64 || bounding <= covered * 3 {
+        vec![Rect { x: x0 as u16, y: y0 as u16, w: (x1 - x0) as u16, h: (y1 - y0) as u16 }]
+    } else {
+        rects
+    }
 }

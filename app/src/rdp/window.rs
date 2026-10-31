@@ -24,7 +24,7 @@ use super::agent::{execute_operations, wait_for_settle};
 use super::ai_panel::RdpAiPanel;
 use super::input::{button_code, text_events, utf16_len, WheelAccumulator};
 use super::rdp_manager;
-use crate::remote::surface::{fit_rect, map_point_fit, swap_image, RemoteSurface};
+use crate::remote::surface::{fit_rect, map_point_fit, RemoteSurface, TileLayer};
 use crate::window::{self, WindowKind};
 
 const MIN_DESKTOP: (u32, u32) = (640, 480);
@@ -150,7 +150,8 @@ pub struct RdpWindow {
     session_id: Option<String>,
     desktop: (u16, u16),
     surface: RemoteSurface,
-    image: Option<Arc<RenderImage>>,
+    /// The picture on screen, one image per tile; only the tiles that changed are replaced.
+    tiles: TileLayer,
     focus: FocusHandle,
     stage_bounds: Rc<Cell<(f32, f32, f32, f32)>>,
     fps: FpsCounter,
@@ -164,8 +165,6 @@ pub struct RdpWindow {
     marked: Option<String>,
     /// Where the pointer last was, in window coordinates: the input method puts its candidate list there.
     pointer: Option<Point<Pixels>>,
-    pending_move: Option<(u16, u16)>,
-    move_scheduled: bool,
     generation: u64,
     transport: RdpTransportMode,
     fell_back: bool,
@@ -204,7 +203,7 @@ impl RdpWindow {
             session_id: None,
             desktop: (1280, 720),
             surface: RemoteSurface::default(),
-            image: None,
+            tiles: TileLayer::default(),
             focus: cx.focus_handle(),
             stage_bounds: Rc::new(Cell::new((0.0, 0.0, 0.0, 0.0))),
             fps: FpsCounter { frames: 0, since: Instant::now(), shown: None },
@@ -217,8 +216,6 @@ impl RdpWindow {
             wheel: WheelAccumulator::default(),
             marked: None,
             pointer: None,
-            pending_move: None,
-            move_scheduled: false,
             generation: 0,
             transport,
             fell_back: false,
@@ -250,6 +247,10 @@ impl RdpWindow {
     }
     pub fn surface(&self) -> &RemoteSurface {
         &self.surface
+    }
+    /// How many tiles of the picture have an image on screen (all of them once a frame has been drawn).
+    pub fn tile_images(&self) -> usize {
+        self.tiles.count()
     }
     pub fn ai_panel(&self) -> &Entity<RdpAiPanel> {
         &self.ai
@@ -328,7 +329,7 @@ impl RdpWindow {
             "正在进行 RDP TCP、TLS 与 NLA 握手".to_string()
         });
         self.surface.clear();
-        self.image = None;
+        self.tiles.clear(window);
         self.metrics = None;
         self.fps = FpsCounter { frames: 0, since: Instant::now(), shown: None };
         cx.notify();
@@ -511,7 +512,7 @@ impl RdpWindow {
                         self.activity.store(self.clock_base.elapsed().as_millis() as u64, std::sync::atomic::Ordering::Relaxed);
                     }
                     self.desktop = (f.width, f.height);
-                    match self.surface.apply_rgba((f.width, f.height), f.x, f.y, f.region_width, f.region_height, &f.rgba) {
+                    match self.surface.apply_rgba((f.width, f.height), f.x, f.y, f.region_width, f.region_height, f.rgba) {
                         Ok(()) => drew += 1,
                         Err(_) => self.status_message = Some(t!("rdp.invalidFrame")),
                     }
@@ -580,24 +581,12 @@ impl RdpWindow {
         self.send_input(RdpInputEvent::MouseButton { x, y, button: code, down }, cx);
     }
 
-    fn mouse_moved(&mut self, pos: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+    /// Sent at once: the session keeps only the last of the moves that pile up while a write is in flight, and a move
+    /// needs no repaint here (the remote picture draws the pointer itself).
+    fn mouse_moved(&mut self, pos: Point<Pixels>, cx: &mut Context<Self>) {
         self.pointer = Some(pos);
-        let Some(point) = self.remote_point(pos) else { return };
-        self.pending_move = Some(point);
-        if self.move_scheduled {
-            return;
-        }
-        self.move_scheduled = true;
-        let this = cx.entity().downgrade();
-        window.on_next_frame(move |_, cx| {
-            let _ = this.update(cx, |this, cx| {
-                this.move_scheduled = false;
-                if let Some((x, y)) = this.pending_move.take() {
-                    this.send_input(RdpInputEvent::MouseMove { x, y }, cx);
-                }
-            });
-        });
-        cx.notify();
+        let Some((x, y)) = self.remote_point(pos) else { return };
+        self.send_input(RdpInputEvent::MouseMove { x, y }, cx);
     }
 
     fn wheel(&mut self, ev: &ScrollWheelEvent, cx: &mut Context<Self>) {
@@ -819,9 +808,7 @@ impl Drop for RdpWindow {
 impl Render for RdpWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        if let Some(img) = self.surface.take_image() {
-            swap_image(&mut self.image, img, window);
-        }
+        self.tiles.refresh(&mut self.surface, window);
         // Keep pulling frames while a session is live (inactive RDP windows run at full rate, see WindowKind).
         if self.state == RdpState::Connected {
             window.request_animation_frame();
@@ -900,7 +887,7 @@ impl Render for RdpWindow {
             .on_mouse_down(MouseButton::Navigate(NavigationDirection::Forward), cx.listener(|this, ev: &MouseDownEvent, window, cx| this.mouse_button(MouseButton::Navigate(NavigationDirection::Forward), ev.position, true, window, cx)))
             .on_mouse_up(MouseButton::Navigate(NavigationDirection::Back), cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Navigate(NavigationDirection::Back), ev.position, false, window, cx)))
             .on_mouse_up(MouseButton::Navigate(NavigationDirection::Forward), cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Navigate(NavigationDirection::Forward), ev.position, false, window, cx)))
-            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, window, cx| this.mouse_moved(ev.position, window, cx)))
+            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, cx| this.mouse_moved(ev.position, cx)))
             .on_scroll_wheel(cx.listener(|this, ev: &ScrollWheelEvent, _, cx| this.wheel(ev, cx)))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| this.key(ev, true, cx)))
             .on_key_up(cx.listener(|this, ev: &KeyUpEvent, _, cx| {
@@ -932,7 +919,8 @@ impl Render for RdpWindow {
                     ),
                 )
             })
-            .when_some(self.image.clone().zip(picture), |d, (image, (x, y, w, h))| {
+            .when_some(picture.filter(|_| self.tiles.count() > 0), |d, (x, y, w, h)| {
+                let (tiles, desktop) = (self.tiles.snapshot(), self.desktop);
                 d.child(
                     div()
                         .absolute()
@@ -942,7 +930,17 @@ impl Render for RdpWindow {
                         .h(gpui_kit::px(h))
                         .bg(rgb(0x101417))
                         .shadow(vec![BoxShadow { color: rgba(0x1c282429).into(), offset: point(px(0.), px(18.)), blur_radius: px(38.), spread_radius: px(0.), inset: false }])
-                        .child(img(ImageSource::Render(image)).size_full().object_fit(ObjectFit::Fill)),
+                        .child(
+                            canvas(
+                                |bounds, _, _| bounds,
+                                // the panel is the picture's own size: tiles go into it at the scale it is shown at
+                                move |_, bounds, window, _| {
+                                    let scale = f32::from(bounds.size.width) / f32::from(desktop.0.max(1));
+                                    tiles.paint(window, desktop, f32::from(bounds.origin.x), f32::from(bounds.origin.y), scale);
+                                },
+                            )
+                            .size_full(),
+                        ),
                 )
             })
             .when(showing_connect, |d| {

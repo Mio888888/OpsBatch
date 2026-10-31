@@ -4,7 +4,6 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::sync::Arc;
 use std::time::Duration;
 
 use gpui_kit::assets::IconName;
@@ -20,7 +19,7 @@ use ops_vnc::keys::{keysym_for_key, modifier_changes, Mods};
 use ops_vnc::{start_session, VncAuthMethod, VncCommand, VncEvent, VncSession};
 
 use crate::rdp::input::{WheelAccumulator, NOTCH};
-use crate::remote::surface::{contain_rect, map_point, swap_image, RemoteSurface};
+use crate::remote::surface::{contain_rect, map_point, RemoteSurface, TileLayer};
 use crate::window::{self, WindowKind};
 
 /// How long a connection attempt may take before the window gives up (`VNC_CONNECT_WATCHDOG_MS`).
@@ -79,14 +78,13 @@ pub struct VncWindow {
     view_only: bool,
     desktop: (u16, u16),
     surface: RemoteSurface,
-    image: Option<Arc<RenderImage>>,
+    /// The picture on screen, one image per tile; only the tiles that changed are replaced.
+    tiles: TileLayer,
     focus: FocusHandle,
     stage_bounds: Rc<Cell<(f32, f32, f32, f32)>>,
     last_mods: Modifiers,
     buttons: u8,
     pointer: (u16, u16),
-    pending_move: bool,
-    move_scheduled: bool,
     down_keys: HashMap<String, u32>,
     last_clipboard: Option<String>,
     /// The remote is a Mac (ARD login or Apple's RFB version): Command stays Command. Otherwise it is sent as Ctrl.
@@ -131,14 +129,12 @@ impl VncWindow {
             view_only: false,
             desktop: (0, 0),
             surface: RemoteSurface::default(),
-            image: None,
+            tiles: TileLayer::default(),
             focus,
             stage_bounds: Rc::new(Cell::new((0.0, 0.0, 0.0, 0.0))),
             last_mods: Modifiers::default(),
             buttons: 0,
             pointer: (0, 0),
-            pending_move: false,
-            move_scheduled: false,
             down_keys: HashMap::new(),
             last_clipboard: None,
             remote_is_mac: false,
@@ -170,6 +166,10 @@ impl VncWindow {
     pub fn view_only(&self) -> bool {
         self.view_only
     }
+    /// How many tiles of the picture have an image on screen (all of them once a frame has been drawn).
+    pub fn tile_images(&self) -> usize {
+        self.tiles.count()
+    }
 
     // ---- connection ----
 
@@ -188,7 +188,7 @@ impl VncWindow {
         self.state = VncState::Connecting;
         self.status_message = Some(t!("vnc.state.connecting"));
         self.surface.clear();
-        self.image = None;
+        self.tiles.clear(window);
         self.buttons = 0;
         self.down_keys.clear();
         self.wheel.reset();
@@ -377,25 +377,13 @@ impl VncWindow {
         self.send_pointer(point);
     }
 
-    fn mouse_moved(&mut self, pos: Point<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
+    /// Sent at once: the session merges the moves that pile up while a write is in flight, and nothing here needs a
+    /// repaint (the remote picture shows the pointer itself), so a move costs neither a frame of delay nor a redraw.
+    fn mouse_moved(&mut self, pos: Point<Pixels>) {
         let Some(point) = self.remote_point(pos) else { return };
-        self.pointer = point;
-        self.pending_move = true;
-        if self.move_scheduled {
-            return;
+        if point != self.pointer {
+            self.send_pointer(point);
         }
-        self.move_scheduled = true;
-        let this = cx.entity().downgrade();
-        window.on_next_frame(move |_, cx| {
-            let _ = this.update(cx, |this, _| {
-                this.move_scheduled = false;
-                if std::mem::take(&mut this.pending_move) {
-                    let p = this.pointer;
-                    this.send_pointer(p);
-                }
-            });
-        });
-        cx.notify();
     }
 
     fn wheel(&mut self, ev: &ScrollWheelEvent, cx: &mut Context<Self>) {
@@ -512,9 +500,7 @@ impl Drop for VncWindow {
 impl Render for VncWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme().clone();
-        if let Some(img) = self.surface.take_image() {
-            swap_image(&mut self.image, img, window);
-        }
+        self.tiles.refresh(&mut self.surface, window);
 
         let Some(host) = self.host.clone() else {
             return v_flex()
@@ -547,6 +533,7 @@ impl Render for VncWindow {
         let chip = |text: String| div().flex_none().px_1p5().rounded(px(4.)).bg(theme.muted).text_size(px(10.)).text_color(theme.muted_foreground).child(text);
         let target = if host.ip.is_empty() { host.name.clone() } else { host.ip.clone() };
         let bounds_cell = self.stage_bounds.clone();
+        let (tiles, desktop, show_picture) = (self.tiles.snapshot(), self.desktop, !connecting && !failed);
 
         let stage = div()
             .id("vnc-stage")
@@ -567,13 +554,29 @@ impl Render for VncWindow {
             .on_mouse_up_out(MouseButton::Left, cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Left, ev.position, false, window, cx)))
             .on_mouse_up_out(MouseButton::Middle, cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Middle, ev.position, false, window, cx)))
             .on_mouse_up_out(MouseButton::Right, cx.listener(|this, ev: &MouseUpEvent, window, cx| this.mouse_button(MouseButton::Right, ev.position, false, window, cx)))
-            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, window, cx| this.mouse_moved(ev.position, window, cx)))
+            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, _| this.mouse_moved(ev.position)))
             .on_scroll_wheel(cx.listener(|this, ev: &ScrollWheelEvent, _, cx| this.wheel(ev, cx)))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| this.key_down(ev, cx)))
             .on_key_up(cx.listener(|this, ev: &KeyUpEvent, _, _| this.key_up(ev)))
             .on_modifiers_changed(cx.listener(|this, ev: &ModifiersChangedEvent, _, _| this.modifiers_changed(ev.modifiers)))
-            .child(canvas(move |bounds, _, _| bounds_cell.set((f32::from(bounds.origin.x), f32::from(bounds.origin.y), f32::from(bounds.size.width), f32::from(bounds.size.height))), |_, _, _, _| {}).absolute().size_full())
-            .when_some(self.image.clone().filter(|_| !connecting && !failed), |d, image| d.child(img(ImageSource::Render(image)).size_full().object_fit(ObjectFit::Contain)))
+            .child(
+                canvas(
+                    move |bounds, _, _| {
+                        bounds_cell.set((f32::from(bounds.origin.x), f32::from(bounds.origin.y), f32::from(bounds.size.width), f32::from(bounds.size.height)));
+                        bounds
+                    },
+                    move |_, bounds, window, _| {
+                        if show_picture {
+                            let stage = (f32::from(bounds.origin.x), f32::from(bounds.origin.y), f32::from(bounds.size.width), f32::from(bounds.size.height));
+                            if let Some((ox, oy, scale)) = contain_rect(stage, desktop) {
+                                tiles.paint(window, desktop, ox, oy, scale);
+                            }
+                        }
+                    },
+                )
+                .absolute()
+                .size_full(),
+            )
             .when(connecting, |d| {
                 d.child(
                     v_flex()

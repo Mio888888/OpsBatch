@@ -346,6 +346,7 @@ impl TerminalPane {
         }
         if !raw.is_empty() {
             let cleaned = self.cleaner.clean(&raw);
+            self.sync_paste_mode();
             if let Some(started) = self.executions.on_output(&raw, &cleaned) {
                 self.begin_execution(started, cx);
             }
@@ -494,14 +495,24 @@ impl TerminalPane {
         cx.notify();
     }
 
-    /// Insert a command at the prompt without running it (command/script panels). Always bracketed.
+    /// Tell the execution tracker how the shell wants pasted text (see `ExecutionTracker::set_bracketed_paste`).
+    fn sync_paste_mode(&mut self) {
+        let on = self.engine.mode().contains(TermMode::BRACKETED_PASTE);
+        self.executions.set_bracketed_paste(on);
+    }
+
+    /// Insert a command at the prompt without running it (command/script panels); bracketed when the shell allows.
     pub fn insert_command(&mut self, command: &str, cx: &mut Context<Self>) {
         let body = command.trim_end();
         if self.closed || body.is_empty() {
             return;
         }
         self.touch();
-        self.write(format!("\x1b[200~{body}\x1b[201~"));
+        if self.engine.mode().contains(TermMode::BRACKETED_PASTE) {
+            self.write(format!("\x1b[200~{body}\x1b[201~"));
+        } else {
+            self.write(body.to_string());
+        }
         self.guard.reset_line();
         cx.notify();
     }
@@ -523,6 +534,7 @@ impl TerminalPane {
             });
             return rx;
         }
+        self.sync_paste_mode();
         let (rx, started) = self.executions.submit(
             command.to_string(),
             timeout.unwrap_or(DEFAULT_COMMAND_TIMEOUT),

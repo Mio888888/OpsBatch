@@ -31,3 +31,7 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+        env:
+          # The tests drive a real shell. The macOS runner's login shell is bash 3.2, which the app copes with, but the
+          # tests assume the macOS default.
+          SHELL: ${{ matrix.os == 'macos-latest' && '/bin/zsh' || '/bin/bash' }}

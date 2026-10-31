@@ -149,7 +149,7 @@ fn read_process_memory_rss_mb() -> Option<u64> {
     None
 }
 
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(target_os = "macos")]
 fn parse_ps_cpu_time_ms(value: &str) -> Option<f64> {
     let parts = value.split(':').collect::<Vec<_>>();
     match parts.as_slice() {

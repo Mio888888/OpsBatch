@@ -109,6 +109,15 @@ fn start(os: &'static str, arch: &'static str) -> Mirror {
     }
 }
 
+/// These mock releases carry no `.sig` files, so the source must not require one even when the build or the
+/// environment configures an updater key (release builds do).
+fn unsigned(base: &str) -> UpdateSource {
+    UpdateSource {
+        pubkey: None,
+        ..UpdateSource::with_base(base)
+    }
+}
+
 #[test]
 fn newer_release_is_reported_with_notes_and_older_is_not() {
     let m = start("macos", "aarch64");
@@ -124,7 +133,7 @@ fn newer_release_is_reported_with_notes_and_older_is_not() {
 #[test]
 fn verified_download_reports_progress_and_leaves_no_partial_file() {
     let m = start("macos", "aarch64");
-    let source = UpdateSource::with_base(&m.base);
+    let source = unsigned(&m.base);
     let dir = std::env::temp_dir().join(format!("opsbatch-update-ok-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let mut seen = Vec::new();
@@ -162,7 +171,7 @@ fn verified_download_reports_progress_and_leaves_no_partial_file() {
 #[test]
 fn tampered_missing_or_unsupported_downloads_are_rejected() {
     let m = start("windows", "x86_64");
-    let source = UpdateSource::with_base(&m.base);
+    let source = unsigned(&m.base);
     let dir = std::env::temp_dir().join(format!("opsbatch-update-bad-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let run = |os: &str, arch: &str| {

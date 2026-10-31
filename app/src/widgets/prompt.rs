@@ -43,10 +43,11 @@ impl TextPrompt {
             let sub = cx.subscribe_in(
                 &input,
                 window,
-                |this: &mut Self, _, ev: &InputEvent, window, cx| {
-                    if matches!(ev, InputEvent::PressEnter { .. }) {
-                        this.submit(window, cx);
-                    }
+                |this: &mut Self, _, ev: &InputEvent, window, cx| match ev {
+                    InputEvent::PressEnter { .. } => this.submit(window, cx),
+                    // the OK button follows whether there is text, so it must be redrawn as soon as that changes
+                    InputEvent::Change => cx.notify(),
+                    _ => {}
                 },
             );
             Self {

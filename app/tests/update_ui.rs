@@ -21,7 +21,11 @@ fn configure(cx: &mut TestAppContext, base: &str, current: &str, dir: &std::path
     cx.update(move |cx| {
         update_store(cx).update(cx, |s, _| {
             s.configure(
-                UpdateSource::with_base(&base),
+                // the mock release has no .sig files, whatever updater key the build or the environment carries
+                UpdateSource {
+                    pubkey: None,
+                    ..UpdateSource::with_base(&base)
+                },
                 &current,
                 "macos",
                 "aarch64",

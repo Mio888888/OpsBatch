@@ -44,7 +44,8 @@ struct Active {
     tx: oneshot::Sender<ExecutionResult>,
 }
 
-/// A command that must now be written to the terminal (bracketed paste + Enter) and given a timeout.
+/// A command that must now be written to the terminal (bracketed paste when the shell asked for it, + Enter) and
+/// given a timeout.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Started {
     pub execution_id: String,
@@ -57,6 +58,10 @@ pub struct ExecutionTracker {
     queue: VecDeque<Queued>,
     active: Option<Active>,
     detector: String,
+    /// Whether the shell turned bracketed paste on (`ESC [ ? 2004 h`). The pane keeps this current; a shell that
+    /// never asked for it (the bash 3.2 macOS ships, for one) would type the `ESC [ 200 ~` markers as text, which
+    /// breaks the command and mangles the completion marker.
+    plain_input: bool,
 }
 
 fn tail_chars(s: &str, max: usize) -> String {
@@ -71,6 +76,10 @@ fn tail_chars(s: &str, max: usize) -> String {
 impl ExecutionTracker {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn set_bracketed_paste(&mut self, on: bool) {
+        self.plain_input = !on;
     }
 
     pub fn is_busy(&self) -> bool {
@@ -105,10 +114,17 @@ impl ExecutionTracker {
         let id = uuid::Uuid::new_v4().simple().to_string();
         let prefix = format!("__OPSBATCH_AI_DONE_{id}__:");
         let tracked = create_tracked_command(&next.command, &prefix);
-        let write = format!(
-            "\x15\x1b[200~{}{}\x1b[201~\r",
-            tracked.visible_command, tracked.hidden_tracker
-        );
+        let write = if self.plain_input {
+            format!(
+                "\x15{}{}\r",
+                tracked.visible_command, tracked.hidden_tracker
+            )
+        } else {
+            format!(
+                "\x15\x1b[200~{}{}\x1b[201~\r",
+                tracked.visible_command, tracked.hidden_tracker
+            )
+        };
         self.detector.clear();
         self.active = Some(Active {
             pattern: done_pattern(&id),
@@ -206,6 +222,26 @@ mod tests {
 
     fn recv(rx: &mut oneshot::Receiver<ExecutionResult>) -> ExecutionResult {
         rx.try_recv().unwrap().expect("result delivered")
+    }
+
+    #[test]
+    fn a_shell_without_bracketed_paste_gets_the_command_as_typed_text() {
+        let mut t = ExecutionTracker::new();
+        t.set_bracketed_paste(false);
+        let s = t
+            .submit("echo hi".into(), DEFAULT_COMMAND_TIMEOUT)
+            .1
+            .unwrap();
+        assert!(s.write.starts_with("\x15echo hi\n__opsbatch_ai_status=$?"));
+        assert!(s.write.ends_with("__\\n' \"$__opsbatch_ai_status\"\r"));
+        assert!(!s.write.contains('\x1b'), "no paste markers: {:?}", s.write);
+        let mut t = ExecutionTracker::new();
+        t.set_bracketed_paste(true);
+        let s = t
+            .submit("echo hi".into(), DEFAULT_COMMAND_TIMEOUT)
+            .1
+            .unwrap();
+        assert!(s.write.starts_with("\x15\x1b[200~echo hi"));
     }
 
     #[test]

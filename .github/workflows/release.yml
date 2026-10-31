@@ -2,7 +2,7 @@ name: Release
 
 # Builds the installers for every platform. Nothing is published unless asked for:
 #
-#   push to 1.0 / main      builds and signs everything and keeps it as workflow artifacts (checks that releases work)
+#   push to master / main  builds and signs everything and keeps it as workflow artifacts (checks that releases work)
 #   push of a tag v<ver>    builds, signs and PUBLISHES the release (the tag must equal the version in Cargo.toml)
 #   run by hand + publish   the same, from the branch picked in "Run workflow"
 #
@@ -20,7 +20,7 @@ name: Release
 
 on:
   push:
-    branches: ["1.0", main]
+    branches: [master, main]
     tags: ["v*"]
   workflow_dispatch:
     inputs:

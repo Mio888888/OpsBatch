@@ -29,6 +29,29 @@ fn render(cx: &mut TestAppContext, fx: &Fixture) {
 }
 
 #[gpui_kit::test]
+fn clicking_outside_the_host_dialog_keeps_it_open(cx: &mut TestAppContext) {
+    let _s = serial();
+    let fx = setup(cx, |_| {});
+    let store = open_sidebar(cx, &fx, 0);
+    cx.update_window(fx.handle.into(), |_, window, cx| {
+        HostDialog::open_with_handle(store.clone(), None, None, window, cx)
+    })
+    .unwrap();
+    render(cx, &fx);
+    cx.update_window(fx.handle.into(), |_, window, cx| {
+        assert!(window.try_find("host-dialog").is_some());
+        // the sidebar lies behind the backdrop, so this click lands on the backdrop, not on the sidebar
+        window.click("asset-panel", cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("host-dialog").is_some(),
+            "a click on the backdrop must not discard what was typed"
+        );
+    })
+    .unwrap();
+}
+
+#[gpui_kit::test]
 fn adding_a_host_validates_then_saves_secrets_to_the_vault(cx: &mut TestAppContext) {
     let _s = serial();
     let fx = setup(cx, |_| {});

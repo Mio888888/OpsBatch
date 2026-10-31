@@ -134,7 +134,12 @@ impl HostDialog {
         let view = cx.new(|cx| HostDialog::new(store, editing, initial_group, window, cx));
         let shown = view.clone();
         window.open_dialog(cx, move |dialog, _, _| {
-            dialog.title(title.clone()).w(px(520.)).child(shown.clone())
+            dialog
+                .title(title.clone())
+                .w(px(520.))
+                // a stray click outside must not throw away a half-filled form; Esc and Cancel still close it
+                .overlay_closable(false)
+                .child(shown.clone())
         });
         let first = view.read(cx).inputs.name.clone();
         first.update(cx, |s, cx| s.focus(window, cx));

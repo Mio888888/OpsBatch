@@ -3,7 +3,7 @@
 **English** | [简体中文](README_CN.md)
 
 [![CI](https://github.com/Mio888888/OpsBatch/actions/workflows/ci.yml/badge.svg)](https://github.com/Mio888888/OpsBatch/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 OpsBatch is a local desktop workbench for operations work: SSH terminals, SFTP, batch commands, script and command
 libraries, quick actions, RDP / VNC remote desktops, AI assistance, workflows and a global log in one app. Everything is
@@ -140,4 +140,6 @@ The plan and per-milestone reports are in [`PLAN.md`](PLAN.md) and [`TASKS.md`](
 
 ## License
 
-[MIT](LICENSE)
+Copyright © 2025-2026 Mio. Licensed under the [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`): if you
+modify OpsBatch and run it as a network service, or distribute it, you must offer the corresponding source code of your
+version under the same license.

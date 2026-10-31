@@ -3,7 +3,7 @@
 [English](README.md) | **简体中文**
 
 [![CI](https://github.com/Mio888888/OpsBatch/actions/workflows/ci.yml/badge.svg)](https://github.com/Mio888888/OpsBatch/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 OpsBatch 是面向运维场景的本地桌面工作台：SSH 终端、SFTP、批量命令、脚本/命令库、快捷动作、RDP/VNC 远程桌面、
 AI 助手、工作流与全局日志集中在一个应用里。数据保存在本机的 SQLite 数据库与加密保险库中，无需部署任何中心服务。
@@ -129,4 +129,5 @@ Windows 和 Linux 的安装包，并用更新密钥签名。
 
 ## 许可证
 
-[MIT](LICENSE)
+Copyright © 2025-2026 Mio。采用 [GNU Affero 通用公共许可证第 3 版](LICENSE)（`AGPL-3.0-only`）：修改 OpsBatch
+后作为网络服务运行或分发时，必须以同一许可证向用户提供你那个版本的对应源代码。

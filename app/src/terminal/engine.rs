@@ -411,6 +411,21 @@ mod tests {
         assert_eq!(e.cursor(), (5, 1));
     }
 
+    /// zsh marks a missing final newline with a reverse-video `%`, pads the line to the terminal width, returns to the
+    /// start of the line and clears below before it draws the prompt. The text before the marker has to survive.
+    #[test]
+    fn text_without_a_final_newline_survives_the_zsh_end_of_line_marker() {
+        for cols in [20usize, 40] {
+            let mut e = engine(cols, 5);
+            e.feed(b"$ printf noeol\r\nnoeol");
+            let pad = " ".repeat(cols - 1);
+            e.feed(format!("\x1b[1m\x1b[7m%\x1b[27m\x1b[1m\x1b[0m{pad}\r \r\r\x1b[0m\x1b[27m\x1b[24m\x1b[JMac-mini% ").as_bytes());
+            let text = e.screen_text();
+            assert!(text.contains("noeol%"), "cols={cols}: {text:?}");
+            assert!(text.ends_with("Mac-mini%"), "cols={cols}: {text:?}");
+        }
+    }
+
     #[test]
     fn cjk_and_ansi_do_not_leak_escape_text() {
         let mut e = engine(20, 3);

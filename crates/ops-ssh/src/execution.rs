@@ -75,7 +75,8 @@ pub async fn list_execution_history(
                 success_count: row.get(4)?,
                 fail_count: row.get(5)?,
                 started_at: row.get(6)?,
-                completed_at: row.get(7)?,
+                // still NULL while the task runs
+                completed_at: row.get::<_, Option<String>>(7)?.unwrap_or_default(),
                 duration: row.get(8)?,
             })
         })

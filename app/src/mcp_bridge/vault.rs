@@ -9,12 +9,14 @@ use ops_ai::mcp_bridge::ToolOutcome;
 use ops_library::library::{CustomScript, NewScript};
 use ops_ssh::groups::HostGroup;
 use ops_ssh::hosts::{Host, NewHost, UpdateHost};
+
+use crate::sftp::store::blocking;
 use serde_json::{json, Value};
 
 pub(super) fn handles(tool: &str) -> bool {
     matches!(
         tool,
-        "vault_list_hosts" | "vault_list_scripts" | "vault_list_groups" | "vault_get_script" | "vault_create_host" | "vault_update_host" | "vault_set_host_notes" | "vault_delete_host" | "vault_create_group" | "vault_update_group" | "vault_delete_group" | "vault_create_script" | "vault_update_script" | "vault_delete_script"
+        "vault_list_hosts" | "vault_list_scripts" | "vault_list_groups" | "vault_get_script" | "vault_create_host" | "vault_update_host" | "vault_set_host_notes" | "vault_delete_host" | "vault_create_group" | "vault_update_group" | "vault_delete_group" | "vault_create_script" | "vault_update_script" | "vault_delete_script" | "vault_run_script" | "vault_get_script_run" | "vault_stop_script_run"
     )
 }
 
@@ -31,6 +33,8 @@ pub(super) fn capability_of(tool: &str) -> Option<&'static str> {
         "vault_create_script" => "vault.scripts.create",
         "vault_update_script" => "vault.scripts.update",
         "vault_delete_script" => "vault.scripts.delete",
+        "vault_run_script" => "vault.scripts.run",
+        "vault_stop_script_run" => "vault.scripts.run.stop",
         _ => return None,
     })
 }
@@ -46,7 +50,8 @@ pub(super) fn summary_of(tool: &str, args: &Value) -> String {
         "vault_create_group" | "vault_create_script" => arg(args, "name"),
         "vault_update_host" | "vault_set_host_notes" | "vault_delete_host" => arg(args, "host_id"),
         "vault_update_group" | "vault_delete_group" => arg(args, "group_id"),
-        "vault_get_script" | "vault_update_script" | "vault_delete_script" => arg(args, "script_id"),
+        "vault_get_script" | "vault_update_script" | "vault_delete_script" | "vault_run_script" => arg(args, "script_id"),
+        "vault_get_script_run" | "vault_stop_script_run" => arg(args, "run_id"),
         _ => arg(args, "query"),
     }
 }
@@ -78,29 +83,40 @@ pub(super) async fn describe(tool: &str, args: &Value, ctx: &Arc<ops_ssh::Ctx>) 
             let script = find_script(ctx, &arg(args, "script_id")).await.ok()?;
             Some(with_changes(script.name, &["script_id"]))
         }
+        "vault_run_script" => {
+            let script = find_script(ctx, &arg(args, "script_id")).await.ok()?;
+            let hosts = all_hosts(ctx).await.ok()?;
+            let names: Vec<String> = host_ids_arg(args).ok()?.iter().filter_map(|id| hosts.iter().find(|h| &h.id == id)).map(|h| format!("{} ({})", h.name, h.ip)).collect();
+            Some(format!("{} [{}] → {}", script.name, script.risk, names.join(", ")))
+        }
         _ => None,
     }
 }
 
-pub(super) async fn run(tool: &str, args: &Value, ctx: &Arc<ops_ssh::Ctx>, cx: &mut AsyncApp) -> ToolOutcome {
+/// `dry` runs every check of a changing call and stops before the first write (used to refuse a bad call before
+/// anyone is asked to approve it).
+pub(super) async fn run(tool: &str, args: &Value, ctx: &Arc<ops_ssh::Ctx>, cx: &mut AsyncApp, dry: bool) -> ToolOutcome {
     let result = match tool {
         "vault_list_hosts" => list_hosts(ctx, &arg(args, "query")).await,
         "vault_list_groups" => list_groups(ctx).await,
         "vault_list_scripts" => list_scripts(ctx, &arg(args, "query")).await,
         "vault_get_script" => get_script(ctx, &arg(args, "script_id")).await,
-        "vault_create_host" => create_host(ctx, args).await,
-        "vault_update_host" => update_host(ctx, args).await,
-        "vault_set_host_notes" => update_host(ctx, &json!({"host_id": arg(args, "host_id"), "remark": arg(args, "notes")})).await,
-        "vault_delete_host" => delete_host(ctx, &arg(args, "host_id")).await,
-        "vault_create_group" => create_group(ctx, args).await,
-        "vault_update_group" => update_group(ctx, args).await,
-        "vault_delete_group" => delete_group(ctx, &arg(args, "group_id")).await,
-        "vault_create_script" => create_script(ctx, args).await,
-        "vault_update_script" => update_script(ctx, args).await,
-        "vault_delete_script" => delete_script(ctx, &arg(args, "script_id")).await,
+        "vault_create_host" => create_host(ctx, args, dry).await,
+        "vault_update_host" => update_host(ctx, args, dry).await,
+        "vault_set_host_notes" => update_host(ctx, &json!({"host_id": arg(args, "host_id"), "remark": arg(args, "notes")}), dry).await,
+        "vault_delete_host" => delete_host(ctx, &arg(args, "host_id"), dry).await,
+        "vault_create_group" => create_group(ctx, args, dry).await,
+        "vault_update_group" => update_group(ctx, args, dry).await,
+        "vault_delete_group" => delete_group(ctx, &arg(args, "group_id"), dry).await,
+        "vault_create_script" => create_script(ctx, args, dry).await,
+        "vault_update_script" => update_script(ctx, args, dry).await,
+        "vault_delete_script" => delete_script(ctx, &arg(args, "script_id"), dry).await,
+        "vault_run_script" => run_script(ctx, args, dry).await,
+        "vault_get_script_run" => run_json(ctx, &arg(args, "run_id")).await,
+        "vault_stop_script_run" => stop_script_run(ctx, &arg(args, "run_id"), dry).await,
         other => Err(format!("Unknown tool: {other}")),
     };
-    if capability_of(tool).is_some() && result.is_ok() {
+    if capability_of(tool).is_some() && result.is_ok() && !dry {
         refresh(tool, cx);
     }
     match result {
@@ -204,7 +220,7 @@ async fn list_hosts(ctx: &Arc<ops_ssh::Ctx>, query: &str) -> Result<String, Stri
     pretty(&rows)
 }
 
-async fn create_host(ctx: &Arc<ops_ssh::Ctx>, args: &Value) -> Result<String, String> {
+async fn create_host(ctx: &Arc<ops_ssh::Ctx>, args: &Value, dry: bool) -> Result<String, String> {
     let (name, address) = (arg(args, "name").trim().to_string(), arg(args, "address").trim().to_string());
     if name.is_empty() || address.is_empty() {
         return Err("`name` and `address` are required.".into());
@@ -230,12 +246,15 @@ async fn create_host(ctx: &Arc<ops_ssh::Ctx>, args: &Value) -> Result<String, St
         rdp_settings: None,
         proxy_settings: None,
     };
+    if dry {
+        return Ok(String::new());
+    }
     let c = ctx.clone();
     let created = ops_core::rt::run(async move { ops_ssh::hosts::add_host(&c.db, host).await }).await.and_then(|r| r)?;
     pretty(&host_json(&created, ""))
 }
 
-async fn update_host(ctx: &Arc<ops_ssh::Ctx>, args: &Value) -> Result<String, String> {
+async fn update_host(ctx: &Arc<ops_ssh::Ctx>, args: &Value, dry: bool) -> Result<String, String> {
     let current = find_host(ctx, &arg(args, "host_id")).await?;
     let text = |key: &str, old: &str| -> Result<String, String> {
         match args.get(key) {
@@ -269,13 +288,19 @@ async fn update_host(ctx: &Arc<ops_ssh::Ctx>, args: &Value) -> Result<String, St
         rdp_settings: Some(current.rdp_settings.clone()).filter(|s| !s.is_empty()),
         proxy_settings: Some(current.proxy_settings.clone()).filter(|s| !s.is_empty()),
     };
+    if dry {
+        return Ok(String::new());
+    }
     let (core, registry) = (ctx.core.clone(), ctx.registry.clone());
     let saved = ops_core::rt::run(async move { ops_ssh::hosts::update_host(core, registry, update).await }).await.and_then(|r| r)?;
     pretty(&host_json(&saved, ""))
 }
 
-async fn delete_host(ctx: &Arc<ops_ssh::Ctx>, id: &str) -> Result<String, String> {
+async fn delete_host(ctx: &Arc<ops_ssh::Ctx>, id: &str, dry: bool) -> Result<String, String> {
     let host = find_host(ctx, id).await?;
+    if dry {
+        return Ok(String::new());
+    }
     let (core, registry, hid) = (ctx.core.clone(), ctx.registry.clone(), host.id.clone());
     ops_core::rt::run(async move { ops_ssh::hosts::delete_host(&core, registry, hid).await }).await.and_then(|r| r)?;
     Ok(format!("Deleted host {} ({})", host.name, host.id))
@@ -293,7 +318,7 @@ async fn list_groups(ctx: &Arc<ops_ssh::Ctx>) -> Result<String, String> {
     pretty(&all_groups(ctx).await?.iter().map(group_json).collect::<Vec<_>>())
 }
 
-async fn create_group(ctx: &Arc<ops_ssh::Ctx>, args: &Value) -> Result<String, String> {
+async fn create_group(ctx: &Arc<ops_ssh::Ctx>, args: &Value, dry: bool) -> Result<String, String> {
     let name = arg(args, "name").trim().to_string();
     if name.is_empty() {
         return Err("`name` is required.".into());
@@ -302,12 +327,15 @@ async fn create_group(ctx: &Arc<ops_ssh::Ctx>, args: &Value) -> Result<String, S
     if let Some(p) = &parent {
         find_group(ctx, p).await?;
     }
+    if dry {
+        return Ok(String::new());
+    }
     let c = ctx.clone();
     let group = ops_core::rt::run(async move { ops_ssh::groups::add_group(&c.db, name, parent).await }).await.and_then(|r| r)?;
     pretty(&group_json(&group))
 }
 
-async fn update_group(ctx: &Arc<ops_ssh::Ctx>, args: &Value) -> Result<String, String> {
+async fn update_group(ctx: &Arc<ops_ssh::Ctx>, args: &Value, dry: bool) -> Result<String, String> {
     let mut group = find_group(ctx, &arg(args, "group_id")).await?;
     if let Some(name) = args.get("name").and_then(Value::as_str) {
         if name.trim().is_empty() {
@@ -332,13 +360,19 @@ async fn update_group(ctx: &Arc<ops_ssh::Ctx>, args: &Value) -> Result<String, S
             group.parent_id = Some(parent.to_string());
         }
     }
+    if dry {
+        return Ok(String::new());
+    }
     let c = ctx.clone();
     let saved = ops_core::rt::run(async move { ops_ssh::groups::update_group(&c.db, group).await }).await.and_then(|r| r)?;
     pretty(&group_json(&saved))
 }
 
-async fn delete_group(ctx: &Arc<ops_ssh::Ctx>, id: &str) -> Result<String, String> {
+async fn delete_group(ctx: &Arc<ops_ssh::Ctx>, id: &str, dry: bool) -> Result<String, String> {
     let group = find_group(ctx, id).await?;
+    if dry {
+        return Ok(String::new());
+    }
     let (c, gid) = (ctx.clone(), group.id.clone());
     ops_core::rt::run(async move { ops_ssh::groups::delete_group(&c.db, gid).await }).await.and_then(|r| r)?;
     Ok(format!("Deleted group {} ({}); its hosts are ungrouped now", group.name, group.id))
@@ -384,7 +418,7 @@ fn risk_arg(args: &Value) -> Result<Option<String>, String> {
     }
 }
 
-async fn create_script(ctx: &Arc<ops_ssh::Ctx>, args: &Value) -> Result<String, String> {
+async fn create_script(ctx: &Arc<ops_ssh::Ctx>, args: &Value, dry: bool) -> Result<String, String> {
     let name = arg(args, "name").trim().to_string();
     if name.is_empty() {
         return Err("`name` is required.".into());
@@ -392,12 +426,15 @@ async fn create_script(ctx: &Arc<ops_ssh::Ctx>, args: &Value) -> Result<String, 
     let Some(content) = args.get("content").and_then(Value::as_str) else { return Err("`content` is required.".into()) };
     let opt = |key: &str| args.get(key).and_then(Value::as_str).map(str::to_string).filter(|v| !v.is_empty());
     let script = NewScript { name, language: opt("language"), category: opt("category"), tags: tags_arg(args)?, risk: risk_arg(args)?, description: opt("description"), content: Some(content.to_string()), parameters: None, url: None, platform: opt("platform") };
+    if dry {
+        return Ok(String::new());
+    }
     let c = ctx.clone();
     let id = ops_core::rt::run(async move { ops_library::library::add_script(&c.db, script).await }).await.and_then(|r| r)?;
     pretty(&script_row(&find_script(ctx, &id).await?))
 }
 
-async fn update_script(ctx: &Arc<ops_ssh::Ctx>, args: &Value) -> Result<String, String> {
+async fn update_script(ctx: &Arc<ops_ssh::Ctx>, args: &Value, dry: bool) -> Result<String, String> {
     let mut script = find_script(ctx, &arg(args, "script_id")).await?;
     if script.is_builtin {
         return Err("Built-in scripts cannot be changed. Create a copy with vault_create_script instead.".into());
@@ -423,24 +460,142 @@ async fn update_script(ctx: &Arc<ops_ssh::Ctx>, args: &Value) -> Result<String, 
     if let Some(tags) = tags_arg(args)? {
         script.tags = tags;
     }
+    if dry {
+        return Ok(String::new());
+    }
     let (c, copy) = (ctx.clone(), script.clone());
     ops_core::rt::run(async move { ops_library::library::update_script(&c.db, copy).await }).await.and_then(|r| r)?;
     pretty(&script_row(&find_script(ctx, &script.id).await?))
 }
 
-async fn delete_script(ctx: &Arc<ops_ssh::Ctx>, id: &str) -> Result<String, String> {
+async fn delete_script(ctx: &Arc<ops_ssh::Ctx>, id: &str, dry: bool) -> Result<String, String> {
     let script = find_script(ctx, id).await?;
     if script.is_builtin {
         return Err("Built-in scripts cannot be deleted.".into());
+    }
+    if dry {
+        return Ok(String::new());
     }
     let (c, sid) = (ctx.clone(), script.id.clone());
     ops_core::rt::run(async move { ops_library::library::delete_script(&c.db, sid).await }).await.and_then(|r| r)?;
     Ok(format!("Deleted script {} ({})", script.name, script.id))
 }
 
+// ---------------------------------------------------------------------------
+// Script runs (the batch execution of the Commands page, so a run shows up in its history too)
+// ---------------------------------------------------------------------------
+
+const RUN_MAX_HOSTS: usize = 20;
+const RUN_CONCURRENCY: usize = 5;
+const RUN_OUTPUT_CHARS: usize = 4000;
+const DEFAULT_RUN_TIMEOUT: u64 = 30;
+const DEFAULT_RUN_WAIT: u64 = 60;
+
+fn host_ids_arg(args: &Value) -> Result<Vec<String>, String> {
+    let list = args.get("host_ids").and_then(Value::as_array).ok_or("`host_ids` must be a list of host_id values.")?;
+    let mut ids: Vec<String> = Vec::new();
+    for v in list {
+        let id = v.as_str().map(str::trim).filter(|s| !s.is_empty()).ok_or("`host_ids` must hold non-empty strings.")?;
+        if !ids.iter().any(|i| i == id) {
+            ids.push(id.to_string());
+        }
+    }
+    match ids.len() {
+        0 => Err("`host_ids` needs at least one host.".into()),
+        n if n > RUN_MAX_HOSTS => Err(format!("At most {RUN_MAX_HOSTS} hosts per run (got {n}).")),
+        _ => Ok(ids),
+    }
+}
+
+fn seconds_arg(args: &Value, key: &str, default: u64, min: u64, max: u64) -> Result<u64, String> {
+    match args.get(key) {
+        None => Ok(default),
+        Some(v) => v.as_u64().filter(|n| (min..=max).contains(n)).ok_or_else(|| format!("`{key}` must be a number from {min} to {max}.")),
+    }
+}
+
+async fn run_script(ctx: &Arc<ops_ssh::Ctx>, args: &Value, dry: bool) -> Result<String, String> {
+    let script = find_script(ctx, &arg(args, "script_id")).await?;
+    if !matches!(script.language.to_lowercase().as_str(), "shell" | "bash" | "sh") {
+        return Err(format!("Only shell scripts can be run through MCP (this one is {}).", script.language));
+    }
+    if !script.url.trim().is_empty() {
+        return Err("Scripts that download from a URL cannot be run through MCP.".into());
+    }
+    if script.content.trim().is_empty() {
+        return Err("The script is empty.".into());
+    }
+    let ids = host_ids_arg(args)?;
+    let hosts = all_hosts(ctx).await?;
+    if let Some(unknown) = ids.iter().find(|id| !hosts.iter().any(|h| &h.id == *id)) {
+        return Err(format!("Unknown host_id: {unknown}. Use vault_list_hosts to see the saved hosts."));
+    }
+    let timeout = seconds_arg(args, "timeout_seconds", DEFAULT_RUN_TIMEOUT, 1, 600)?;
+    let wait = seconds_arg(args, "wait_seconds", DEFAULT_RUN_WAIT, 0, 600)?;
+    // the same policy as a command typed by the agent: observer mode and the blocklist refuse whatever the mode
+    let (c, content) = (ctx.clone(), script.content.clone());
+    let assessment = ops_core::rt::run(async move { ops_ai::client::ai_assess_action(&c.db, content) }).await.and_then(|r| r).map_err(|e| format!("Refused: the safety policy could not be evaluated ({e})."))?;
+    if assessment.decision == ops_ai::client::AiActionDecision::Block {
+        return Err(format!("Refused by OpsBatch: {}", assessment.reason));
+    }
+    if dry {
+        return Ok(String::new());
+    }
+    let task_id = uuid::Uuid::new_v4().to_string();
+    let done = ctx.events.subscribe(format!("exec:{task_id}:done"));
+    let (c, tid, content, hosts_to_run) = (ctx.clone(), task_id.clone(), script.content.clone(), ids.clone());
+    let concurrency = hosts_to_run.len().min(RUN_CONCURRENCY) as u32;
+    blocking(move || ops_ssh::execution::execute_command(c.clone(), &c.db, tid, hosts_to_run, content, concurrency, timeout, None)).await.map_err(|e| format!("Could not start the run: {e}"))?;
+    if wait > 0 {
+        let _ = ops_core::rt::run(async move { tokio::time::timeout(std::time::Duration::from_secs(wait), done.recv_async()).await.is_ok() }).await;
+    }
+    run_json(ctx, &task_id).await
+}
+
+/// The state of a run: the history row (running until it has a completion time) and the hosts that reported so far.
+async fn run_json(ctx: &Arc<ops_ssh::Ctx>, run_id: &str) -> Result<String, String> {
+    if run_id.is_empty() {
+        return Err("`run_id` is required.".into());
+    }
+    let c = ctx.clone();
+    let history = ops_core::rt::run(async move { ops_ssh::execution::list_execution_history(&c.db).await }).await.and_then(|r| r)?;
+    let Some(row) = history.into_iter().find(|h| h.id == run_id) else { return Err(format!("Unknown run_id: {run_id}.")) };
+    let (c, id) = (ctx.clone(), run_id.to_string());
+    let details = ops_core::rt::run(async move { ops_ssh::execution::get_execution_detail(&c.db, id).await }).await.and_then(|r| r)?;
+    let running = row.completed_at.trim().is_empty();
+    let hosts: Vec<Value> = details
+        .iter()
+        .map(|d| json!({"host_id": d.host_id, "name": d.host_name, "status": d.status, "exit_code": d.exit_code, "duration_ms": d.duration, "output": super::tail(&super::strip_ansi(&d.output), RUN_OUTPUT_CHARS)}))
+        .collect();
+    pretty(&json!({
+        "run_id": row.id,
+        "status": if running { "running" } else { "completed" },
+        "started_at": row.started_at,
+        "completed_at": row.completed_at,
+        "hosts_total": row.host_count,
+        "hosts_reported": details.len(),
+        "success": row.success_count,
+        "failed": row.fail_count,
+        "hosts": hosts,
+    }))
+}
+
+async fn stop_script_run(ctx: &Arc<ops_ssh::Ctx>, run_id: &str, dry: bool) -> Result<String, String> {
+    let state: Value = serde_json::from_str(&run_json(ctx, run_id).await?).map_err(|e| e.to_string())?;
+    if state["status"] != "running" {
+        return Err("The run has already finished.".into());
+    }
+    if dry {
+        return Ok(String::new());
+    }
+    let (c, id) = (ctx.clone(), run_id.to_string());
+    ops_core::rt::run(async move { ops_ssh::execution::cancel_execution(&c.db, id).await }).await.and_then(|r| r).map_err(|e| format!("Could not stop the run: {e}"))?;
+    Ok(format!("Stop requested for run {run_id}: hosts that have not started are skipped; a script already running on a host finishes on its own."))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{capability_of, contains_any, handles, parse_tags, summary_of, tags_arg};
+    use super::{capability_of, contains_any, handles, host_ids_arg, parse_tags, seconds_arg, summary_of, tags_arg};
     use serde_json::json;
 
     #[test]
@@ -463,13 +618,28 @@ mod tests {
     }
 
     #[test]
+    fn run_arguments_are_checked() {
+        assert_eq!(host_ids_arg(&json!({"host_ids": ["a", " b ", "a"]})).unwrap(), vec!["a", "b"]);
+        assert!(host_ids_arg(&json!({"host_ids": []})).unwrap_err().contains("at least one"));
+        assert!(host_ids_arg(&json!({})).is_err());
+        assert!(host_ids_arg(&json!({"host_ids": [1]})).is_err());
+        let many: Vec<String> = (0..21).map(|i| format!("h{i}")).collect();
+        assert!(host_ids_arg(&json!({"host_ids": many})).unwrap_err().contains("At most 20"));
+        assert_eq!(seconds_arg(&json!({}), "timeout_seconds", 120, 1, 3600), Ok(120));
+        assert_eq!(seconds_arg(&json!({"wait_seconds": 0}), "wait_seconds", 60, 0, 600), Ok(0));
+        assert!(seconds_arg(&json!({"timeout_seconds": 0}), "timeout_seconds", 120, 1, 3600).is_err());
+        assert!(seconds_arg(&json!({"timeout_seconds": "5"}), "timeout_seconds", 120, 1, 3600).is_err());
+        assert!(seconds_arg(&json!({"wait_seconds": 601}), "wait_seconds", 60, 0, 600).is_err());
+    }
+
+    #[test]
     fn writes_map_to_grantable_capabilities_and_hide_text() {
-        for tool in ["vault_create_host", "vault_update_host", "vault_set_host_notes", "vault_delete_host", "vault_create_group", "vault_update_group", "vault_delete_group", "vault_create_script", "vault_update_script", "vault_delete_script"] {
+        for tool in ["vault_create_host", "vault_update_host", "vault_set_host_notes", "vault_delete_host", "vault_create_group", "vault_update_group", "vault_delete_group", "vault_create_script", "vault_update_script", "vault_delete_script", "vault_run_script", "vault_stop_script_run"] {
             let cap = capability_of(tool).unwrap_or_else(|| panic!("{tool}"));
             assert!(ops_ai::prefs::safety::GRANTABLE_CAPABILITIES.contains(&cap), "{cap}");
             assert!(handles(tool));
         }
-        for tool in ["vault_list_hosts", "vault_list_groups", "vault_list_scripts", "vault_get_script"] {
+        for tool in ["vault_list_hosts", "vault_list_groups", "vault_list_scripts", "vault_get_script", "vault_get_script_run"] {
             assert!(capability_of(tool).is_none() && handles(tool), "{tool}");
         }
         // the approval of a script write shows its name, never its text; notes never show either

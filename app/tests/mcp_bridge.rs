@@ -558,6 +558,24 @@ fn transfers_permissions_forward_changes_and_vault_writes_work_against_a_real_se
     let local_src = format!("{dir}/local-src.txt");
     std::fs::write(&local_src, "uploaded bytes").unwrap();
     let remote = format!("{dir}/remote-dst.txt");
+    // (Confirm mode: a call that can never run is answered at once, nobody is asked to approve it)
+    for (tool, args, needle) in [
+        ("sftp_upload", json!({"local_path": "relative.txt", "remote_path": remote}), "absolute"),
+        ("sftp_upload", json!({"local_path": format!("{dir}/missing"), "remote_path": remote}), "Cannot read"),
+        ("sftp_download", json!({"remote_path": remote, "local_path": format!("{dir}/no-folder/x")}), "existing folder"),
+        ("sftp_chmod", json!({"path": remote, "mode": "rwx"}), "octal"),
+        ("sftp_write", json!({"path": remote}), "`content` is required"),
+        ("sftp_rename", json!({"from": remote}), "`to` is required"),
+        ("portforward_start", json!({"type": "sideways", "local_address": "127.0.0.1:1"}), "`type` must be"),
+        ("portforward_start", json!({"type": "local", "local_address": "127.0.0.1:1"}), "remote_address"),
+        ("portforward_stop", json!({"forward_id": "nope"}), "Unknown forward_id"),
+        ("portforward_update", json!({"forward_id": "nope"}), "Unknown forward_id"),
+    ] {
+        let v = call_plain(cx, port, tool, args);
+        assert!(v["result"]["isError"] == true && text_of(&v).contains(needle), "{tool}: {}", text_of(&v));
+        assert!(cx.update(|cx| activity.read(cx).pending().is_empty()), "{tool} must not ask first");
+    }
+    assert!(!std::path::Path::new(&remote).exists(), "nothing was written by the refused calls");
     let reply = send(port, Some("test-token"), call("sftp_upload", json!({"local_path": local_src, "remote_path": remote})));
     wait_until(cx, "upload approval requested", |cx| cx.update(|cx| activity.read(cx).pending().len() == 1));
     let pending = cx.update(|cx| activity.read(cx).pending()[0].clone());
@@ -634,7 +652,7 @@ fn transfers_permissions_forward_changes_and_vault_writes_work_against_a_real_se
     let sub: Value = serde_json::from_str(&text_of(&call_approved(cx, port, "vault_create_group", json!({"name": "Web", "parent_id": group_id})))).unwrap();
     let sub_id = sub["group_id"].as_str().unwrap().to_string();
     assert_eq!(sub["parent_id"], group_id.as_str());
-    let v = call_approved(cx, port, "vault_update_group", json!({"group_id": group_id, "parent_id": sub_id}));
+    let v = call_plain(cx, port, "vault_update_group", json!({"group_id": group_id, "parent_id": sub_id})); // refused before anyone is asked
     assert!(text_of(&v).contains("below itself"), "{}", text_of(&v));
     assert_eq!(call_approved(cx, port, "vault_update_group", json!({"group_id": sub_id, "name": "Frontend"}))["result"]["isError"], false);
     let groups: Value = serde_json::from_str(&text_of(&call_plain(cx, port, "vault_list_groups", json!({})))).unwrap();
@@ -757,4 +775,155 @@ fn answering_an_approval_does_not_move_the_records(cx: &mut TestAppContext) {
         assert_eq!(f.1, Some(records), "frame {i}: the records area stays put");
         assert_eq!(f.2, Some(row), "frame {i}: the record row keeps its position and height");
     }
+}
+
+#[gpui_kit::test]
+fn bad_vault_calls_are_refused_before_anyone_is_asked(cx: &mut TestAppContext) {
+    let _s = serial();
+    let (_fx, port) = running_bridge(cx, PermissionMode::Confirm);
+    let activity = act(cx);
+    for (tool, args, needle) in [
+        ("vault_create_host", json!({"name": "x", "address": "y", "port": 0}), "`port`"),
+        ("vault_create_host", json!({"name": "x", "address": "y", "auth_type": "magic"}), "`auth_type`"),
+        ("vault_create_host", json!({"name": "x", "address": "y", "group_id": "nope"}), "Unknown group_id"),
+        ("vault_create_host", json!({"name": "x", "address": "y", "tags": "a"}), "`tags`"),
+        ("vault_create_host", json!({"name": " ", "address": "y"}), "required"),
+        ("vault_update_host", json!({"host_id": "nope", "name": "x"}), "Unknown host_id"),
+        ("vault_set_host_notes", json!({"host_id": "nope", "notes": "x"}), "Unknown host_id"),
+        ("vault_delete_host", json!({"host_id": "nope"}), "Unknown host_id"),
+        ("vault_create_group", json!({"name": ""}), "required"),
+        ("vault_update_group", json!({"group_id": "nope", "name": "x"}), "Unknown group_id"),
+        ("vault_delete_group", json!({"group_id": "nope"}), "Unknown group_id"),
+        ("vault_create_script", json!({"name": "s"}), "`content` is required"),
+        ("vault_create_script", json!({"name": "s", "content": "x", "risk": "extreme"}), "`risk`"),
+        ("vault_update_script", json!({"script_id": "nope", "name": "x"}), "Unknown script_id"),
+        ("vault_delete_script", json!({"script_id": "nope"}), "Unknown script_id"),
+    ] {
+        let v = call_plain(cx, port, tool, args);
+        assert!(v["result"]["isError"] == true && text_of(&v).contains(needle), "{tool}: {}", text_of(&v));
+        assert!(cx.update(|cx| activity.read(cx).pending().is_empty()), "{tool} must not ask first");
+    }
+    // a valid call still asks, and a refused one changed nothing
+    let reply = send(port, Some("test-token"), call("vault_create_group", json!({"name": "Valid"})));
+    wait_until(cx, "approval requested", |cx| cx.update(|cx| activity.read(cx).pending().len() == 1));
+    let id = cx.update(|cx| activity.read(cx).pending()[0].id.clone());
+    cx.update(|cx| activity.update(cx, |a, cx| a.decide(&id, Decision::Reject, cx)));
+    assert!(text_of(&wait_reply(cx, &reply).1).starts_with("Rejected"));
+    let groups: Value = serde_json::from_str(&text_of(&call_plain(cx, port, "vault_list_groups", json!({})))).unwrap();
+    assert!(groups.as_array().unwrap().is_empty(), "nothing was created: {groups}");
+}
+
+#[gpui_kit::test]
+fn library_scripts_run_on_hosts_and_the_run_can_be_followed_and_stopped(cx: &mut TestAppContext) {
+    let _s = serial();
+    let Some(sshd) = ssh_support::Sshd::start() else {
+        eprintln!("SKIP: no sshd");
+        return;
+    };
+    let user = std::env::var("USER").unwrap_or_else(|_| "root".into());
+    let (ssh_port, key) = (sshd.port as i32, sshd.private_key.clone());
+    let mut host_id = String::new();
+    let (_fx, port) = running_bridge_seeded(cx, PermissionMode::Confirm, |core| {
+        host_id = ops_core::rt::block_on(ops_ssh::hosts::add_host(
+            &core.db,
+            ops_ssh::hosts::NewHost { name: "run-srv".into(), ip: "127.0.0.1".into(), port: Some(ssh_port), auth_type: Some("key".into()), username: Some(user.clone()), password: None, private_key: Some(key.clone()), os: Some("linux".into()), tags: None, group_id: None, remark: None, jump_chain: None, rdp_settings: None, proxy_settings: None },
+        ))
+        .unwrap()
+        .id;
+    });
+    let activity = act(cx);
+    let store = cx.update(|cx| prefs_store::shared(cx));
+    let set_mode = |cx: &mut TestAppContext, mode: PermissionMode| cx.update(|cx| store.update(cx, |s, cx| s.update(cx, |p| p.global_permission_mode = mode)));
+    let json_of = |v: &Value| -> Value { serde_json::from_str(&text_of(v)).unwrap_or_else(|_| panic!("not json: {}", text_of(v))) };
+
+    set_mode(cx, PermissionMode::Auto);
+    let mk = |cx: &mut TestAppContext, args: Value| json_of(&call_plain(cx, port, "vault_create_script", args))["script_id"].as_str().unwrap().to_string();
+    let ok_script = mk(cx, json!({"name": "Say hello", "content": "echo run-ok-42\nuname -s", "risk": "low"}));
+    let slow_script = mk(cx, json!({"name": "Sleepy", "content": "sleep 4; echo woke-up"}));
+    let py_script = mk(cx, json!({"name": "Python one", "content": "print(1)", "language": "python"}));
+    let bad_script = mk(cx, json!({"name": "Dangerous", "content": "rm -rf /"}));
+
+    // calls that cannot run are answered before anyone is asked (Confirm mode, no pending approval ever shows up)
+    set_mode(cx, PermissionMode::Confirm);
+    let many: Vec<String> = (0..21).map(|i| format!("h{i}")).collect();
+    for (args, needle) in [
+        (json!({"script_id": ok_script, "host_ids": []}), "at least one"),
+        (json!({"script_id": ok_script, "host_ids": ["nope"]}), "Unknown host_id"),
+        (json!({"script_id": ok_script, "host_ids": many}), "At most 20"),
+        (json!({"script_id": py_script, "host_ids": [host_id]}), "Only shell scripts"),
+        (json!({"script_id": "nope", "host_ids": [host_id]}), "Unknown script_id"),
+        (json!({"script_id": ok_script, "host_ids": [host_id], "timeout_seconds": 0}), "`timeout_seconds`"),
+        (json!({"script_id": ok_script, "host_ids": [host_id], "timeout_seconds": 601}), "`timeout_seconds`"),
+        (json!({"script_id": bad_script, "host_ids": [host_id]}), "Refused by OpsBatch"),
+    ] {
+        let v = call_plain(cx, port, "vault_run_script", args.clone());
+        assert!(v["result"]["isError"] == true && text_of(&v).contains(needle), "{args}: {}", text_of(&v));
+        assert!(cx.update(|cx| activity.read(cx).pending().is_empty()), "{args} must not ask first");
+    }
+
+    // a valid run asks first; the card names the script, its risk and the host
+    let reply = send(port, Some("test-token"), call("vault_run_script", json!({"script_id": ok_script, "host_ids": [host_id]})));
+    wait_until(cx, "run approval requested", |cx| cx.update(|cx| activity.read(cx).pending().len() == 1));
+    let pending = cx.update(|cx| activity.read(cx).pending()[0].clone());
+    assert_eq!(pending.summary, "Say hello [low] → run-srv (127.0.0.1)");
+    cx.update(|cx| activity.update(cx, |a, cx| a.decide(&pending.id, Decision::Reject, cx)));
+    assert!(text_of(&wait_reply(cx, &reply).1).starts_with("Rejected"));
+
+    let v = call_approved(cx, port, "vault_run_script", json!({"script_id": ok_script, "host_ids": [host_id], "timeout_seconds": 20}));
+    assert_eq!(v["result"]["isError"], false, "{}", text_of(&v));
+    let run = json_of(&v);
+    assert_eq!((run["status"].as_str(), run["success"].as_i64(), run["failed"].as_i64(), run["hosts_total"].as_i64()), (Some("completed"), Some(1), Some(0), Some(1)), "{run}");
+    let host = &run["hosts"][0];
+    assert_eq!((host["name"].as_str(), host["status"].as_str()), (Some("run-srv"), Some("success")));
+    let out = host["output"].as_str().unwrap();
+    assert!(out.contains("run-ok-42") && out.contains("Darwin") || out.contains("Linux"), "{out}");
+    // the same run can be read again
+    let run_id = run["run_id"].as_str().unwrap().to_string();
+    let again = json_of(&call_plain(cx, port, "vault_get_script_run", json!({"run_id": run_id})));
+    assert_eq!(again["hosts"][0]["output"], run["hosts"][0]["output"]);
+    assert!(call_plain(cx, port, "vault_get_script_run", json!({"run_id": "nope"}))["result"]["isError"] == true);
+    assert!(text_of(&call_plain(cx, port, "vault_stop_script_run", json!({"run_id": run_id}))).contains("already finished"));
+
+    // a long run keeps going after the call stopped waiting; it can be followed, and stopping it is accepted
+    set_mode(cx, PermissionMode::Auto);
+    let started = json_of(&call_plain(cx, port, "vault_run_script", json!({"script_id": slow_script, "host_ids": [host_id], "wait_seconds": 1})));
+    assert_eq!(started["status"], "running", "{started}");
+    let slow_id = started["run_id"].as_str().unwrap().to_string();
+    let stopped = call_plain(cx, port, "vault_stop_script_run", json!({"run_id": slow_id}));
+    assert!(text_of(&stopped).contains("Stop requested"), "{}", text_of(&stopped));
+    // the script was already running on its host, so it finishes by itself and the run completes
+    let mut last = Value::Null;
+    wait_until(cx, "the slow run finished", |cx| {
+        let v = call_plain(cx, port, "vault_get_script_run", json!({"run_id": slow_id}));
+        last = serde_json::from_str(&text_of(&v)).unwrap_or(Value::Null);
+        let _ = cx;
+        last["status"] == "completed"
+    });
+    assert_eq!(last["hosts"][0]["output"].as_str().map(str::trim), Some("woke-up"), "{last}");
+
+    // observer mode refuses to run anything
+    set_mode(cx, PermissionMode::Observer);
+    let v = call_plain(cx, port, "vault_run_script", json!({"script_id": ok_script, "host_ids": [host_id]}));
+    assert!(text_of(&v).starts_with("Refused by OpsBatch"), "{}", text_of(&v));
+    cx.update(|cx| assert!(activity.read(cx).pending().is_empty()));
+}
+
+#[gpui_kit::test]
+fn output_without_a_final_newline_is_kept(cx: &mut TestAppContext) {
+    let _s = serial();
+    let (_fx, port) = running_bridge(cx, PermissionMode::Auto);
+    let v = call_plain(cx, port, "terminal_execute", json!({"command": "printf 'first\\n'; printf noeol-tail"}));
+    assert_eq!(v["result"]["isError"], false);
+    let answer = text_of(&v);
+    assert!(answer.contains("first\nnoeol-tail"), "the answer keeps the last line: {answer:?}");
+    // the screen keeps it too, and the next prompt starts on its own line
+    let screen = text_of(&call_plain(cx, port, "terminal_read", json!({"lines": 12})));
+    assert!(screen.contains("noeol-tail"), "{screen:?}");
+    assert!(!screen.lines().any(|l| l.contains("noeol-tail") && l.contains("% ") && !l.contains("printf")), "the prompt does not share the line with the output: {screen:?}");
+    // a command that ends its output normally shows no extra blank line
+    let v = call_plain(cx, port, "terminal_execute", json!({"command": "echo plain-line"}));
+    assert!(text_of(&v).contains("plain-line"));
+    let screen = text_of(&call_plain(cx, port, "terminal_read", json!({"lines": 12})));
+    let idx = screen.lines().position(|l| l == "plain-line").expect("the output line");
+    assert!(screen.lines().nth(idx + 1).is_some_and(|l| !l.trim().is_empty()), "no blank line after the output: {screen:?}");
 }

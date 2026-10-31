@@ -12,6 +12,13 @@ const TRACKER_STATUS_TOKEN: &str = "__opsbatch_ai_status=$?";
 const TRACKER_DONE_PREFIX: &str = "__OPSBATCH_AI_DONE_";
 const PARTIAL_TRACKER_PREFIXES: [&str; 2] = [TRACKER_STATUS_TOKEN, TRACKER_DONE_PREFIX];
 
+/// What the tracker prints before its completion marker (an OSC sequence no terminal shows): "if the output so far
+/// does not end with a line break, start a new line". The shell cannot know the cursor column, the cleaner knows
+/// whether the text it passed on ended a line, and a command whose output has no final newline keeps its last line.
+pub const FRESH_LINE_MARKER: &str = "\x1b]7777;opsbatch-fresh-line\x07";
+/// The same sequence as the shell's `printf` writes it.
+const FRESH_LINE_PRINTF: &str = "\\033]7777;opsbatch-fresh-line\\007";
+
 fn done_marker_re() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"__OPSBATCH_AI_DONE_[a-f0-9]+__:-?\d+__").unwrap())
@@ -56,7 +63,7 @@ pub fn create_tracked_command(command: &str, done_prefix: &str) -> TrackedComman
     TrackedCommand {
         visible_command: command.trim_end().to_string(),
         hidden_tracker: format!(
-            "\n__opsbatch_ai_status=$?; printf '\\r\\033[K'; printf '{done_prefix}%s__\\n' \"$__opsbatch_ai_status\""
+            "\n__opsbatch_ai_status=$?; printf '{FRESH_LINE_PRINTF}'; printf '{done_prefix}%s__\\n' \"$__opsbatch_ai_status\""
         ),
     }
 }
@@ -128,6 +135,10 @@ fn pending_start_for_partial_tracker(text: &str, suffix_length: usize) -> usize 
 pub struct TrackedCommandOutputCleaner {
     pending: String,
     discarding_artifact_line: bool,
+    /// The tail of a fresh-line marker that was cut off at the end of the previous chunk.
+    carried_marker: String,
+    /// The text passed on so far did not end with a line break (the cursor is in the middle of a line).
+    mid_line: bool,
 }
 
 impl TrackedCommandOutputCleaner {
@@ -139,6 +150,45 @@ impl TrackedCommandOutputCleaner {
         if data.is_empty() {
             return String::new();
         }
+        let resolved = self.resolve_fresh_lines(data);
+        let out = self.clean_lines(&resolved);
+        if !out.is_empty() {
+            self.mid_line = !out.ends_with('\n');
+        }
+        out
+    }
+
+    /// Replaces every fresh-line marker by a line break, or by nothing when the text before it already ended one.
+    fn resolve_fresh_lines(&mut self, data: &str) -> String {
+        let mut text = format!("{}{}", std::mem::take(&mut self.carried_marker), data);
+        // a marker cut off by the end of the chunk waits for the next one
+        for len in (1..FRESH_LINE_MARKER.len()).rev() {
+            if text.is_char_boundary(text.len().saturating_sub(len)) && text.ends_with(&FRESH_LINE_MARKER[..len]) {
+                self.carried_marker = FRESH_LINE_MARKER[..len].to_string();
+                text.truncate(text.len() - len);
+                break;
+            }
+        }
+        if !text.contains(FRESH_LINE_MARKER) {
+            return text;
+        }
+        let mut out = String::with_capacity(text.len());
+        let mut mid_line = self.mid_line;
+        for (i, piece) in text.split(FRESH_LINE_MARKER).enumerate() {
+            if i > 0 && mid_line {
+                out.push_str("\r\n");
+            }
+            out.push_str(piece);
+            if !piece.is_empty() {
+                mid_line = !piece.ends_with('\n');
+            } else if i > 0 {
+                mid_line = false;
+            }
+        }
+        out
+    }
+
+    fn clean_lines(&mut self, data: &str) -> String {
         let source = format!("{}{}", std::mem::take(&mut self.pending), data);
         let mut cursor = 0usize;
         let mut output = String::new();
@@ -197,6 +247,68 @@ impl TrackedCommandOutputCleaner {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn tracker_tail(id: &str, code: i32) -> String {
+        format!("{FRESH_LINE_MARKER}__OPSBATCH_AI_DONE_{id}__:{code}__\r\n")
+    }
+
+    #[test]
+    fn output_without_a_final_newline_keeps_its_last_line() {
+        let mut c = TrackedCommandOutputCleaner::new();
+        let out = c.clean(&format!("noeol{}", tracker_tail("abc123", 0)));
+        assert_eq!(out, "noeol\r\n");
+        // the marker line is gone, what came before it is shown, and the cursor ends on a fresh line
+        assert!(!out.contains("DONE") && !out.contains('\u{7}'));
+    }
+
+    #[test]
+    fn output_that_ended_a_line_gets_no_extra_blank_line() {
+        let mut c = TrackedCommandOutputCleaner::new();
+        let out = c.clean(&format!("hi\r\n{}", tracker_tail("abc123", 0)));
+        assert_eq!(out, "hi\r\n");
+        // nothing printed at all before the marker: still no blank line
+        let mut c = TrackedCommandOutputCleaner::new();
+        assert_eq!(c.clean(&tracker_tail("abc123", 0)), "");
+    }
+
+    #[test]
+    fn the_decision_survives_chunk_boundaries() {
+        // text and marker in different chunks
+        let mut c = TrackedCommandOutputCleaner::new();
+        assert_eq!(c.clean("partial"), "partial");
+        let out = c.clean(&tracker_tail("abc123", 0));
+        assert_eq!(out, "\r\n");
+        let mut c = TrackedCommandOutputCleaner::new();
+        assert_eq!(c.clean("done\r\n"), "done\r\n");
+        assert_eq!(c.clean(&tracker_tail("abc123", 0)), "");
+        // the marker cut at every possible byte
+        let tail = tracker_tail("abc123", 0);
+        for cut in 0..tail.len() {
+            if !tail.is_char_boundary(cut) {
+                continue;
+            }
+            let mut c = TrackedCommandOutputCleaner::new();
+            let mut out = c.clean("noeol");
+            out.push_str(&c.clean(&tail[..cut]));
+            out.push_str(&c.clean(&tail[cut..]));
+            assert_eq!(out, "noeol\r\n", "cut at {cut}");
+        }
+    }
+
+    #[test]
+    fn ordinary_output_is_untouched() {
+        let mut c = TrackedCommandOutputCleaner::new();
+        assert_eq!(c.clean("\x1b[31mred\x1b[0m text\r\n"), "\x1b[31mred\x1b[0m text\r\n");
+        assert_eq!(c.clean("a\x1b"), "a");
+        assert_eq!(c.clean("[1mb"), "\x1b[1mb", "an escape split across chunks is put back together");
+    }
+
+    #[test]
+    fn the_tracked_command_asks_for_the_fresh_line() {
+        let t = create_tracked_command("echo hi", "__OPSBATCH_AI_DONE_abc__:");
+        assert!(t.hidden_tracker.contains("printf '\\033]7777;opsbatch-fresh-line\\007'"), "{}", t.hidden_tracker);
+        assert!(t.hidden_tracker.contains("__opsbatch_ai_status=$?"));
+    }
 
     const PREFIX: &str = "__OPSBATCH_AI_DONE_abc123__:";
 

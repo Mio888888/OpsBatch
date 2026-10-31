@@ -340,6 +340,30 @@ pub fn tool_definitions() -> Vec<Value> {
                 "script_id": {"type": "string", "description": "A script_id from vault_list_scripts."}
             }, "required": ["script_id"], "additionalProperties": false}
         }),
+        json!({
+            "name": "vault_run_script",
+            "description": "Run a shell library script on one or more saved hosts over SSH (several hosts run side by side, up to 5 at a time) and return each host's output and exit status. If the run takes longer than wait_seconds it keeps running: use vault_get_script_run to follow it. A script that is already running on a host cannot be interrupted; vault_stop_script_run only skips the hosts that have not started yet. Subject to the permission mode and the command blocklist; the approval names the script, its risk and the hosts.",
+            "inputSchema": {"type": "object", "properties": {
+                "script_id": {"type": "string", "description": "A script_id from vault_list_scripts (language shell; scripts that download from a URL are not supported)."},
+                "host_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 20, "description": "host_id values from vault_list_hosts."},
+                "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 600, "description": "How long to wait for the SSH connection to a host (default 30). It does not limit how long the script runs."},
+                "wait_seconds": {"type": "integer", "minimum": 0, "maximum": 600, "description": "How long this call waits for the run to finish (default 60). 0 returns the run_id at once."}
+            }, "required": ["script_id", "host_ids"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "vault_get_script_run",
+            "description": "The state of a script run started with vault_run_script: running or finished, and the output and exit status of every host that has finished. Read only.",
+            "inputSchema": {"type": "object", "properties": {
+                "run_id": {"type": "string", "description": "The run_id returned by vault_run_script."}
+            }, "required": ["run_id"], "additionalProperties": false}
+        }),
+        json!({
+            "name": "vault_stop_script_run",
+            "description": "Stop a running script run: hosts that have not started yet are skipped; a script already running on a host cannot be interrupted and finishes on its own. Subject to the permission mode.",
+            "inputSchema": {"type": "object", "properties": {
+                "run_id": {"type": "string", "description": "The run_id returned by vault_run_script."}
+            }, "required": ["run_id"], "additionalProperties": false}
+        }),
     ]
 }
 
@@ -709,7 +733,7 @@ mod tests {
         unique.dedup();
         assert_eq!(unique.len(), names.len());
         assert!(names.iter().all(|n| n.chars().all(|c| c.is_ascii_lowercase() || c == '_')));
-        assert_eq!(names.len(), 34);
+        assert_eq!(names.len(), 37);
         assert!(tools.iter().all(|t| t["inputSchema"]["type"] == "object" && t["description"].as_str().is_some_and(|d| !d.is_empty())));
         assert_eq!(tools[3]["inputSchema"]["required"][0], "command");
     }

@@ -139,6 +139,10 @@ fn detail_of(tool: &str, outcome: &ToolOutcome) -> String {
         ("vault_list_groups", Some(n)) => t!("mcpwin.detail.groups", count = n),
         ("portforward_list", Some(n)) => t!("mcpwin.detail.forwards", count = n),
         ("sftp_read", _) => t!("mcpwin.detail.bytes", count = outcome.text.len()),
+        ("vault_run_script" | "vault_get_script_run", _) => match value.as_ref().and_then(|v| v.get("status").and_then(Value::as_str).map(|s| (s.to_string(), v["success"].as_i64().unwrap_or(0), v["failed"].as_i64().unwrap_or(0), v["hosts_total"].as_i64().unwrap_or(0)))) {
+            Some((status, ok, failed, total)) => t!("mcpwin.detail.run", status = status, ok = ok, failed = failed, total = total),
+            None => tail(outcome.text.lines().next().unwrap_or(""), 300),
+        },
         _ => tail(outcome.text.lines().next().unwrap_or(""), 300),
     }
 }
@@ -153,6 +157,10 @@ async fn run(id: &str, tool: &str, args: &Value, target: Option<SshTarget>, cx: 
             }
         }
         let named = cx.update(|cx| crate::services::ctx(cx));
+        // a call that cannot run is answered before anyone is asked to approve it
+        if let Err(e) = validate(tool, args, &named, cx).await {
+            return ToolOutcome::error(e);
+        }
         if let Some(text) = describe(tool, args, &named, cx).await {
             let activity = cx.update(|cx| activity(cx));
             let id = id.to_string();
@@ -164,7 +172,7 @@ async fn run(id: &str, tool: &str, args: &Value, target: Option<SshTarget>, cx: 
     }
     let ctx = cx.update(|cx| crate::services::ctx(cx));
     match tool {
-        t if vault::handles(t) => vault::run(t, args, &ctx, cx).await,
+        t if vault::handles(t) => vault::run(t, args, &ctx, cx, false).await,
         "portforward_list" => list_forwards(cx).await,
         "portforward_start" => match target {
             Some(t) => start_forward(&ctx, &t, args).await,
@@ -176,6 +184,26 @@ async fn run(id: &str, tool: &str, args: &Value, target: Option<SshTarget>, cx: 
             Some(t) => sftp(&ctx, tool, &t.host_id, args).await,
             None => ToolOutcome::error("No SSH session."),
         },
+    }
+}
+
+/// Everything about a changing call that can be checked without changing anything.
+async fn validate(tool: &str, args: &Value, ctx: &std::sync::Arc<ops_ssh::Ctx>, cx: &mut AsyncApp) -> Result<(), String> {
+    match tool {
+        t if vault::handles(t) => {
+            let checked = vault::run(t, args, ctx, cx, true).await;
+            if checked.is_error { Err(checked.text) } else { Ok(()) }
+        }
+        "portforward_start" => forward_config(args, None).map(|_| ()),
+        "portforward_stop" | "portforward_delete" | "portforward_update" | "portforward_duplicate" => {
+            let id = arg(args, "forward_id");
+            let Some((_, _, forward)) = find_forward(ctx, &id, cx).await else { return Err(unknown_forward(&id).text) };
+            if tool.ends_with("update") || tool.ends_with("duplicate") {
+                forward_config(args, Some(&forward.config))?;
+            }
+            Ok(())
+        }
+        t => validate_sftp(t, args),
     }
 }
 
@@ -224,7 +252,58 @@ async fn authorize(id: &str, capability: &str, target: Option<&SshTarget>, args:
 // SFTP
 // ---------------------------------------------------------------------------
 
+/// The checks of an SFTP call that need no connection: required arguments and the local side of a transfer.
+fn validate_sftp(tool: &str, args: &Value) -> Result<(), String> {
+    let need = |key: &str| if arg(args, key).trim().is_empty() { Err(format!("`{key}` is required.")) } else { Ok(()) };
+    match tool {
+        "sftp_rename" => {
+            need("from")?;
+            need("to")
+        }
+        "sftp_write" => {
+            need("path")?;
+            args.get("content").and_then(Value::as_str).map(|_| ()).ok_or_else(|| "`content` is required.".to_string())
+        }
+        "sftp_chmod" => {
+            need("path")?;
+            parse_mode(&arg(args, "mode")).map(|_| ())
+        }
+        "sftp_upload" => {
+            need("remote_path")?;
+            let local = arg(args, "local_path");
+            if !std::path::Path::new(&local).is_absolute() {
+                return Err("`local_path` must be an absolute path.".into());
+            }
+            match std::fs::metadata(&local) {
+                Ok(m) if m.is_file() => Ok(()),
+                Ok(_) => Err("`local_path` is not a regular file (folders cannot be uploaded).".into()),
+                Err(e) => Err(format!("Cannot read `local_path`: {e}")),
+            }
+        }
+        "sftp_download" => {
+            need("remote_path")?;
+            let local = arg(args, "local_path");
+            let target = std::path::Path::new(&local);
+            if !target.is_absolute() {
+                return Err("`local_path` must be an absolute path.".into());
+            }
+            if target.exists() && !args.get("overwrite").and_then(Value::as_bool).unwrap_or(false) {
+                return Err("`local_path` already exists; pass overwrite=true to replace it.".into());
+            }
+            if target.is_dir() || !target.parent().is_some_and(|p| p.is_dir()) {
+                return Err("`local_path` must be a file path inside an existing folder.".into());
+            }
+            Ok(())
+        }
+        // list, stat, read, mkdir, delete
+        _ => need("path"),
+    }
+}
+
 async fn sftp(ctx: &std::sync::Arc<ops_ssh::Ctx>, tool: &str, host_id: &str, args: &Value) -> ToolOutcome {
+    if let Err(e) = validate_sftp(tool, args) {
+        return ToolOutcome::error(e);
+    }
     // opens the SFTP channel of the session's host (reuses the one the SFTP panel may already hold)
     {
         let (c, h) = (ctx.clone(), host_id.to_string());
@@ -261,14 +340,6 @@ async fn sftp(ctx: &std::sync::Arc<ops_ssh::Ctx>, tool: &str, host_id: &str, arg
         }
         "sftp_upload" => {
             let (local, remote) = (arg(args, "local_path"), arg(args, "remote_path"));
-            if !std::path::Path::new(&local).is_absolute() {
-                return ToolOutcome::error("`local_path` must be an absolute path.");
-            }
-            match std::fs::metadata(&local) {
-                Ok(m) if m.is_file() => {}
-                Ok(_) => return ToolOutcome::error("`local_path` is not a regular file (folders cannot be uploaded)."),
-                Err(e) => return ToolOutcome::error(format!("Cannot read `local_path`: {e}")),
-            }
             let size = std::fs::metadata(&local).map(|m| m.len()).unwrap_or(0);
             let (c2, h, l, r) = (c.clone(), host, local, remote);
             ops_core::rt::run(async move {
@@ -280,16 +351,6 @@ async fn sftp(ctx: &std::sync::Arc<ops_ssh::Ctx>, tool: &str, host_id: &str, arg
         }
         "sftp_download" => {
             let (remote, local) = (arg(args, "remote_path"), arg(args, "local_path"));
-            let target = std::path::Path::new(&local);
-            if !target.is_absolute() {
-                return ToolOutcome::error("`local_path` must be an absolute path.");
-            }
-            if target.exists() && !args.get("overwrite").and_then(Value::as_bool).unwrap_or(false) {
-                return ToolOutcome::error("`local_path` already exists; pass overwrite=true to replace it.");
-            }
-            if target.is_dir() || !target.parent().is_some_and(|p| p.is_dir()) {
-                return ToolOutcome::error("`local_path` must be a file path inside an existing folder.");
-            }
             let (c2, h, rm, l) = (c.clone(), host, remote, local);
             ops_core::rt::run(async move {
                 ops_ssh::sftp::sftp_download(c2, h, rm, l.clone(), uuid::Uuid::new_v4().to_string()).await.map(|_| format!("Downloaded to {l}"))
@@ -393,22 +454,41 @@ fn valid_address(addr: &str) -> bool {
     }
 }
 
+/// The settings of a forward from the call's arguments; `base` is the forward being changed or copied (its settings
+/// stay where the call does not name them).
+fn forward_config(args: &Value, base: Option<&ForwardConfig>) -> Result<ForwardConfig, String> {
+    let mut config = base.cloned().unwrap_or(ForwardConfig { forward_type: ForwardType::Local, local_addr: String::new(), remote_addr: String::new(), label: None });
+    match args.get("type").and_then(Value::as_str) {
+        Some("local") => config.forward_type = ForwardType::Local,
+        Some("remote") => config.forward_type = ForwardType::Remote,
+        Some("dynamic") => config.forward_type = ForwardType::Dynamic,
+        Some(other) => return Err(format!("`type` must be local, remote or dynamic (got \"{other}\").")),
+        None if base.is_none() => return Err("`type` must be local, remote or dynamic.".into()),
+        None => {}
+    }
+    if let Some(v) = args.get("local_address").and_then(Value::as_str) {
+        config.local_addr = v.to_string();
+    }
+    if let Some(v) = args.get("remote_address").and_then(Value::as_str) {
+        config.remote_addr = v.to_string();
+    }
+    if let Some(v) = args.get("label").and_then(Value::as_str) {
+        config.label = Some(v.to_string()).filter(|l| !l.is_empty());
+    }
+    if !valid_address(&config.local_addr) {
+        return Err("`local_address` must be host:port.".into());
+    }
+    if !matches!(config.forward_type, ForwardType::Dynamic) && !valid_address(&config.remote_addr) {
+        return Err("`remote_address` must be host:port for local and remote forwards.".into());
+    }
+    Ok(config)
+}
+
 async fn start_forward(ctx: &std::sync::Arc<ops_ssh::Ctx>, target: &SshTarget, args: &Value) -> ToolOutcome {
-    let forward_type = match arg(args, "type").as_str() {
-        "local" => ForwardType::Local,
-        "remote" => ForwardType::Remote,
-        "dynamic" => ForwardType::Dynamic,
-        other => return ToolOutcome::error(format!("`type` must be local, remote or dynamic (got \"{other}\").")),
+    let config = match forward_config(args, None) {
+        Ok(c) => c,
+        Err(e) => return ToolOutcome::error(e),
     };
-    let (local, remote) = (arg(args, "local_address"), arg(args, "remote_address"));
-    if !valid_address(&local) {
-        return ToolOutcome::error("`local_address` must be host:port.");
-    }
-    if !matches!(forward_type, ForwardType::Dynamic) && !valid_address(&remote) {
-        return ToolOutcome::error("`remote_address` must be host:port for local and remote forwards.");
-    }
-    let label = Some(arg(args, "label")).filter(|l| !l.is_empty());
-    let config = ForwardConfig { forward_type, local_addr: local, remote_addr: remote, label };
     let (c, host) = (ctx.clone(), target.host_id.clone());
     match blocking(move || ops_ssh::forward::forward_add(c.clone(), &c.db, &c.registry, &c.forwards, host, config)).await {
         Ok(entry) => ToolOutcome::ok(serde_json::to_string_pretty(&forward_json(&entry, &target.session.name)).unwrap_or_default()),
@@ -456,30 +536,10 @@ async fn end_forward(ctx: &std::sync::Arc<ops_ssh::Ctx>, forward_id: &str, remov
 async fn change_forward(ctx: &std::sync::Arc<ops_ssh::Ctx>, args: &Value, duplicate: bool, cx: &mut AsyncApp) -> ToolOutcome {
     let forward_id = arg(args, "forward_id");
     let Some((host_id, name, old)) = find_forward(ctx, &forward_id, cx).await else { return unknown_forward(&forward_id) };
-    let mut config = old.config.clone();
-    if let Some(kind) = args.get("type").and_then(Value::as_str) {
-        config.forward_type = match kind {
-            "local" => ForwardType::Local,
-            "remote" => ForwardType::Remote,
-            "dynamic" => ForwardType::Dynamic,
-            other => return ToolOutcome::error(format!("`type` must be local, remote or dynamic (got \"{other}\").")),
-        };
-    }
-    if let Some(v) = args.get("local_address").and_then(Value::as_str) {
-        config.local_addr = v.to_string();
-    }
-    if let Some(v) = args.get("remote_address").and_then(Value::as_str) {
-        config.remote_addr = v.to_string();
-    }
-    if let Some(v) = args.get("label").and_then(Value::as_str) {
-        config.label = Some(v.to_string()).filter(|l| !l.is_empty());
-    }
-    if !valid_address(&config.local_addr) {
-        return ToolOutcome::error("`local_address` must be host:port.");
-    }
-    if !matches!(config.forward_type, ForwardType::Dynamic) && !valid_address(&config.remote_addr) {
-        return ToolOutcome::error("`remote_address` must be host:port for local and remote forwards.");
-    }
+    let config = match forward_config(args, Some(&old.config)) {
+        Ok(c) => c,
+        Err(e) => return ToolOutcome::error(e),
+    };
     if !duplicate {
         let (c, h, f) = (ctx.clone(), host_id.clone(), forward_id.clone());
         if let Err(e) = blocking(move || ops_ssh::forward::forward_remove(&c.forwards, h, f)).await {
@@ -520,7 +580,7 @@ mod tests {
 
     #[test]
     fn only_the_changing_tools_need_a_capability() {
-        for tool in ["sftp_list", "sftp_stat", "sftp_read", "portforward_list", "vault_list_hosts", "vault_list_scripts", "vault_list_groups", "vault_get_script"] {
+        for tool in ["sftp_list", "sftp_stat", "sftp_read", "portforward_list", "vault_list_hosts", "vault_list_scripts", "vault_list_groups", "vault_get_script", "vault_get_script_run"] {
             assert!(capability_of(tool).is_none(), "{tool}");
         }
         for tool in ["sftp_write", "sftp_mkdir", "sftp_rename", "sftp_delete", "sftp_upload", "sftp_download", "sftp_chmod", "portforward_start", "portforward_stop", "portforward_delete", "portforward_update", "portforward_duplicate"] {

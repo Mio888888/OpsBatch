@@ -16,7 +16,8 @@ name: Release
 # The public key is compiled into the app as OPSBATCH_UPDATER_PUBKEY.
 #
 # To release: raise `version` in Cargo.toml (the Tauri updater only offers a version higher than the installed one),
-# merge, and push the tag v<version>.
+# merge, and push the tag v<version>. The release notes fill in by themselves: release-notes/v<version>.md if you
+# wrote one, otherwise the commits since the previous release tag, grouped (scripts/release-notes.sh).
 
 on:
   push:
@@ -39,13 +40,15 @@ concurrency:
 env:
   # Production builds keep the encrypted vault in the system keystore and the Tauri build's data directory.
   OPSBATCH_FEATURES: real-vault
-  OPSBATCH_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
-  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
-  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
 
 jobs:
+  # The updater key is only given to the jobs that compile it in or sign with it; `test` runs without it.
   plan:
     runs-on: ubuntu-latest
+    env:
+      OPSBATCH_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
     outputs:
       version: ${{ steps.plan.outputs.version }}
       tag: ${{ steps.plan.outputs.tag }}
@@ -102,6 +105,9 @@ jobs:
             arch: x86_64
     runs-on: ${{ matrix.runner }}
     env:
+      OPSBATCH_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
       # secrets are not available to step-level `if`, so mirror the optional one into the job environment
       MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
     steps:
@@ -152,6 +158,9 @@ jobs:
     needs: [plan, test]
     runs-on: windows-latest
     env:
+      OPSBATCH_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
       WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CODESIGN_CERT_BASE64 }}
     steps:
       - uses: actions/checkout@v4
@@ -184,6 +193,10 @@ jobs:
   linux:
     needs: [plan, test]
     runs-on: ubuntu-22.04
+    env:
+      OPSBATCH_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -222,15 +235,21 @@ jobs:
       TAG: ${{ needs.plan.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the release notes list the commits since the previous release tag
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      # release-notes/<tag>.md when it exists, otherwise the commits since the previous release, grouped. The same
+      # text is the release body and the notes the update dialog of an installed app shows (latest.json).
+      - name: Release notes
+        run: scripts/release-notes.sh "$TAG" "$GITHUB_REPOSITORY" | tee "$RUNNER_TEMP/notes.md"
       - name: Checksums and manifest
         run: |
           set -eu
           scripts/checksums.sh dist
-          scripts/latest-json.sh dist "$TAG" "$GITHUB_REPOSITORY"
+          NOTES="$(cat "$RUNNER_TEMP/notes.md")" scripts/latest-json.sh dist "$TAG" "$GITHUB_REPOSITORY"
       # A release is created as a draft and published last, so releases/latest (and latest.json) never points at a
       # release that is still missing assets. A published release that already has latest.json is never overwritten:
       # raise the version instead.
@@ -243,7 +262,8 @@ jobs:
               exit 1
             fi
             gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --notes-file "$RUNNER_TEMP/notes.md"
           else
-            gh release create "$TAG" dist/* --draft --target "$GITHUB_SHA" --title "OpsBatch $TAG" --generate-notes
+            gh release create "$TAG" dist/* --draft --target "$GITHUB_SHA" --title "OpsBatch $TAG" --notes-file "$RUNNER_TEMP/notes.md"
           fi
           gh release edit "$TAG" --draft=false --latest

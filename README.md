@@ -111,6 +111,10 @@ Intel), Windows and Linux with the real vault, and signs them with the updater k
 * A push to `master` only builds; the installers are kept as workflow artifacts.
 * **To publish**, raise `version` in `Cargo.toml` (an installed Tauri build only offers a higher version) and push the
   tag `v<version>`, or run the workflow by hand with *publish* ticked. The tag must equal the version.
+* **The release notes fill in by themselves**: `release-notes/v<version>.md` if you wrote one (use it for a
+  release that needs more than a commit list), otherwise the commits since the previous release tag, grouped into new
+  features, performance, fixes and maintenance. The same text is the release body and the notes an installed app shows
+  in its update dialog.
 * A release carries what both updaters need: the installers, `SHA256SUMS` and the `.sig` files for this build, and
   `latest.json` with the `.app.tar.gz`, setup program and AppImage for the Tauri updater. It is created as a draft and
   published last, and a published version is never overwritten.

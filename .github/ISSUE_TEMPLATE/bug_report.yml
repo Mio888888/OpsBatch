@@ -48,7 +48,7 @@ body:
     attributes:
       label: OpsBatch version / 版本
       description: Shown in Settings, or the installer file name. / 设置页或安装包文件名里可见。
-      placeholder: "0.2.4"
+      placeholder: "1.0.0"
     validations:
       required: true
   - type: dropdown

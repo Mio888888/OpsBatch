@@ -4,42 +4,12 @@ use ops_core::db::Database;
 use ops_core::keychain::SecretError;
 use ops_core::security::SECRET_PLACEHOLDER;
 use rusqlite::params;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::Deserialize;
 
 pub const DEFAULT_VNC_PORT: u16 = 5900;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Default)]
-pub enum VncAuthMethod {
-    #[serde(rename = "vnc")]
-    #[default]
-    VncAuth,
-    #[serde(rename = "ard")]
-    AppleRemoteDesktop,
-}
-
-impl VncAuthMethod {
-    pub fn from_value(value: &str) -> Self {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "ard" | "appleremotedesktop" | "apple_remote_desktop" => Self::AppleRemoteDesktop,
-            _ => Self::VncAuth,
-        }
-    }
-
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::VncAuth => "vnc",
-            Self::AppleRemoteDesktop => "ard",
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for VncAuthMethod {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = Option::<String>::deserialize(deserializer)?;
-        Ok(value.as_deref().map(Self::from_value).unwrap_or_default())
-    }
-}
-
+/// The stored `vncAuthMethod` is not read: the authentication type follows from the server's offer and whether a
+/// username is filled in (see `client::choose_security`).
 #[derive(Debug, Clone, Deserialize, Default)]
 pub struct VncSettings {
     #[serde(default)]
@@ -50,8 +20,6 @@ pub struct VncSettings {
     pub vnc_username: Option<String>,
     #[serde(default, rename = "vncPassword")]
     pub vnc_password: Option<String>,
-    #[serde(default, rename = "vncAuthMethod")]
-    pub vnc_auth_method: VncAuthMethod,
     #[serde(default, rename = "vncShared")]
     pub vnc_shared: Option<bool>,
     #[serde(default, rename = "vncViewOnly")]
@@ -64,7 +32,6 @@ pub struct VncHostConfig {
     pub port: u16,
     pub username: Option<String>,
     pub password: Option<String>,
-    pub auth_method: VncAuthMethod,
     pub shared: bool,
     pub view_only: bool,
     pub proxy: Option<ops_ssh::ssh::ProxySettings>,
@@ -120,7 +87,6 @@ pub fn load_vnc_host_config(db: &Database, host_id: &str) -> Result<VncHostConfi
         port: vnc_port_from_settings(&settings_json),
         username: settings.vnc_username.and_then(non_empty_trimmed),
         password,
-        auth_method: settings.vnc_auth_method,
         shared: settings.vnc_shared.unwrap_or(true),
         view_only: settings.vnc_view_only.unwrap_or(false),
         proxy: ops_ssh::hosts::resolve_host_proxy_settings(host_id, proxy_settings)?,
@@ -132,14 +98,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn settings_defaults_and_auth_method_aliases() {
-        let s = parse_vnc_settings(r#"{"protocol":"vnc","vncPort":5901,"vncAuthMethod":"ard","vncViewOnly":true}"#);
-        assert_eq!((s.vnc_port, s.vnc_auth_method, s.vnc_view_only), (Some(5901), VncAuthMethod::AppleRemoteDesktop, Some(true)));
-        assert_eq!(parse_vnc_settings("{}").vnc_auth_method, VncAuthMethod::VncAuth);
+    fn settings_defaults_and_legacy_auth_method() {
+        // Hosts saved with the old authentication selector still load; the stored method is ignored.
+        let s = parse_vnc_settings(r#"{"protocol":"vnc","vncPort":5901,"vncAuthMethod":"ard","vncUsername":"me","vncViewOnly":true}"#);
+        assert_eq!((s.vnc_port, s.vnc_username.as_deref(), s.vnc_view_only), (Some(5901), Some("me"), Some(true)));
         assert_eq!(parse_vnc_settings("not json").vnc_port, None);
         assert_eq!(vnc_port_from_settings(r#"{"vncPort":0}"#), 5900);
         assert_eq!(vnc_port_from_settings("{}"), DEFAULT_VNC_PORT);
-        assert_eq!(VncAuthMethod::from_value("Apple_Remote_Desktop"), VncAuthMethod::AppleRemoteDesktop);
-        assert_eq!(VncAuthMethod::from_value("whatever").as_str(), "vnc");
     }
 }

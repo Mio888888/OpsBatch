@@ -50,12 +50,6 @@ pub enum AuthKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum VncAuth {
-    Vnc,
-    Ard,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProxyKind {
     Socks5,
     Http,
@@ -95,7 +89,6 @@ pub struct HostFormValues {
     pub vnc_port: String,
     pub vnc_username: String,
     pub vnc_password: String,
-    pub vnc_auth: VncAuth,
     pub vnc_view_only: bool,
     pub vnc_shared: bool,
 
@@ -140,7 +133,6 @@ impl HostFormValues {
             vnc_port: DEFAULT_VNC_PORT.to_string(),
             vnc_username: String::new(),
             vnc_password: String::new(),
-            vnc_auth: VncAuth::Vnc,
             vnc_view_only: false,
             vnc_shared: true,
             proxy_enabled: false,
@@ -192,7 +184,6 @@ impl HostFormValues {
             vnc_port: rdp_num("vncPort", DEFAULT_VNC_PORT),
             vnc_username: rdp_str("vncUsername"),
             vnc_password: rdp_str("vncPassword"),
-            vnc_auth: if rdp.get("vncAuthMethod").and_then(Value::as_str) == Some("ard") { VncAuth::Ard } else { VncAuth::Vnc },
             vnc_view_only: rdp_bool("vncViewOnly", false),
             vnc_shared: rdp_bool("vncShared", true),
             proxy_enabled: proxy_on,
@@ -357,7 +348,9 @@ impl HostFormValues {
                 if !self.vnc_password.trim().is_empty() {
                     m.insert("vncPassword".into(), json!(self.vnc_password.trim()));
                 }
-                m.insert("vncAuthMethod".into(), json!(if self.vnc_auth == VncAuth::Ard { "ard" } else { "vnc" }));
+                // The client picks the type from the server's offer (a username means ARD); the stored method keeps the
+                // Tauri build, which shares this database, doing the same.
+                m.insert("vncAuthMethod".into(), json!(if self.vnc_username.trim().is_empty() { "vnc" } else { "ard" }));
                 m.insert("vncViewOnly".into(), json!(self.vnc_view_only));
                 m.insert("vncShared".into(), json!(self.vnc_shared));
             }
@@ -513,7 +506,6 @@ mod tests {
         f.change_os(OsKind::Vnc);
         f.vnc_username = " me ".into();
         f.vnc_password = " pw ".into();
-        f.vnc_auth = VncAuth::Ard;
         let v = json_of(&f.rdp_settings_json());
         assert_eq!(v["protocol"], json!("vnc"));
         assert_eq!(v["vncPort"], json!(5900));
@@ -521,6 +513,10 @@ mod tests {
         assert_eq!((v["vncAuthMethod"].clone(), v["vncViewOnly"].clone(), v["vncShared"].clone()), (json!("ard"), json!(false), json!(true)));
         f.vnc_port = "99999".into();
         assert_eq!(json_of(&f.rdp_settings_json())["vncPort"], json!(65535));
+        // no username: password-only VNC auth
+        f.vnc_username = "  ".into();
+        let v = json_of(&f.rdp_settings_json());
+        assert_eq!((v.get("vncUsername"), v["vncAuthMethod"].clone()), (None, json!("vnc")));
     }
 
     #[test]

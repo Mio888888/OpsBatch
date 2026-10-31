@@ -10,6 +10,7 @@
   "appUpdate.readyDescManual": "The installer was downloaded, verified (SHA-256) and opened for you. Finish the installation, then choose “Restart” to quit this version.",
   "assets.noRecent": "No recent connections",
   "assets.recent": "Recent connections",
+  "assets.vncUsernameAuto": "Mac: account name (ARD); blank = VNC password",
   "batchExec.close": "Close",
   "batchExec.durationCol": "Duration",
   "batchExec.exitCodeCol": "Exit code",

@@ -11,28 +11,44 @@ pub const SEC_NONE: u8 = 1;
 pub const SEC_VNC: u8 = 2;
 pub const SEC_ARD: u8 = 30;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum AuthPreference {
-    Vnc,
-    Ard,
-}
-
 #[derive(Clone, Debug)]
 pub struct Options {
     pub username: Option<String>,
     pub password: Option<String>,
-    pub prefer: AuthPreference,
     pub shared: bool,
 }
 
-/// Order the server's offered types by our preference (mirrors OpsBatch's `order_vnc_security_types`).
-pub fn choose_security(offered: &[u8], prefer: AuthPreference, has_password: bool) -> Option<u8> {
-    let order: &[u8] = match (prefer, has_password) {
-        (AuthPreference::Ard, _) => &[SEC_ARD, SEC_VNC, SEC_NONE],
-        (AuthPreference::Vnc, true) => &[SEC_VNC, SEC_ARD, SEC_NONE],
-        (AuthPreference::Vnc, false) => &[SEC_NONE, SEC_VNC, SEC_ARD],
+/// Pick one of the server's offered types from what the user filled in. A username asks for Apple ARD (account name +
+/// password) when the server offers it; a password alone is classic VNC auth and never falls back to ARD, which would
+/// send an empty account name and fail. Without a password only servers without authentication can be used.
+pub fn choose_security(offered: &[u8], has_username: bool, has_password: bool) -> Option<u8> {
+    let order: &[u8] = match (has_username, has_password) {
+        (true, true) => &[SEC_ARD, SEC_VNC, SEC_NONE],
+        (false, true) => &[SEC_VNC, SEC_NONE],
+        (_, false) => &[SEC_NONE],
     };
     order.iter().copied().find(|t| offered.contains(t))
+}
+
+/// Why [`choose_security`] found nothing, in terms of what to fill in.
+pub fn no_usable_security(server_version: &str, offered: &[u8], has_username: bool, has_password: bool) -> String {
+    let ard_only = offered.contains(&SEC_ARD) && !offered.contains(&SEC_VNC) && !offered.contains(&SEC_NONE);
+    if ard_only && !has_username {
+        format!("服务器 {server_version} 未开启 VNC 密码认证, 只支持 Apple ARD(提供 {offered:?}): 请在「VNC 用户名」中填写远程 Mac 的登录账户名, 密码填写该账户的登录密码")
+    } else if !has_password && (offered.contains(&SEC_VNC) || offered.contains(&SEC_ARD)) {
+        format!("服务器 {server_version} 需要密码认证(提供 {offered:?}): 请填写 VNC 密码")
+    } else {
+        format!("服务器 {server_version} 只提供了不支持的认证方式 {offered:?}(支持 1=无、2=VNC 密码、30=Apple ARD)")
+    }
+}
+
+fn security_name(sec: u8) -> &'static str {
+    match sec {
+        SEC_NONE => "无认证",
+        SEC_VNC => "VNC 密码",
+        SEC_ARD => "Apple ARD",
+        _ => "其他",
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,7 +134,7 @@ pub async fn connect<S: AsyncRead + AsyncWrite + Unpin>(
 ) -> Result<(RfbInfo, RfbReader<ReadHalf<S>>, RfbWriter<WriteHalf<S>>)> {
     // --- version ---
     let mut ver = [0u8; 12];
-    s.read_exact(&mut ver).await.context("握手第 1 步: 读取服务器 RFB 版本时连接被对端关闭(服务器接受了 TCP 连接但没有发出 VNC 欢迎信息; 请检查本机代理/VPN 是否接管了该地址, 以及服务器是否限制了来源 IP)")?;
+    s.read_exact(&mut ver).await.context("握手第 1 步: 读取服务器 RFB 版本时连接被对端关闭(服务器接受了 TCP 连接但没有发出 VNC 欢迎信息; 请检查本机代理/VPN 是否接管了该地址, 以及服务器是否限制了来源 IP; 如果刚才多次认证失败, 服务器(如 macOS)可能临时拒绝本机连接, 请等几分钟再试)")?;
     let text = std::str::from_utf8(&ver).map_err(|_| anyhow!("握手第 1 步: 对端发来的不是 RFB 版本串 {ver:?}"))?;
     if !text.starts_with("RFB ") || ver[11] != b'\n' {
         bail!("not an RFB server: {text:?}");
@@ -137,12 +153,13 @@ pub async fn connect<S: AsyncRead + AsyncWrite + Unpin>(
 
     // --- security ---
     let has_pw = opts.password.as_deref().is_some_and(|p| !p.is_empty());
-    let sec = if cn == 3 {
+    let username = opts.username.as_deref().map(str::trim).unwrap_or("");
+    let (sec, offered) = if cn == 3 {
         let t = s.read_u32().await.with_context(|| format!("握手第 2 步: 读取安全类型时连接被对端关闭(服务器 {server_version})"))?;
         if t == 0 {
             bail!("server refused: {}", read_reason(&mut s).await?);
         }
-        t as u8
+        (t as u8, vec![t as u8])
     } else {
         let n = read_u8(&mut s).await.with_context(|| format!("握手第 2 步: 读取安全类型时连接被对端关闭(服务器 {server_version})"))? as usize;
         if n == 0 {
@@ -150,13 +167,17 @@ pub async fn connect<S: AsyncRead + AsyncWrite + Unpin>(
         }
         let mut types = vec![0u8; n];
         s.read_exact(&mut types).await.with_context(|| format!("握手第 2 步: 读取安全类型列表时连接被对端关闭(服务器 {server_version})"))?;
-        let chosen = choose_security(&types, opts.prefer, has_pw)
-            .ok_or_else(|| anyhow!("服务器 {server_version} 只提供了不支持的认证方式 {types:?}(支持 1=无、2=VNC 密码、30=Apple ARD)"))?;
+        let chosen = choose_security(&types, !username.is_empty(), has_pw)
+            .ok_or_else(|| anyhow!(no_usable_security(&server_version, &types, !username.is_empty(), has_pw)))?;
         s.write_all(&[chosen]).await?;
-        chosen
+        (chosen, types)
     };
+    // An RFB 3.3 server picks the type itself; ARD with an empty account name can only fail, so stop before sending it.
+    if sec == SEC_ARD && username.is_empty() {
+        bail!(no_usable_security(&server_version, &[SEC_ARD], false, has_pw));
+    }
 
-    let auth_stage = || format!("握手第 3 步: 认证({}, 服务器 {server_version})时连接被对端关闭", match sec { SEC_NONE => "无认证", SEC_VNC => "VNC 密码", SEC_ARD => "Apple ARD", _ => "其他" });
+    let auth_stage = || format!("握手第 3 步: 认证({}, 服务器 {server_version})时连接被对端关闭", security_name(sec));
     match sec {
         SEC_NONE => {}
         SEC_VNC => {
@@ -177,7 +198,7 @@ pub async fn connect<S: AsyncRead + AsyncWrite + Unpin>(
             s.read_exact(&mut server_public).await.with_context(auth_stage)?;
             let (enc, cpub) = ard_client_response(
                 &ArdServerHello { generator, prime, server_public },
-                opts.username.as_deref().unwrap_or(""),
+                username,
                 opts.password.as_deref().unwrap_or(""),
             )?;
             s.write_all(&enc).await.with_context(auth_stage)?;
@@ -190,7 +211,12 @@ pub async fn connect<S: AsyncRead + AsyncWrite + Unpin>(
         let result = s.read_u32().await.with_context(|| format!("握手第 4 步: 等待认证结果时连接被对端关闭(服务器 {server_version}; 认证方式 {sec}; 常见原因: 密码不对而服务器直接断开, 或失败次数过多被临时封锁)"))?;
         if result != 0 {
             let reason = if cn == 8 { read_reason(&mut s).await.unwrap_or_default() } else { String::new() };
-            bail!("authentication failed{}", if reason.is_empty() { String::new() } else { format!(": {reason}") });
+            let check = if sec == SEC_ARD { "请检查账户名和登录密码" } else { "请检查 VNC 密码" };
+            bail!(
+                "authentication failed{}: 认证失败(认证方式 {}, 服务器 {server_version} 提供 {offered:?}), {check}; 多次失败后服务器可能临时拒绝连接",
+                if reason.is_empty() { String::new() } else { format!(" ({reason})") },
+                security_name(sec),
+            );
         }
     }
 

@@ -5,8 +5,8 @@ use std::time::Duration;
 
 use tokio::sync::mpsc;
 
-use crate::client::{connect, cut_text_message, key_message, pointer_message, AuthPreference, Options, Rect, ServerEvent};
-use crate::config::{VncAuthMethod, VncHostConfig};
+use crate::client::{connect, cut_text_message, key_message, pointer_message, Options, Rect, ServerEvent};
+use crate::config::VncHostConfig;
 use crate::keys;
 
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
@@ -102,7 +102,6 @@ async fn run(config: VncHostConfig, mut commands: mpsc::UnboundedReceiver<VncCom
     let opts = Options {
         username: config.username.clone(),
         password: config.password.clone(),
-        prefer: if config.auth_method == VncAuthMethod::AppleRemoteDesktop { AuthPreference::Ard } else { AuthPreference::Vnc },
         shared: config.shared,
     };
     let (info, mut reader, mut writer) = tokio::time::timeout(CONNECT_TIMEOUT, connect(tcp, &opts))

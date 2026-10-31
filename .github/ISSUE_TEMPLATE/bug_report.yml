@@ -1,0 +1,92 @@
+name: Bug report / Bug 报告
+description: Something does not work as expected / 功能异常或崩溃
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues first. For a security problem, do **not** open an issue; see [SECURITY.md](https://github.com/Mio888888/OpsBatch/blob/master/.github/SECURITY.md).
+        请先搜索已有 Issue。安全漏洞请不要公开提交，参见 SECURITY.md。
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened / 问题描述
+      description: What you did, what you expected and what you got. / 你做了什么、期望什么、实际发生了什么。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / 复现步骤
+      placeholder: |
+        1. Open ...
+        2. Click ...
+        3. See ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area / 所属模块
+      options:
+        - Terminal / SSH
+        - SFTP / editor
+        - Batch execution / broadcast
+        - RDP
+        - VNC
+        - Libraries / repository sync
+        - Workflow
+        - AI / MCP
+        - Vault / keychain / data
+        - Update / installer
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: OpsBatch version / 版本
+      description: Shown in Settings, or the installer file name. / 设置页或安装包文件名里可见。
+      placeholder: "0.2.4"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system / 操作系统
+      options:
+        - macOS (Apple silicon)
+        - macOS (Intel)
+        - Windows 11
+        - Windows 10
+        - Linux (X11)
+        - Linux (Wayland)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: remote
+    attributes:
+      label: Remote side / 远端环境
+      description: For SSH, RDP and VNC problems, the server OS and software (for example Windows Server 2022, TigerVNC 1.13, macOS Screen Sharing). / SSH、RDP、VNC 问题请写服务器系统与软件。
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / 日志
+      description: Open the global log window and copy the relevant lines. Remove passwords, tokens and hostnames you do not want to share. / 打开全局日志窗口复制相关内容，并去掉密码、令牌等敏感信息。
+      render: text
+  - type: textarea
+    id: shots
+    attributes:
+      label: Screenshots / 截图
+      description: Drag images or recordings here. / 可拖入截图或录屏。
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks / 确认
+      options:
+        - label: I searched existing issues / 我已搜索过已有 Issue
+          required: true
+        - label: This also happens on the latest release / 最新版本中依然存在
+          required: false

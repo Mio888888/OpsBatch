@@ -1,0 +1,22 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "CI"
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    groups:
+      rust-patch-and-minor:
+        update-types: [patch, minor]
+    # The GPUI stack is pinned on purpose (gpui-kit =0.8.0, patched copies in vendor/): upgrade it by hand.
+    ignore:
+      - dependency-name: "gpui*"
+      - dependency-name: "ironrdp*"

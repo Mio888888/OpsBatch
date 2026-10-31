@@ -1,6 +1,6 @@
 # OpsBatch
 
-**English** | [简体中文](README_CN.md)
+**English** | [简体中文](README_CN.md) | [Website](https://mio888888.github.io/OpsBatch/)
 
 [![CI](https://github.com/Mio888888/OpsBatch/actions/workflows/ci.yml/badge.svg)](https://github.com/Mio888888/OpsBatch/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
@@ -137,6 +137,12 @@ updater key; publishing fails without it), and optionally `MACOS_CERT_P12`, `MAC
 | `vendor/`, `spikes/` | Patched third-party crates; early prototypes |
 
 The plan and per-milestone reports are in [`PLAN.md`](PLAN.md) and [`TASKS.md`](TASKS.md) (Chinese).
+
+## Contributing
+
+Issues and pull requests are welcome; read [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md) first. Report security
+problems privately as described in [`.github/SECURITY.md`](.github/SECURITY.md). The product site lives in
+[`website/`](website) and is published to GitHub Pages.
 
 ## License
 

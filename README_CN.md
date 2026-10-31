@@ -1,6 +1,6 @@
 # OpsBatch
 
-[English](README.md) | **简体中文**
+[English](README.md) | **简体中文** | [官网](https://mio888888.github.io/OpsBatch/)
 
 [![CI](https://github.com/Mio888888/OpsBatch/actions/workflows/ci.yml/badge.svg)](https://github.com/Mio888888/OpsBatch/actions/workflows/ci.yml)
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
@@ -126,6 +126,11 @@ Windows 和 Linux 的安装包，并用更新密钥签名。
 | `vendor/`、`spikes/` | 打过补丁的第三方 crate；早期原型 |
 
 计划与各里程碑报告见 [`PLAN.md`](PLAN.md)、[`TASKS.md`](TASKS.md)。
+
+## 参与贡献
+
+欢迎提交 Issue 和 Pull Request，请先阅读 [`.github/CONTRIBUTING.md`](.github/CONTRIBUTING.md)。安全问题请按
+[`.github/SECURITY.md`](.github/SECURITY.md) 私下报告。产品官网在 [`website/`](website)，会发布到 GitHub Pages。
 
 ## 许可证
 

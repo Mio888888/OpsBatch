@@ -1,0 +1,5 @@
+# Every change needs a review from the maintainer; narrower owners can be added below.
+*                        @Mio888888
+/.github/                @Mio888888
+/packaging/              @Mio888888
+/crates/ops-core/src/update.rs @Mio888888

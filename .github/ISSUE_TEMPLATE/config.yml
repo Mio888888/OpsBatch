@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Documentation / 文档
+    url: https://github.com/Mio888888/OpsBatch#readme
+    about: Install, build, update and migration notes / 安装、构建、更新与迁移说明
+  - name: Report a security vulnerability / 报告安全漏洞
+    url: https://github.com/Mio888888/OpsBatch/security/advisories/new
+    about: Report privately; do not open a public issue / 请私下报告，不要公开提 Issue
+  - name: Tauri build (0.x) / Tauri 版
+    url: https://github.com/Mio888888/OpsBatch/tree/0.x
+    about: The previous Tauri + React build lives on the 0.x branch / 旧的 Tauri + React 版本在 0.x 分支

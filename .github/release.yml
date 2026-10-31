@@ -1,0 +1,18 @@
+# Groups the notes that `gh release create --generate-notes` writes for a release.
+changelog:
+  exclude:
+    labels:
+      - skip-changelog
+    authors:
+      - dependabot
+  categories:
+    - title: New features / 新功能
+      labels: [enhancement, feature]
+    - title: Fixes / 问题修复
+      labels: [bug, fix]
+    - title: Performance / 性能
+      labels: [performance]
+    - title: Documentation / 文档
+      labels: [documentation]
+    - title: Maintenance / 优化与维护
+      labels: ["*"]

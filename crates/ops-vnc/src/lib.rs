@@ -6,7 +6,7 @@ pub mod config;
 pub mod keys;
 pub mod session;
 
-pub use config::{load_vnc_host_config, VncAuthMethod, VncHostConfig, DEFAULT_VNC_PORT};
+pub use config::{load_vnc_host_config, VncHostConfig, DEFAULT_VNC_PORT};
 pub use session::{start_session, VncCommand, VncEvent, VncSession};
 
 #[cfg(test)]

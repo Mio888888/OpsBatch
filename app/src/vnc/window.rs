@@ -16,7 +16,7 @@ use gpui_kit::*;
 use crate::scale::px;
 use ops_i18n::t;
 use ops_vnc::keys::{keysym_for_key, modifier_changes, Mods};
-use ops_vnc::{start_session, VncAuthMethod, VncCommand, VncEvent, VncSession};
+use ops_vnc::{start_session, VncCommand, VncEvent, VncSession};
 
 use crate::rdp::input::{WheelAccumulator, NOTCH};
 use crate::remote::surface::{contain_rect, map_point, RemoteSurface, TileLayer};
@@ -241,7 +241,8 @@ impl VncWindow {
 
     fn start(&mut self, config: ops_vnc::VncHostConfig, generation: u64, window: &mut Window, cx: &mut Context<Self>) {
         self.view_only = config.view_only;
-        self.remote_is_mac = config.auth_method == VncAuthMethod::AppleRemoteDesktop;
+        // Set from the server's "RFB 003.889" once connected.
+        self.remote_is_mac = false;
         let session = start_session(config);
         let events = session.events.clone();
         self.session = Some(session);

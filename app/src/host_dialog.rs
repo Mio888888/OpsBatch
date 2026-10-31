@@ -16,7 +16,7 @@ use ops_i18n::t;
 use ops_ssh::hosts::Host;
 
 use crate::asset_tree::{group_choices, HostKind, DEFAULT_GROUP_ID};
-use crate::host_form::{AuthKind, Field, HostFormValues, OsKind, ProxyKind, VncAuth};
+use crate::host_form::{AuthKind, Field, HostFormValues, OsKind, ProxyKind};
 use crate::stores::assets::AssetsStore;
 use crate::widgets::choice::{confirmed_value, new_select, Choice, ChoiceSelect};
 use crate::widgets::form::{field, section, switch_row};
@@ -53,7 +53,6 @@ pub struct Selects {
     pub os: Entity<ChoiceSelect>,
     pub auth: Entity<ChoiceSelect>,
     pub group: Entity<ChoiceSelect>,
-    pub vnc_auth: Entity<ChoiceSelect>,
     pub proxy_type: Entity<ChoiceSelect>,
 }
 
@@ -174,7 +173,7 @@ impl HostDialog {
             rdp_height: text_input(window, cx, "720".into(), &values.rdp_height, false),
             rdp_disk_path: text_input(window, cx, t!("assets.rdpDiskPathPlaceholder"), &values.rdp_disk_path, false),
             vnc_port: text_input(window, cx, "5900".into(), &values.vnc_port, false),
-            vnc_username: text_input(window, cx, t!("assets.vncUsernamePlaceholder"), &values.vnc_username, false),
+            vnc_username: text_input(window, cx, t!("assets.vncUsernameAuto"), &values.vnc_username, false),
             vnc_password: text_input(window, cx, t!("assets.vncPasswordPlaceholder"), &values.vnc_password, true),
             proxy_host: text_input(window, cx, t!("assets.proxyHostPlaceholder"), &values.proxy_host, false),
             proxy_port: text_input(window, cx, "1080".into(), &values.proxy_port, false),
@@ -185,14 +184,6 @@ impl HostDialog {
             os: cx.new(|cx| new_select(os_choices(), values.os.as_str(), window, cx)),
             auth: cx.new(|cx| new_select(auth_choices(values.os), if values.auth == AuthKind::Key { "key" } else { "password" }, window, cx)),
             group: cx.new(|cx| new_select(group_options, &values.group_id, window, cx)),
-            vnc_auth: cx.new(|cx| {
-                new_select(
-                    vec![Choice::new("vnc", t!("assets.vncAuthMethodVnc")), Choice::new("ard", t!("assets.vncAuthMethodArd"))],
-                    if values.vnc_auth == VncAuth::Ard { "ard" } else { "vnc" },
-                    window,
-                    cx,
-                )
-            }),
             proxy_type: cx.new(|cx| {
                 new_select(
                     vec![Choice::new("socks5", "SOCKS5"), Choice::new("http", "HTTP")],
@@ -218,12 +209,6 @@ impl HostDialog {
             cx.subscribe_in(&selects.group, window, |this, _, ev, _, cx| {
                 if let Some(v) = confirmed_value(ev) {
                     this.values.group_id = v;
-                }
-                cx.notify();
-            }),
-            cx.subscribe_in(&selects.vnc_auth, window, |this, _, ev, _, cx| {
-                if let Some(v) = confirmed_value(ev) {
-                    this.values.vnc_auth = if v == "ard" { VncAuth::Ard } else { VncAuth::Vnc };
                 }
                 cx.notify();
             }),
@@ -424,7 +409,6 @@ impl HostDialog {
                         .gap(px(10.))
                         .items_start()
                         .child(field(t!("assets.vncPort"), crate::widgets::form::spin(Input::new(&i.vnc_port), "host-vnc-port", &i.vnc_port, 1, Some(65535), crate::theme::ui(cx)), None, cx).w(px(96.)).flex_none())
-                        .child(field(t!("assets.vncAuthMethod"), Select::new(&self.selects.vnc_auth), None, cx).flex_1())
                         .child(field(t!("assets.vncUsername"), Input::new(&i.vnc_username), None, cx).flex_1())
                         .child(field(t!("assets.vncPassword"), Input::new(&i.vnc_password), None, cx).flex_1()),
                 )

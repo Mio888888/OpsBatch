@@ -124,8 +124,8 @@ fn hex_prime() -> Vec<u8> {
     (0..s.len()).step_by(2).map(|i| u8::from_str_radix(&s[i..i + 2], 16).unwrap()).collect()
 }
 
-fn opts(user: &str, pass: &str, prefer: AuthPreference) -> Options {
-    Options { username: Some(user.into()), password: Some(pass.into()), prefer, shared: true }
+fn opts(user: &str, pass: &str) -> Options {
+    Options { username: Some(user.into()), password: Some(pass.into()), shared: true }
 }
 
 type Reader = RfbReader<tokio::io::ReadHalf<DuplexStream>>;
@@ -135,12 +135,12 @@ fn px(c: &Reader, x: usize, y: usize) -> [u8; 4] {
     c.fb.data[o..o + 4].try_into().unwrap()
 }
 
-async fn run(version: &'static str, sec: u8, prefer: AuthPreference, cpass: &'static str) -> anyhow::Result<(RfbInfo, Reader)> {
+async fn run(version: &'static str, sec: u8, cpass: &'static str) -> anyhow::Result<(RfbInfo, Reader)> {
     let (cs, ss) = tokio::io::duplex(1 << 16);
     tokio::spawn(async move {
         let _ = mock_server(ss, version, sec, "alice", "pw12").await;
     });
-    let (info, mut r, mut w) = connect(cs, &opts("alice", cpass, prefer)).await?;
+    let (info, mut r, mut w) = connect(cs, &opts("alice", cpass)).await?;
     w.request_update(false).await?;
     loop {
         if let ServerEvent::Update(rects) = r.next_event().await? {
@@ -165,33 +165,55 @@ fn check_pixels((info, c): &(RfbInfo, Reader)) {
 
 #[tokio::test]
 async fn security_none_rfb38() {
-    check_pixels(&run("RFB 003.008\n", SEC_NONE, AuthPreference::Vnc, "").await.unwrap());
+    check_pixels(&run("RFB 003.008\n", SEC_NONE, "").await.unwrap());
 }
 
 #[tokio::test]
 async fn security_vnc_auth_ok_and_wrong_password() {
-    check_pixels(&run("RFB 003.008\n", SEC_VNC, AuthPreference::Vnc, "pw12").await.unwrap());
-    let err = run("RFB 003.008\n", SEC_VNC, AuthPreference::Vnc, "bad").await.err().unwrap();
-    assert!(err.to_string().contains("authentication failed"), "{err}");
+    check_pixels(&run("RFB 003.008\n", SEC_VNC, "pw12").await.unwrap());
+    let err = run("RFB 003.008\n", SEC_VNC, "bad").await.err().unwrap().to_string();
+    assert!(err.contains("authentication failed") && err.contains("VNC 密码") && err.contains("[2]"), "{err}");
 }
 
 #[tokio::test]
 async fn security_ard_and_apple_version_string() {
     // Apple servers announce RFB 003.889 and are spoken to as 3.8.
-    check_pixels(&run("RFB 003.889\n", SEC_ARD, AuthPreference::Ard, "pw12").await.unwrap());
-    assert!(run("RFB 003.889\n", SEC_ARD, AuthPreference::Ard, "bad").await.is_err());
+    check_pixels(&run("RFB 003.889\n", SEC_ARD, "pw12").await.unwrap());
+    let err = run("RFB 003.889\n", SEC_ARD, "bad").await.err().unwrap().to_string();
+    assert!(err.contains("authentication failed") && err.contains("Apple ARD") && err.contains("账户名"), "{err}");
+}
+
+/// A Mac without a VNC password only offers ARD: with no username the client must say so and send nothing, instead of
+/// trying ARD with an empty account name (which fails and, repeated, gets the address temporarily refused).
+#[tokio::test]
+async fn ard_only_server_without_username_asks_for_it_and_sends_nothing() {
+    for (version, offer) in [(&b"RFB 003.889\n"[..], &[2u8, SEC_ARD, 35][..]), (b"RFB 003.003\n", &[0, 0, 0, SEC_ARD])] {
+        let (client, mut server) = tokio::io::duplex(1 << 16);
+        let srv = tokio::spawn(async move {
+            server.write_all(version).await.unwrap();
+            read_exact_vec(&mut server, 12).await;
+            server.write_all(offer).await.unwrap();
+            let mut rest = Vec::new();
+            server.read_to_end(&mut rest).await.unwrap();
+            rest
+        });
+        let opts = Options { username: Some("  ".into()), password: Some("pw12".into()), shared: true };
+        let e = format!("{:#}", connect(client, &opts).await.err().expect("must stop before authenticating"));
+        assert!(e.contains("VNC 用户名") && e.contains("Apple ARD"), "{e}");
+        assert!(srv.await.unwrap().is_empty(), "no security type or credentials may be sent");
+    }
 }
 
 #[tokio::test]
 async fn rfb33_type_chosen_by_server() {
-    check_pixels(&run("RFB 003.003\n", SEC_VNC, AuthPreference::Vnc, "pw12").await.unwrap());
+    check_pixels(&run("RFB 003.003\n", SEC_VNC, "pw12").await.unwrap());
 }
 
 /// Connects to a server that plays `script` and then hangs up; returns the error text the user would see.
 async fn hang_up_after(script: impl FnOnce(DuplexStream) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + 'static) -> String {
     let (client, server) = tokio::io::duplex(1 << 16);
     tokio::spawn(script(server));
-    let opts = Options { username: None, password: Some("pw12".into()), prefer: AuthPreference::Vnc, shared: true };
+    let opts = Options { username: None, password: Some("pw12".into()), shared: true };
     format!("{:#}", connect(client, &opts).await.err().expect("the handshake must fail"))
 }
 
@@ -232,12 +254,21 @@ async fn a_server_that_hangs_up_says_at_which_handshake_step() {
 }
 
 #[test]
-fn security_preference_order() {
-    assert_eq!(choose_security(&[1, 2, 30], AuthPreference::Vnc, true), Some(SEC_VNC));
-    assert_eq!(choose_security(&[1, 2, 30], AuthPreference::Ard, true), Some(SEC_ARD));
-    assert_eq!(choose_security(&[1, 2], AuthPreference::Vnc, false), Some(SEC_NONE));
-    assert_eq!(choose_security(&[30], AuthPreference::Vnc, true), Some(SEC_ARD));
-    assert_eq!(choose_security(&[5, 6], AuthPreference::Vnc, true), None);
+fn security_choice_follows_the_filled_in_fields() {
+    // username + password: ARD when offered, otherwise the VNC password
+    assert_eq!(choose_security(&[1, 2, 30], true, true), Some(SEC_ARD));
+    assert_eq!(choose_security(&[2], true, true), Some(SEC_VNC));
+    // password only: the VNC password, never ARD with an empty account name
+    assert_eq!(choose_security(&[1, 2, 30], false, true), Some(SEC_VNC));
+    assert_eq!(choose_security(&[30, 35], false, true), None);
+    // nothing filled in: only servers without authentication
+    assert_eq!(choose_security(&[1, 2], false, false), Some(SEC_NONE));
+    assert_eq!(choose_security(&[2], false, false), None);
+    assert_eq!(choose_security(&[5, 6], true, true), None);
+
+    assert!(no_usable_security("RFB 003.889", &[30, 35], false, true).contains("VNC 用户名"));
+    assert!(no_usable_security("RFB 003.008", &[2], false, false).contains("请填写 VNC 密码"));
+    assert!(no_usable_security("RFB 003.008", &[19], true, true).contains("不支持"));
 }
 
 
@@ -299,7 +330,7 @@ async fn hextile_background_foreground_and_subrects() {
     u.push(0x00);
     let (cs, ss) = tokio::io::duplex(1 << 16);
     tokio::spawn(simple_server(ss, u));
-    let (_info, mut r, mut w) = connect(cs, &opts("", "", AuthPreference::Vnc)).await.unwrap();
+    let (_info, mut r, mut w) = connect(cs, &opts("", "")).await.unwrap();
     w.request_update(false).await.unwrap();
     assert!(matches!(r.next_event().await.unwrap(), ServerEvent::Update(v) if v.len() == 1));
     assert_eq!(px(&r, 2, 2), [1, 2, 3, 255], "background");
@@ -316,7 +347,7 @@ async fn desktop_size_replaces_the_framebuffer() {
     u.extend(rect_header(0, 0, 48, 40, -223));
     let (cs, ss) = tokio::io::duplex(1 << 16);
     tokio::spawn(simple_server(ss, u));
-    let (_info, mut r, mut w) = connect(cs, &opts("", "", AuthPreference::Vnc)).await.unwrap();
+    let (_info, mut r, mut w) = connect(cs, &opts("", "")).await.unwrap();
     w.request_update(false).await.unwrap();
     assert!(matches!(r.next_event().await.unwrap(), ServerEvent::Resized { width: 48, height: 40 }));
     assert_eq!((r.fb.width, r.fb.height), (48, 40));
@@ -329,14 +360,14 @@ async fn rects_outside_the_framebuffer_are_rejected() {
     u.extend(vec![0u8; 400]);
     let (cs, ss) = tokio::io::duplex(1 << 16);
     tokio::spawn(simple_server(ss, u));
-    let (_info, mut r, mut w) = connect(cs, &opts("", "", AuthPreference::Vnc)).await.unwrap();
+    let (_info, mut r, mut w) = connect(cs, &opts("", "")).await.unwrap();
     w.request_update(false).await.unwrap();
     assert!(r.next_event().await.is_err());
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_session_streams_frames_forwards_input_and_honours_view_only() {
-    use crate::config::{VncAuthMethod, VncHostConfig};
+    use crate::config::VncHostConfig;
     use crate::session::{start_session, VncCommand, VncEvent};
     use std::time::Duration;
     use tokio::net::TcpListener;
@@ -385,7 +416,6 @@ async fn a_session_streams_frames_forwards_input_and_honours_view_only() {
             port,
             username: None,
             password: None,
-            auth_method: VncAuthMethod::VncAuth,
             shared: true,
             view_only,
             proxy: None,
@@ -433,7 +463,7 @@ async fn a_session_streams_frames_forwards_input_and_honours_view_only() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn connection_failures_are_reported_as_closed_events() {
-    use crate::config::{VncAuthMethod, VncHostConfig};
+    use crate::config::VncHostConfig;
     use crate::session::{start_session, VncEvent};
     use std::time::Duration;
     // Nothing listens on this port.
@@ -443,7 +473,6 @@ async fn connection_failures_are_reported_as_closed_events() {
         port: free,
         username: None,
         password: None,
-        auth_method: VncAuthMethod::VncAuth,
         shared: true,
         view_only: false,
         proxy: None,
@@ -470,7 +499,7 @@ async fn copyrect_moves_overlapping_rows_without_smearing_them() {
     u.extend_from_slice(&[0, 0, 0, 6]);
     let (cs, ss) = tokio::io::duplex(1 << 16);
     tokio::spawn(simple_server(ss, u));
-    let (_info, mut r, mut w) = connect(cs, &opts("", "", AuthPreference::Vnc)).await.unwrap();
+    let (_info, mut r, mut w) = connect(cs, &opts("", "")).await.unwrap();
     w.request_update(false).await.unwrap();
     assert!(matches!(r.next_event().await.unwrap(), ServerEvent::Update(v) if v.len() == 3));
     let col = |y| px(&r, 0, y)[0];
@@ -501,7 +530,7 @@ async fn the_next_update_is_requested_while_the_current_one_is_still_arriving() 
         ss.write_all(&u).await.unwrap();
         ss
     });
-    let (_info, mut r, _w) = connect(cs, &opts("", "", AuthPreference::Vnc)).await.unwrap();
+    let (_info, mut r, _w) = connect(cs, &opts("", "")).await.unwrap();
     let (tx, mut started) = tokio::sync::mpsc::unbounded_channel();
     r.set_update_hook(move || {
         let _ = tx.send(());
@@ -603,7 +632,7 @@ async fn decode_bench(label: &str, w: u16, h: u16, rects: u16, payload: Vec<u8>)
         let mut sink = [0u8; 64];
         while s.read(&mut sink).await.unwrap_or(0) > 0 {}
     });
-    let opts = Options { username: None, password: None, prefer: AuthPreference::Vnc, shared: true };
+    let opts = Options { username: None, password: None, shared: true };
     let (_, mut reader, _writer) = connect(TcpStream::connect(addr).await.unwrap(), &opts).await.unwrap();
     let started = std::time::Instant::now();
     let ev = reader.next_event().await.unwrap();

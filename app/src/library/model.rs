@@ -368,7 +368,7 @@ pub fn filter_commands<'a>(
     let q = query.trim().to_lowercase();
     all.iter()
         .filter(|c| docker_only == (c.kind == Kind::Docker))
-        .filter(|c| category.map_or(true, |cat| c.category == cat))
+        .filter(|c| category.is_none_or(|cat| c.category == cat))
         .filter(|c| {
             q.is_empty()
                 || contains_ci(&c.name, &q)
@@ -387,7 +387,7 @@ pub fn filter_scripts<'a>(
 ) -> Vec<&'a ScriptEntry> {
     let q = query.trim().to_lowercase();
     all.iter()
-        .filter(|s| category.map_or(true, |cat| s.category == cat))
+        .filter(|s| category.is_none_or(|cat| s.category == cat))
         .filter(|s| {
             q.is_empty()
                 || contains_ci(&s.name, &q)
@@ -405,7 +405,7 @@ pub fn filter_actions<'a>(
 ) -> Vec<&'a QuickActionEntry> {
     let q = query.trim().to_lowercase();
     all.iter()
-        .filter(|a| category.map_or(true, |cat| a.category == cat))
+        .filter(|a| category.is_none_or(|cat| a.category == cat))
         .filter(|a| {
             q.is_empty()
                 || contains_ci(&a.name, &q)

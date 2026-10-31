@@ -411,7 +411,7 @@ async fn exec_through_jump_host_chain() {
             tags: None,
             group_id: None,
             remark: None,
-            jump_chain: Some(serde_json::to_string(&[fx.host_id.clone()]).unwrap()),
+            jump_chain: Some(serde_json::to_string(std::slice::from_ref(&fx.host_id)).unwrap()),
             rdp_settings: None,
             proxy_settings: None,
         },

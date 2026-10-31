@@ -104,6 +104,12 @@ pub struct TerminalManager {
     sessions: DashMap<String, SessionHandle>,
 }
 
+impl Default for TerminalManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TerminalManager {
     pub fn new() -> Self {
         Self {
@@ -341,7 +347,7 @@ fn create_terminal_output_emitter(
             };
 
             if first.is_empty() {
-                let _ = app_handle.terminals.emit(&session_id, String::new());
+                app_handle.terminals.emit(&session_id, String::new());
                 continue;
             }
 
@@ -355,28 +361,28 @@ fn create_terminal_output_emitter(
                     data = receiver.recv() => match data {
                         Some(data) if data.is_empty() => {
                             if !buffer.is_empty() {
-                                let _ = app_handle.terminals.emit(&session_id, std::mem::take(&mut buffer));
+                                app_handle.terminals.emit(&session_id, std::mem::take(&mut buffer));
                             }
-                            let _ = app_handle.terminals.emit(&session_id, String::new());
+                            app_handle.terminals.emit(&session_id, String::new());
                             break;
                         }
                         Some(data) => {
                             buffer.push_str(&data);
                             if buffer.len() >= OUTPUT_BATCH_MAX_BYTES || buffer.len() / 1024 >= EMITTER_BATCH_SIZE {
-                                let _ = app_handle.terminals.emit(&session_id, std::mem::take(&mut buffer));
+                                app_handle.terminals.emit(&session_id, std::mem::take(&mut buffer));
                                 break;
                             }
                         }
                         None => {
                             if !buffer.is_empty() {
-                                let _ = app_handle.terminals.emit(&session_id, std::mem::take(&mut buffer));
+                                app_handle.terminals.emit(&session_id, std::mem::take(&mut buffer));
                             }
                             return;
                         }
                     },
                     _ = &mut deadline => {
                         if !buffer.is_empty() {
-                            let _ = app_handle.terminals.emit(&session_id, std::mem::take(&mut buffer));
+                            app_handle.terminals.emit(&session_id, std::mem::take(&mut buffer));
                         }
                         break;
                     }
@@ -971,7 +977,7 @@ pub async fn terminal_write(
                 "session write channel closed".to_string()
             }
         })?;
-    touch_terminal_connection(&pool, host_id.as_deref());
+    touch_terminal_connection(pool, host_id.as_deref());
     Ok(())
 }
 pub async fn terminal_batch_write(
@@ -991,7 +997,7 @@ pub async fn terminal_batch_write(
             .try_send(TerminalCommand::Write(data.into_bytes()))
             .is_ok()
         {
-            touch_terminal_connection(&pool, host_id.as_deref());
+            touch_terminal_connection(pool, host_id.as_deref());
         }
     }
     Ok(())
@@ -1038,7 +1044,7 @@ pub async fn terminal_resize(
                     "session resize channel closed".to_string()
                 }
             })?;
-        touch_terminal_connection(&pool, host_id.as_deref());
+        touch_terminal_connection(pool, host_id.as_deref());
     }
 
     Ok(())

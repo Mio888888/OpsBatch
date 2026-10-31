@@ -204,7 +204,7 @@ async fn jump_chain_is_resolved_and_cascades() {
         .await
         .unwrap();
     let mut inner = new_host("inner", "10.9.9.2");
-    inner.jump_chain = Some(serde_json::to_string(&[bastion.id.clone()]).unwrap());
+    inner.jump_chain = Some(serde_json::to_string(std::slice::from_ref(&bastion.id)).unwrap());
     let inner = hosts::add_host(&core.db, inner).await.unwrap();
 
     let chain = proxyjump::resolve_jump_chain(&core.db, inner.id.clone()).unwrap();

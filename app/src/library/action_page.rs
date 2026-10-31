@@ -103,10 +103,8 @@ impl QuickActionsPage {
                     t!("quickActions.executeFailed", error = e.clone()),
                 ),
             });
-            if result.is_ok() {
-                if done.recv_async().await.is_ok() {
-                    let _ = cx.update(|_, cx| store.update(cx, |s, cx| s.load_actions(cx)));
-                }
+            if result.is_ok() && done.recv_async().await.is_ok() {
+                let _ = cx.update(|_, cx| store.update(cx, |s, cx| s.load_actions(cx)));
             }
         })
         .detach();
@@ -762,10 +760,9 @@ impl ActionFormDialog {
                 .default_value(e.as_ref().map(|e| e.name.clone()).unwrap_or_default())
         });
         let command = cx.new(|cx| {
-            let s = TextareaState::new(window, cx)
+            TextareaState::new(window, cx)
                 .placeholder(t!("quickActions.commandPlaceholder"))
-                .auto_grow(3, 6);
-            s
+                .auto_grow(3, 6)
         });
         if let Some(e) = &editing {
             let c = e.command.clone();

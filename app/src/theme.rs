@@ -173,7 +173,7 @@ pub fn on_system_appearance_changed(cx: &mut App) {
 pub fn apply(cx: &mut App) {
     let r = cx.global::<AppTheme>().resolved;
     let scale = cx.global::<AppTheme>().settings.ui_scale;
-    crate::scale::set_percent(scale as u32);
+    crate::scale::set_percent(scale);
     let ui = r.theme.ui;
     let accent = r.accent;
     let mode = if r.is_dark {

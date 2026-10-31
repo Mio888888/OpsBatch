@@ -1052,7 +1052,8 @@ fn the_channel_decodes_requests_and_encodes_completions() {
 
     // IRP_MJ_CREATE for \hello.txt, FILE_OPEN
     let mut body = Vec::new();
-    for v in [0x0012_019f_u32] {
+    {
+        let v = 0x0012_019f_u32;
         le32(&mut body, v); // DesiredAccess
     }
     body.extend_from_slice(&0u64.to_le_bytes()); // AllocationSize

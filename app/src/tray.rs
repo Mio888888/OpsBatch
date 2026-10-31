@@ -56,7 +56,7 @@ pub fn init(cx: &mut App, show_main: fn(&mut App)) {
         cx.background_executor()
             .timer(Duration::from_millis(120))
             .await;
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             while let Ok(ev) = MenuEvent::receiver().try_recv() {
                 let (show_id, quit_id) = {
                     let t = cx.global::<TrayHolder>();

@@ -896,7 +896,7 @@ async fn describe(
 
 #[cfg(test)]
 mod tests {
-    use super::{arg, capability_of, decode_text, handles, parse_mode, summary_of, valid_address};
+    use super::{capability_of, decode_text, handles, parse_mode, summary_of, valid_address};
     use serde_json::json;
 
     #[test]

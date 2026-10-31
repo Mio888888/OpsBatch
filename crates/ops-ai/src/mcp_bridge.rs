@@ -389,10 +389,7 @@ pub async fn handle_rpc(message: &Value, calls: &flume::Sender<BridgeCall>) -> O
         id.clone()
             .map(|id| json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": text}}))
     };
-    if id.is_none() {
-        // notifications (`notifications/initialized`, ...) are accepted silently
-        return None;
-    }
+    id.as_ref()?;
     match method {
         "initialize" => {
             let requested = message

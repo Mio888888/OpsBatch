@@ -96,7 +96,7 @@ fn setup(cx: &mut TestAppContext, backend: Arc<Fake>) -> Fixture {
 }
 
 fn request(cx: &mut TestAppContext, fx: &Fixture) -> futures::channel::oneshot::Receiver<bool> {
-    win(cx, fx, |w, cx| vault::request_unlock(w, cx))
+    win(cx, fx, vault::request_unlock)
 }
 
 fn dialog_shown(cx: &mut TestAppContext, fx: &Fixture) -> bool {
@@ -169,7 +169,7 @@ fn without_a_keychain_key_the_dialog_asks_for_the_startup_password(cx: &mut Test
             ops_i18n::template(ops_i18n::Language::ZhCn, "keychainNotice.needMasterKey")
         )
     });
-    assert!(MISSING_KEY.len() > 0);
+    assert!(!MISSING_KEY.is_empty());
     win(cx, &fx, |w, cx| {
         w.render_frame(cx);
         assert!(
@@ -242,7 +242,7 @@ fn a_stale_keychain_key_gets_its_own_message(cx: &mut TestAppContext) {
             ops_i18n::template(ops_i18n::Language::ZhCn, "keychainNotice.staleMasterKey")
         )
     });
-    assert!(STALE_KEY.len() > 0);
+    assert!(!STALE_KEY.is_empty());
 }
 
 #[gpui_kit::test]
@@ -262,7 +262,7 @@ fn an_unusable_keychain_still_offers_the_startup_password_with_the_reason(cx: &m
     });
     dialog.read_with(cx, |d, _| {
         assert!(
-            d.error().starts_with(&ops_i18n::template(
+            d.error().starts_with(ops_i18n::template(
                 ops_i18n::Language::ZhCn,
                 "keychainNotice.keychainUnavailable"
             )),

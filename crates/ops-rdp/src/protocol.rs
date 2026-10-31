@@ -219,7 +219,7 @@ impl RdpMetrics {
                 as u32,
             sent_mbytes_per_second: self.sent_bytes as f64 / elapsed_secs / 1_048_576.0,
         };
-        let _ = app.emit(&format!("rdp-metrics-{}", session_id), payload);
+        app.emit(&format!("rdp-metrics-{}", session_id), payload);
 
         self.window_started_at = now;
         self.server_updates = 0;
@@ -1011,7 +1011,7 @@ fn emit_download_complete(app: &ops_core::Core, session_id: &str, ft: &FileTrans
         "failed": dp.failed.clone(),
         "downloadDir": ft.download_dir.to_string_lossy(),
     });
-    let _ = app.emit(&format!("rdp-file-transfer-{session_id}"), payload);
+    app.emit(&format!("rdp-file-transfer-{session_id}"), payload);
 }
 
 /// Per-input-event tracing (4 database rows and 4 log events for every mouse move) is off unless
@@ -1285,7 +1285,7 @@ fn emit_status_with_detail(
         message,
         detail,
     };
-    let _ = app.emit(&format!("rdp-status-{}", session_id), payload);
+    app.emit(&format!("rdp-status-{}", session_id), payload);
 }
 
 fn disconnect_reason(reason: GracefulDisconnectReason) -> String {

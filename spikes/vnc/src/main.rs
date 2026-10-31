@@ -4,6 +4,8 @@
 //!   VNC_USER=me VNC_PASS=secret VNC_AUTH=ard cargo run -p spike-vnc -- 192.168.1.20 5900
 //! writes the first full frame to target/spike-data/vnc.ppm.
 
+#![allow(dead_code)]
+
 mod auth;
 mod client;
 
@@ -45,7 +47,7 @@ async fn main() -> anyhow::Result<()> {
                 if updates == 1 {
                     let (w, h) = (c.fb.width as usize, c.fb.height as usize);
                     let mut ppm = format!("P6\n{w} {h}\n255\n").into_bytes();
-                    for px in c.fb.data.chunks_exact(4) {
+                    for px in c.fb.data.as_chunks::<4>().0 {
                         ppm.extend_from_slice(&[px[2], px[1], px[0]]);
                     }
                     std::fs::create_dir_all("target/spike-data")?;

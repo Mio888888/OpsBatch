@@ -118,7 +118,7 @@ pub fn run(ctx: Arc<Ctx>) {
                         .and_then(|r| r);
                         match results {
                             Ok(r) if !r.is_empty() => {
-                                let _ = cx.update(|cx| {
+                                cx.update(|cx| {
                                     crate::library::store::library_store(cx)
                                         .update(cx, |l, cx| l.load_all(cx))
                                 });
@@ -136,7 +136,7 @@ pub fn run(ctx: Arc<Ctx>) {
                     cx.background_executor()
                         .timer(std::time::Duration::from_secs(secs))
                         .await;
-                    let _ = cx.update(|cx| cx.quit());
+                    cx.update(|cx| cx.quit());
                 })
                 .detach();
             }

@@ -77,7 +77,7 @@ impl VideoView {
                         let (w, h) = yuv.dimensions();
                         buf.resize(w * h * 4, 0);
                         yuv.write_rgba8(&mut buf);
-                        for px in buf.chunks_exact_mut(4) {
+                        for px in buf.as_chunks_mut::<4>().0 {
                             px.swap(0, 2); // RGBA -> BGRA
                         }
                         if tx
@@ -226,7 +226,7 @@ fn main() {
             let v = handle.unwrap();
             cx.spawn(async move |cx| {
                 cx.background_executor().timer(Duration::from_secs(exit_after)).await;
-                let _ = cx.update(|cx| {
+                cx.update(|cx| {
                     let s = &v.read(cx).stats;
                     let secs = s.started.elapsed().as_secs_f64();
                     let vv = v.read(cx);

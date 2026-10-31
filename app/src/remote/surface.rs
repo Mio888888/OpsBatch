@@ -172,7 +172,12 @@ impl RemoteSurface {
             let from = &src[row * row_len..(row + 1) * row_len];
             let to = &mut self.buf[dst..dst + row_len];
             if swap_rb {
-                for (d, s) in to.chunks_exact_mut(4).zip(from.chunks_exact(4)) {
+                for (d, s) in to
+                    .as_chunks_mut::<4>()
+                    .0
+                    .iter_mut()
+                    .zip(from.as_chunks::<4>().0)
+                {
                     d[0] = s[2];
                     d[1] = s[1];
                     d[2] = s[0];
@@ -210,7 +215,9 @@ impl RemoteSurface {
         );
         let rgb: Vec<u8> = self
             .buf
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .flat_map(|p| [p[2], p[1], p[0]])
             .collect();
         let full = image::RgbImage::from_raw(sw, sh, rgb)?;
@@ -497,11 +504,7 @@ mod tests {
         );
         let (bytes, _, ph) = s.tile_pixels(1, 1).unwrap();
         assert_eq!(ph, 4 + 2, "last tile row is 4 pixels high");
-        assert_eq!(
-            &bytes[(46 * 0 + 1) * 4 + 1],
-            &255,
-            "its top border is desktop row 255"
-        );
+        assert_eq!(&bytes[4 + 1], &255, "its top border is desktop row 255");
     }
 
     #[test]

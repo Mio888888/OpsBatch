@@ -25,7 +25,7 @@ pub fn init(cx: &mut App) {
             .background_executor()
             .spawn(async { detect_os_reduce_motion() })
             .await;
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             cx.global_mut::<OsMotion>().reduce = reduce;
             cx.refresh_windows();
         });

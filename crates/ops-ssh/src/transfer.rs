@@ -81,9 +81,9 @@ fn resolve_remote_path_template(
     for cap in re.captures_iter(path_template) {
         let full_match = cap.get(0).unwrap().as_str();
         let parent = cap.get(1).unwrap().as_str();
-        match resolve_firstdir(pool, host_id, config, parent, timeout_secs) {
-            Ok(dir_name) => result = result.replace(full_match, &dir_name),
-            Err(e) => return Err(e),
+        {
+            let dir_name = resolve_firstdir(pool, host_id, config, parent, timeout_secs)?;
+            result = result.replace(full_match, &dir_name)
         }
     }
 
@@ -289,8 +289,7 @@ pub fn file_transfer(
                                 error: Some(format!("路径解析失败: {}", e)),
                             };
                             records.push(record.clone());
-                            let _ =
-                                app.emit(&format!("transfer:{}:progress", task_id_clone), &record);
+                            app.emit(&format!("transfer:{}:progress", task_id_clone), &record);
                             continue;
                         }
                     }
@@ -318,10 +317,10 @@ pub fn file_transfer(
                 error,
             };
             records.push(record.clone());
-            let _ = app.emit(&format!("transfer:{}:progress", task_id_clone), &record);
+            app.emit(&format!("transfer:{}:progress", task_id_clone), &record);
         }
 
-        let _ = app.emit(
+        app.emit(
             &format!("transfer:{}:done", task_id_clone),
             serde_json::json!({
                 "direction": direction,

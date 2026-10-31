@@ -81,7 +81,7 @@ pub fn init(cx: &mut App) {
             std::env::consts::ARCH.to_string(),
         ),
         download_dir: dir,
-        opener: Arc::new(|p| ops_core::update::open_installer(p)),
+        opener: Arc::new(ops_core::update::open_installer),
     });
     cx.set_global(UpdateHandle(store));
 }

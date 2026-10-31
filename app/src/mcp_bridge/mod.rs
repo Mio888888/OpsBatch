@@ -86,7 +86,7 @@ pub fn init(cx: &mut App) {
     });
     cx.spawn(async move |cx| {
         while let Ok(call) = rx.recv_async().await {
-            let _ = cx.update(|cx| dispatch(call, cx));
+            cx.update(|cx| dispatch(call, cx));
         }
     })
     .detach();
@@ -96,7 +96,7 @@ pub fn init(cx: &mut App) {
         cx.background_executor()
             .timer(Duration::from_secs(30))
             .await;
-        let _ = watched.update(cx, |b, cx| b.check_idle(cx));
+        watched.update(cx, |b, cx| b.check_idle(cx));
     })
     .detach();
 }
@@ -748,7 +748,7 @@ async fn execute(
             Ok(Decision::Approve) => {}
             Ok(Decision::AlwaysAllow) => {
                 let command = command.clone();
-                let _ = cx.update(|cx| {
+                cx.update(|cx| {
                     let patterns = ops_ai::prefs::safety::always_allow_patterns(&command);
                     prefs_store::shared(cx).update(cx, |s, cx| {
                         s.update(cx, |p| {

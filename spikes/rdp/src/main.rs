@@ -66,7 +66,7 @@ fn main() -> anyhow_free::Result<()> {
             let t = Instant::now();
             // write_rgba8 gives RGBA; swap R/B to BGRA like gpui's RenderImage expects.
             yuv.write_rgba8(&mut bgra);
-            for px in bgra.chunks_exact_mut(4) {
+            for px in bgra.as_chunks_mut::<4>().0 {
                 px.swap(0, 2);
             }
             conv_ns += t.elapsed().as_nanos();

@@ -180,12 +180,7 @@ impl AsciinemaPlayer {
     }
 
     pub fn play(&mut self, cx: &mut Context<Self>) {
-        if self
-            .recording
-            .as_ref()
-            .map_or(true, |r| r.events.is_empty())
-            || self.playing
-        {
+        if self.recording.as_ref().is_none_or(|r| r.events.is_empty()) || self.playing {
             return;
         }
         self.playing = true;

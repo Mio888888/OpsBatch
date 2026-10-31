@@ -25,7 +25,7 @@ pub fn log_store(cx: &App) -> Entity<LogStore> {
 }
 
 pub fn init(cx: &mut App) {
-    let store = cx.new(|cx| LogStore::new(cx));
+    let store = cx.new(LogStore::new);
     cx.set_global(LogHandle(store));
 }
 

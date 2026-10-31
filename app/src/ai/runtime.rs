@@ -23,7 +23,7 @@ pub fn init(cx: &mut App) {
     cx.spawn(async move |cx| {
         let loaded = ops_core::rt::run(async move { ops_ai::prefs::runtime_limits(&ctx.db) }).await;
         if let Ok(limits) = loaded {
-            let _ = cx.update(|cx| set(cx, limits));
+            cx.update(|cx| set(cx, limits));
         }
     })
     .detach();

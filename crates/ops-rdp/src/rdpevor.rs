@@ -434,7 +434,6 @@ fn parse_video_data(payload: &[u8]) -> Result<VideoDataPacket, String> {
 #[cfg(test)]
 mod tests {
     use ironrdp::core::encode_vec;
-    use ironrdp::dvc::DvcProcessor as _;
 
     use super::*;
     use crate::types::RdpEncodedVideoCodec;

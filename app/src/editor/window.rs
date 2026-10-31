@@ -52,11 +52,7 @@ impl EditorWindow {
     /// Open (or focus) the editor window for a remote file or directory.
     pub fn open(host_id: &str, dir: bool, path: &str, cx: &mut App) {
         let label = window_label(host_id, dir, path);
-        let title = if dir {
-            base_name(path)
-        } else {
-            base_name(path)
-        };
+        let title = base_name(path);
         let options = window::window_options(
             WindowKind::Editor,
             &format!("{title} - {}", t!("editor.remoteEdit")),

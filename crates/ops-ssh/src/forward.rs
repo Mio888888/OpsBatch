@@ -81,6 +81,12 @@ pub struct ForwardManager {
     latest: DashMap<String, ForwardEntry>,
 }
 
+impl Default for ForwardManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ForwardManager {
     pub fn new() -> Self {
         Self {
@@ -160,7 +166,7 @@ fn parse_addr(addr: &str) -> (String, u16) {
 
 fn emit_status(app: &Arc<Ctx>, host_id: &str, entry: ForwardEntry) {
     app.forwards.latest.insert(entry.id.clone(), entry.clone());
-    let _ = app.emit(&format!("forward-status:{}", host_id), entry);
+    app.emit(&format!("forward-status:{}", host_id), entry);
 }
 
 // ---------------------------------------------------------------------------
@@ -207,7 +213,7 @@ async fn relay_pair(
         }
     }
 
-    let _ = app.emit(
+    app.emit(
         &format!("forward-stats:{}", host_id),
         serde_json::json!({
             "id": forward_id, "bytesSent": sent, "bytesReceived": received,
@@ -667,7 +673,7 @@ pub fn forward_add(
     config: ForwardConfig,
 ) -> Result<ForwardEntry, String> {
     let forward_id = uuid::Uuid::new_v4().to_string();
-    let ssh_config = load_host_config(&db, &host_id)?;
+    let ssh_config = load_host_config(db, &host_id)?;
     let shared_conn = pool.get_shared_connection(&host_id, &ssh_config, 10)?;
 
     let (cmd_tx, task_handle) = match config.forward_type {

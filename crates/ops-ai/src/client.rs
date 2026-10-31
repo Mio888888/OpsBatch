@@ -190,7 +190,7 @@ fn load_ai_config(db: &Database) -> Result<AiConfig, String> {
 }
 
 pub async fn get_ai_config(db: &Database) -> Result<AiConfig, String> {
-    let config = load_ai_config(&db)?;
+    let config = load_ai_config(db)?;
     // Mask API key for frontend display
     let masked = if config.api_key.len() > 8 {
         let k = &config.api_key;
@@ -222,7 +222,7 @@ pub fn save_ai_config_blocking(db: &Database, config: AiConfig) -> Result<(), St
         String::new()
     } else if config.api_key.contains("****") || config.api_key == SECRET_PLACEHOLDER {
         // User didn't change the key — reload the existing one
-        let existing = load_ai_config_raw(&db)?;
+        let existing = load_ai_config_raw(db)?;
         if existing.api_key.contains("****") || existing.api_key.is_empty() {
             return Err("无法读取现有 API Key，请重新输入".to_string());
         }
@@ -683,7 +683,7 @@ fn load_enabled_danger_patterns(db: &Database) -> Result<Vec<String>, String> {
 }
 
 pub fn ai_assess_action(db: &Database, command: String) -> Result<AiActionAssessment, String> {
-    let custom_patterns = load_enabled_danger_patterns(&db)?;
+    let custom_patterns = load_enabled_danger_patterns(db)?;
     let assessment = assess_ai_action(&command, &custom_patterns);
     Ok(apply_prefs_policy(
         assessment,
@@ -855,7 +855,7 @@ fn send_chat_request(
 // ---------------------------------------------------------------------------
 
 pub async fn ai_chat(db: &Database, request: ChatRequest) -> Result<ChatResponse, String> {
-    let config = load_ai_config(&db)?;
+    let config = load_ai_config(db)?;
     // one-shot requests get their own placeholder map, dropped with the answer
     let mut redactor =
         crate::prefs::privacy::Redactor::new(&crate::prefs::runtime_limits(db).privacy);
@@ -956,7 +956,7 @@ pub async fn ai_chat_stream(
     db: &Database,
     request: StreamChatRequest,
 ) -> Result<serde_json::Value, String> {
-    let config = load_ai_config(&db)?;
+    let config = load_ai_config(db)?;
     if !config.enabled || (config.provider != "ollama" && config.api_key.trim().is_empty()) {
         return Err("AI功能未启用或API Key未配置".to_string());
     }
@@ -1367,7 +1367,7 @@ pub fn ai_generate_script(
         language, description
     );
 
-    let config = load_ai_config(&db)?;
+    let config = load_ai_config(db)?;
     let opts = crate::prefs::request_options(db);
     let result = send_chat_request(
         &config,
@@ -1397,7 +1397,7 @@ pub fn ai_analyze_results(
         command, results_json
     );
 
-    let config = load_ai_config(&db)?;
+    let config = load_ai_config(db)?;
     let opts = crate::prefs::request_options(db);
     let result = send_chat_request(
         &config,
@@ -1427,7 +1427,7 @@ pub fn ai_diagnose_error(
         command, error_output
     );
 
-    let config = load_ai_config(&db)?;
+    let config = load_ai_config(db)?;
     let opts = crate::prefs::request_options(db);
     let result = send_chat_request(
         &config,
@@ -1460,7 +1460,7 @@ pub fn ai_risk_assessment(db: &Database, command: String) -> Result<String, Stri
         command
     );
 
-    let config = load_ai_config(&db)?;
+    let config = load_ai_config(db)?;
     let opts = crate::prefs::request_options(db);
     let result = send_chat_request(
         &config,
@@ -1496,7 +1496,7 @@ pub async fn ai_list_models(
     api_key: Option<String>,
     provider: Option<String>,
 ) -> Result<Vec<ModelInfo>, String> {
-    let config = load_ai_config(&db)?;
+    let config = load_ai_config(db)?;
 
     let url_base = api_url
         .as_deref()

@@ -28,8 +28,6 @@ use crate::terminal::pane::TerminalPane;
 use ops_ai::prefs::quick::{self, SlashItem, SlashKind};
 use ops_ai::prefs::user_skills::{self, UserSkill};
 
-/// A terminal command started from the AI may run this long before it is reported as timed out.
-
 /// What the panel is currently attached to: the active terminal tab.
 #[derive(Clone)]
 pub struct AiTarget {

@@ -110,7 +110,7 @@ fn running_bridge_seeded(
     });
     std::thread::sleep(Duration::from_millis(600));
     cx.run_until_parked();
-    let store = cx.update(|cx| prefs_store::shared(cx));
+    let store = cx.update(prefs_store::shared);
     wait_until(cx, "preferences loaded", |cx| {
         store.read_with(cx, |s, _| s.loaded())
     });
@@ -370,7 +370,7 @@ fn confirm_mode_waits_for_the_window_and_honours_the_decision(cx: &mut TestAppCo
     let id = cx.update(|cx| activity.read(cx).pending()[0].id.clone());
     cx.update(|cx| activity.update(cx, |a, cx| a.decide(&id, Decision::AlwaysAllow, cx)));
     assert!(text_of(&wait_reply(cx, &reply).1).contains("grant-mark"));
-    let store = cx.update(|cx| prefs_store::shared(cx));
+    let store = cx.update(prefs_store::shared);
     let grants = store.read_with(cx, |s, _| s.prefs().permission_grants.clone());
     assert_eq!(
         (
@@ -418,7 +418,7 @@ fn observer_mode_and_the_blocklist_refuse_without_asking(cx: &mut TestAppContext
     assert_eq!(wait_reply(cx, &read).1["result"]["isError"], false);
 
     // auto mode still refuses what the blocklist names
-    let store = cx.update(|cx| prefs_store::shared(cx));
+    let store = cx.update(prefs_store::shared);
     cx.update(|cx| {
         store.update(cx, |s, cx| {
             s.update(cx, |p| p.global_permission_mode = PermissionMode::Auto)
@@ -452,7 +452,7 @@ fn observer_mode_and_the_blocklist_refuse_without_asking(cx: &mut TestAppContext
 fn the_server_follows_the_settings_and_keeps_a_discovery_file(cx: &mut TestAppContext) {
     let _s = serial();
     let (fx, port) = running_bridge(cx, PermissionMode::Auto);
-    let store = cx.update(|cx| prefs_store::shared(cx));
+    let store = cx.update(prefs_store::shared);
     let b = cx.update(|cx| bridge(cx));
     let discovery = ops_ai::mcp_bridge::default_discovery_path(&fx.ctx.core.data_dir);
     assert_eq!(
@@ -564,7 +564,7 @@ fn the_real_stdio_launcher_talks_to_the_running_app(cx: &mut TestAppContext) {
         .any(|r| r.summary == "echo stdio-mark-3")));
 
     // with External MCP switched off the launcher explains instead of hanging
-    let store = cx.update(|cx| prefs_store::shared(cx));
+    let store = cx.update(prefs_store::shared);
     cx.update(|cx| store.update(cx, |s, cx| s.update(cx, |p| p.external_mcp.enabled = false)));
     cx.run_until_parked();
     say(json!({"jsonrpc": "2.0", "id": 4, "method": "ping"}));
@@ -780,7 +780,7 @@ fn sftp_forward_and_host_tools_work_against_a_real_server(cx: &mut TestAppContex
     let id = cx.update(|cx| activity.read(cx).pending()[0].id.clone());
     cx.update(|cx| activity.update(cx, |a, cx| a.decide(&id, Decision::AlwaysAllow, cx)));
     assert_eq!(wait_reply(cx, &reply).1["result"]["isError"], false);
-    let store = cx.update(|cx| prefs_store::shared(cx));
+    let store = cx.update(prefs_store::shared);
     assert_eq!(
         store.read_with(cx, |s, _| s
             .prefs()
@@ -1082,7 +1082,7 @@ fn transfers_permissions_forward_changes_and_vault_writes_work_against_a_real_se
     });
     cx.run_until_parked();
     let activity = act(cx);
-    let store = cx.update(|cx| prefs_store::shared(cx));
+    let store = cx.update(prefs_store::shared);
     let set_mode = |cx: &mut TestAppContext, mode: PermissionMode| {
         cx.update(|cx| {
             store.update(cx, |s, cx| {
@@ -1919,7 +1919,7 @@ fn library_scripts_run_on_hosts_and_the_run_can_be_followed_and_stopped(cx: &mut
         .id;
     });
     let activity = act(cx);
-    let store = cx.update(|cx| prefs_store::shared(cx));
+    let store = cx.update(prefs_store::shared);
     let set_mode = |cx: &mut TestAppContext, mode: PermissionMode| {
         cx.update(|cx| {
             store.update(cx, |s, cx| {

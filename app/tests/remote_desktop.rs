@@ -575,7 +575,7 @@ fn vnc_pointer_moves_go_out_at_once_and_only_changed_tiles_are_rebuilt(cx: &mut 
     let mut sent = Vec::new();
     wait_until(cx, "moves reach the server", |_| {
         sent.extend(drain(&mock.received));
-        pointer_buttons(&sent).len() >= 1
+        !pointer_buttons(&sent).is_empty()
     });
     let positions = |bytes: &[u8]| {
         let (mut at, mut out) = (0, Vec::new());

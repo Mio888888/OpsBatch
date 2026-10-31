@@ -513,8 +513,7 @@ fn rdp_connector_refuses_a_shared_folder_that_does_not_exist() {
         Some(std::env::temp_dir().join(format!("opsbatch-rdp-missing-{}", uuid::Uuid::new_v4())));
     let config = build_ironrdp_config(&options, &test_rdp_credentials()).unwrap();
     let error = build_client_connector(config, "127.0.0.1:50000".parse().unwrap(), &options)
-        .err()
-        .expect("a missing folder stops the connection");
+        .expect_err("a missing folder stops the connection");
     assert!(error.contains("共享目录不可用"), "{error}");
 }
 

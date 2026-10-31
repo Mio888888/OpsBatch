@@ -489,7 +489,10 @@ impl<R: AsyncRead + Unpin> RfbReader<R> {
             let row = &mut self.fb.data[o..o + row_len];
             self.stream.read_exact(row).await?;
             // the fourth byte of a 32-bit pixel is padding
-            row.chunks_exact_mut(4).for_each(|px| px[3] = 255);
+            row.as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .for_each(|px| px[3] = 255);
         }
         Ok(())
     }
@@ -546,7 +549,9 @@ impl<R: AsyncRead + Unpin> RfbReader<R> {
                         for yy in y..(y + h).min(th) {
                             let o = origin + yy * stride + x * 4;
                             fb.data[o..o + ((x + w).min(tw) - x) * 4]
-                                .chunks_exact_mut(4)
+                                .as_chunks_mut::<4>()
+                                .0
+                                .iter_mut()
                                 .for_each(|px| px.copy_from_slice(&c));
                         }
                     };
@@ -558,7 +563,10 @@ impl<R: AsyncRead + Unpin> RfbReader<R> {
                         let o = origin + y * stride;
                         let row = &mut self.fb.data[o..o + tw * 4];
                         row.copy_from_slice(src);
-                        row.chunks_exact_mut(4).for_each(|px| px[3] = 255);
+                        row.as_chunks_mut::<4>()
+                            .0
+                            .iter_mut()
+                            .for_each(|px| px[3] = 255);
                     }
                 } else {
                     if sub & 2 != 0 {

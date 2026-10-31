@@ -104,7 +104,7 @@ impl LibraryStore {
         cx.spawn(async move |this, cx| {
             let result = ops_core::rt::run(fut).await.and_then(|r| r);
             if result.is_ok() {
-                let _ = this.update(cx, |this, cx| reload(this, cx));
+                let _ = this.update(cx, reload);
             }
             result
         })

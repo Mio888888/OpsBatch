@@ -340,7 +340,7 @@ impl Render for InlinePanel {
                     .when(rows.is_empty(), |d| d.child(empty_state(empty, cx)))
                     .children(
                         rows.into_iter()
-                            .filter(|r| self.category.as_deref().map_or(true, |c| r.category == c))
+                            .filter(|r| self.category.as_deref().is_none_or(|c| r.category == c))
                             .enumerate()
                             .map(|(ix, r)| {
                                 let (w_star, w_run) = (weak.clone(), weak.clone());
@@ -572,7 +572,7 @@ impl RunDialog {
     pub fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let values = self.values(cx);
         for p in &self.spec.params {
-            if p.required && values.get(&p.name).map_or(true, |v| v.trim().is_empty()) {
+            if p.required && values.get(&p.name).is_none_or(|v| v.trim().is_empty()) {
                 self.error = Some(t!("inlinePanel.paramRequired", name = p.name.clone()));
                 cx.notify();
                 return;

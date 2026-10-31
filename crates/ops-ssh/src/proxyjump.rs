@@ -211,7 +211,7 @@ fn build_topology(db: &Database) -> Result<TopologyGraph, String> {
     Ok((nodes, adjacency))
 }
 pub fn get_jump_topology(db: &Database) -> Result<JumpTopology, String> {
-    let (nodes, adjacency) = build_topology(&db)?;
+    let (nodes, adjacency) = build_topology(db)?;
 
     let mut edges = Vec::new();
     let mut seen = HashSet::new();
@@ -256,7 +256,7 @@ pub fn resolve_jump_chain(db: &Database, host_id: String) -> Result<Vec<String>,
     }
 
     // Try to find a path using the topology graph
-    let (_, adjacency) = build_topology(&db)?;
+    let (_, adjacency) = build_topology(db)?;
 
     // BFS from all directly reachable hosts (hosts with empty jump_chain, meaning client can reach them directly)
     let client_reachable = {

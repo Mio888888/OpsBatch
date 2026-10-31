@@ -185,7 +185,7 @@ pub fn execute_command(
         for (hid, host_name, config) in configs.into_iter() {
             if is_cancelled(&app, &task_id_arc) {
                 fail_count += 1;
-                let _ = app.emit(
+                app.emit(
                     &format!("exec:{}:output", task_id_arc),
                     serde_json::json!({
                         "hostId": hid,
@@ -231,13 +231,13 @@ pub fn execute_command(
             }
 
             let handle = std::thread::spawn(move || {
-                let _ = app_spawn.emit(&format!("exec:{}:start", task_id), &hid);
+                app_spawn.emit(&format!("exec:{}:start", task_id), &hid);
                 let pool = app_spawn.registry.clone();
 
                 match pool.execute(&hid, &config, &command, timeout) {
                     Ok(output) => {
                         let output = truncate_output_lossy(output);
-                        let _ = app_spawn.emit(
+                        app_spawn.emit(
                             &format!("exec:{}:output", task_id),
                             serde_json::json!({
                                 "hostId": hid,
@@ -252,7 +252,7 @@ pub fn execute_command(
                     }
                     Err(e) => {
                         let e = truncate_output_lossy(e);
-                        let _ = app_spawn.emit(
+                        app_spawn.emit(
                             &format!("exec:{}:output", task_id),
                             serde_json::json!({
                                 "hostId": hid,
@@ -348,7 +348,7 @@ pub fn execute_command(
             };
         }
 
-        let _ = app.emit(
+        app.emit(
             &format!("exec:{}:done", task_id_arc),
             serde_json::json!({
                 "successCount": success_count,

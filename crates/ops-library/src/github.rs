@@ -944,6 +944,7 @@ fn count_repo_items(conn: &rusqlite::Connection, table: &str, repo_id: &str) -> 
 // Import commands
 // ---------------------------------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 fn import_commands_recursive(
     conn: &rusqlite::Connection,
     repo_id: &str,

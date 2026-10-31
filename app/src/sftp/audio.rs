@@ -18,7 +18,7 @@ pub fn probe(bytes: &[u8]) -> Result<AudioInfo, String> {
     let decoder = Decoder::new(Cursor::new(bytes.to_vec())).map_err(|e| e.to_string())?;
     Ok(AudioInfo {
         duration: decoder.total_duration(),
-        sample_rate: u32::from(decoder.sample_rate().get()),
+        sample_rate: decoder.sample_rate().get(),
         channels: decoder.channels().get(),
     })
 }

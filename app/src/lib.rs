@@ -1,5 +1,8 @@
 //! OpsBatch GPUI application (library part so UI can be tested headlessly).
 
+// GPUI view builders take many parts and pass shared callbacks/handles around; splitting them only moves the noise.
+#![allow(clippy::too_many_arguments, clippy::type_complexity)]
+
 pub mod ai;
 pub mod ansi;
 pub mod app;

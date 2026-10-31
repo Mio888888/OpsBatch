@@ -163,7 +163,7 @@ fn main() {
                 y: ((1.0 - phase) * (h as f32 - 80.0)) as u16 + 20,
             });
         }
-        if t > 4.0 && tick % 80 == 0 {
+        if t > 4.0 && tick.is_multiple_of(80) {
             // Start menu: Win down/up, later Esc
             send(RdpInputEvent::KeyScancode {
                 code: 0x5B,

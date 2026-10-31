@@ -1121,9 +1121,7 @@ impl SftpPanel {
                                         if a.finished() {
                                             let _ = a.seek(Duration::ZERO);
                                         }
-                                        if a.is_paused() {
-                                            a.play()
-                                        } else if a.finished() {
+                                        if a.is_paused() || a.finished() {
                                             a.play()
                                         } else {
                                             a.pause()

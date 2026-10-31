@@ -26,6 +26,12 @@ pub struct SftpManager {
     sessions: DashMap<String, SftpSessionEntry>,
 }
 
+impl Default for SftpManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SftpManager {
     pub fn new() -> Self {
         Self {
@@ -431,14 +437,14 @@ pub fn sftp_mkdir(
     host_id: String,
     path: String,
 ) -> Result<(), String> {
-    let mkdir_result = attempt_sftp_mkdir(&db, &manager, &pool, &host_id, &path);
+    let mkdir_result = attempt_sftp_mkdir(db, manager, pool, &host_id, &path);
     if mkdir_result.is_ok() {
         return Ok(());
     }
 
     let first_error = mkdir_result.unwrap_err();
     drop(manager.sessions.remove(&host_id));
-    let retry_result = attempt_sftp_mkdir(&db, &manager, &pool, &host_id, &path);
+    let retry_result = attempt_sftp_mkdir(db, manager, pool, &host_id, &path);
     retry_result.map_err(|e| format!("{} (重试后仍失败: {})", first_error, e))
 }
 
@@ -565,7 +571,7 @@ fn upload_file_blocking(
         .ok_or("sftp session not found")?;
     let sftp = entry.sftp.lock().map_err(|e| e.to_string())?;
 
-    let _ = app.emit(
+    app.emit(
         &format!("sftp-transfer:{}:start", transfer_id),
         serde_json::json!({ "fileSize": file_size }),
     );
@@ -603,7 +609,7 @@ fn upload_file_blocking(
 
     match result {
         Ok(()) => {
-            let _ = app.emit(
+            app.emit(
                 &format!("sftp-transfer:{}:done", transfer_id),
                 serde_json::json!({
                     "success": true,
@@ -614,7 +620,7 @@ fn upload_file_blocking(
             Ok(())
         }
         Err(e) => {
-            let _ = app.emit(
+            app.emit(
                 &format!("sftp-transfer:{}:done", transfer_id),
                 serde_json::json!({ "success": false, "error": e.to_string() }),
             );
@@ -672,7 +678,7 @@ fn download_file_blocking(
         fs::create_dir_all(parent).map_err(|e| format!("create local parent: {}", e))?;
     }
 
-    let _ = app.emit(
+    app.emit(
         &format!("sftp-transfer:{}:start", transfer_id),
         serde_json::json!({ "fileSize": file_size }),
     );
@@ -710,7 +716,7 @@ fn download_file_blocking(
 
     match result {
         Ok(()) => {
-            let _ = app.emit(
+            app.emit(
                 &format!("sftp-transfer:{}:done", transfer_id),
                 serde_json::json!({
                     "success": true,
@@ -721,7 +727,7 @@ fn download_file_blocking(
             Ok(())
         }
         Err(e) => {
-            let _ = app.emit(
+            app.emit(
                 &format!("sftp-transfer:{}:done", transfer_id),
                 serde_json::json!({ "success": false, "error": e.to_string() }),
             );
@@ -819,7 +825,7 @@ pub fn sftp_extract_archive(
         _ => return Err(format!("不支持的压缩格式: .{}", ext)),
     };
 
-    let config = load_host_config(&db, &pool, &host_id)?;
+    let config = load_host_config(db, pool, &host_id)?;
     let output = pool.execute(&host_id, &config, &command, 60)?;
     Ok(output)
 }
@@ -981,7 +987,7 @@ pub fn sftp_write_file(
         data.len()
     );
 
-    let write_result = attempt_sftp_write(&db, &manager, &pool, &host_id, &path, &data);
+    let write_result = attempt_sftp_write(db, manager, pool, &host_id, &path, &data);
     if write_result.is_ok() {
         eprintln!("[SFTP] write_file OK host={} path={}", host_id, path);
         return Ok(());
@@ -991,7 +997,7 @@ pub fn sftp_write_file(
     eprintln!("[SFTP] Write failed, reconnecting: {}", first_error);
     drop(manager.sessions.remove(&host_id));
 
-    let retry_result = attempt_sftp_write(&db, &manager, &pool, &host_id, &path, &data);
+    let retry_result = attempt_sftp_write(db, manager, pool, &host_id, &path, &data);
     if retry_result.is_ok() {
         eprintln!("[SFTP] write_file retry OK host={} path={}", host_id, path);
     } else {

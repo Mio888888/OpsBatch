@@ -165,22 +165,20 @@ impl<S: AsyncRead + AsyncWrite + Unpin> RfbClient<S> {
             other => bail!("unsupported security type {other}"),
         }
         // SecurityResult is sent for every type in 3.8, and for non-None types in 3.3/3.7.
-        if cn == 8 || sec != SEC_NONE {
-            if s.read_u32().await? != 0 {
-                let reason = if cn == 8 {
-                    read_reason(&mut s).await.unwrap_or_default()
-                } else {
+        if (cn == 8 || sec != SEC_NONE) && s.read_u32().await? != 0 {
+            let reason = if cn == 8 {
+                read_reason(&mut s).await.unwrap_or_default()
+            } else {
+                String::new()
+            };
+            bail!(
+                "authentication failed{}",
+                if reason.is_empty() {
                     String::new()
-                };
-                bail!(
-                    "authentication failed{}",
-                    if reason.is_empty() {
-                        String::new()
-                    } else {
-                        format!(": {reason}")
-                    }
-                );
-            }
+                } else {
+                    format!(": {reason}")
+                }
+            );
         }
 
         // --- init ---
@@ -341,7 +339,7 @@ impl<S: AsyncRead + AsyncWrite + Unpin> RfbClient<S> {
         for y in 0..r.h as usize {
             self.stream.read_exact(&mut row).await?;
             let o = ((r.y as usize + y) * self.fb.width as usize + r.x as usize) * 4;
-            for (i, px) in row.chunks_exact(4).enumerate() {
+            for (i, px) in row.as_chunks::<4>().0.iter().enumerate() {
                 self.fb.data[o + i * 4..o + i * 4 + 3].copy_from_slice(&px[..3]);
                 self.fb.data[o + i * 4 + 3] = 255;
             }

@@ -58,6 +58,12 @@ pub struct McpManager {
     request_id: Mutex<u64>,
 }
 
+impl Default for McpManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl McpManager {
     pub fn new() -> Self {
         Self {

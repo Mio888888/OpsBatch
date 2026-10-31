@@ -197,8 +197,8 @@ impl SafetyTab {
             Field::MaxIterations => *n > 0,
             _ => true,
         });
-        match parsed {
-            Some(n) => self.store.update(cx, |s, cx| {
+        if let Some(n) = parsed {
+            self.store.update(cx, |s, cx| {
                 s.update(cx, |p| match field {
                     Field::ResponseIdle => {
                         p.response_idle_timeout = safety::normalize_response_idle_timeout(n)
@@ -208,8 +208,7 @@ impl SafetyTab {
                     }
                     Field::MaxIterations => p.max_iterations = safety::normalize_max_iterations(n),
                 })
-            }),
-            None => {}
+            })
         }
         // show what was actually stored (clamped, or the old value after invalid input)
         let prefs = self.store.read(cx).prefs().clone();

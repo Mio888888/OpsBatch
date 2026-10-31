@@ -17,8 +17,8 @@ pub fn vnc_auth_response(password: &str, challenge: &[u8; 16]) -> [u8; 16] {
     }
     let cipher = des::Des::new(GenericArray::from_slice(&key));
     let mut out = *challenge;
-    for chunk in out.chunks_exact_mut(8) {
-        cipher.encrypt_block(GenericArray::from_mut_slice(chunk));
+    for chunk in out.as_chunks_mut::<8>().0 {
+        cipher.encrypt_block(GenericArray::from_mut_slice(chunk.as_mut_slice()));
     }
     out
 }
@@ -72,8 +72,8 @@ pub fn ard_client_response(
     fill_field(&mut creds[..64], username);
     fill_field(&mut creds[64..], password);
     let cipher = aes::Aes128::new(GenericArray::from_slice(&aes_key));
-    for block in creds.chunks_exact_mut(16) {
-        cipher.encrypt_block(GenericArray::from_mut_slice(block));
+    for block in creds.as_chunks_mut::<16>().0 {
+        cipher.encrypt_block(GenericArray::from_mut_slice(block.as_mut_slice()));
     }
     Ok((creds.to_vec(), client_public))
 }
@@ -94,8 +94,8 @@ pub fn ard_server_decrypt(
     let aes_key: [u8; 16] = Md5::digest(&shared).into();
     let cipher = aes::Aes128::new(GenericArray::from_slice(&aes_key));
     let mut buf = encrypted.to_vec();
-    for block in buf.chunks_exact_mut(16) {
-        cipher.decrypt_block(GenericArray::from_mut_slice(block));
+    for block in buf.as_chunks_mut::<16>().0 {
+        cipher.decrypt_block(GenericArray::from_mut_slice(block.as_mut_slice()));
     }
     let cstr = |b: &[u8]| {
         let end = b.iter().position(|&c| c == 0).unwrap_or(b.len());

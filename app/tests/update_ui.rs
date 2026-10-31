@@ -105,7 +105,10 @@ fn update_available_shows_dot_downloads_verifies_and_hands_over_the_installer(
     });
     let path = cx.update(|cx| store.read(cx).installer.clone().unwrap());
     assert_eq!(std::fs::read(&path).unwrap(), payload());
-    assert_eq!(opened.lock().unwrap().as_slice(), [path.clone()]);
+    assert_eq!(
+        opened.lock().unwrap().as_slice(),
+        std::slice::from_ref(&path)
+    );
     cx.update(|cx| {
         let s = store.read(cx);
         assert_eq!(
@@ -202,7 +205,7 @@ fn up_to_date_and_failed_checks_report_to_the_user(cx: &mut TestAppContext) {
     // unreachable mirror: loud for manual checks
     let _opened = configure(cx, "http://127.0.0.1:9", "0.1.0", &dir);
     cx.update(|cx| store.update(cx, |s, cx| s.check(false, cx)));
-    wait_until(cx, "check failed", |cx| {
+    wait_until(cx, "check failed", |_cx| {
         events
             .lock()
             .unwrap()

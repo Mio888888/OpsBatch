@@ -638,14 +638,7 @@ impl Element for TerminalElement {
                     seg.text.into(),
                     fs,
                     &[seg.run],
-                    Some(
-                        m.cell_w
-                            * if seg.width_cols > 1 && seg.col + seg.width_cols <= n_cols {
-                                1.0
-                            } else {
-                                1.0
-                            },
-                    ),
+                    Some(m.cell_w),
                 );
                 let origin = point(
                     bounds.origin.x + m.cell_w * seg.col as f32,
@@ -699,7 +692,7 @@ fn main() {
             if let (Some(n), Some(v)) = (scroll_up, view_handle.clone()) {
                 cx.spawn(async move |cx| {
                     cx.background_executor().timer(Duration::from_secs(4)).await;
-                    let _ = cx.update(|cx| {
+                    cx.update(|cx| {
                         v.update(cx, |v, cx| {
                             v.term.scroll_display(Scroll::Delta(n));
                             cx.notify();
@@ -713,7 +706,7 @@ fn main() {
                     cx.background_executor()
                         .timer(Duration::from_secs(secs))
                         .await;
-                    let _ = cx.update(|cx| {
+                    cx.update(|cx| {
                         let v = v.read(cx);
                         let secs = match (v.first_byte_at, v.last_byte_at) {
                             (Some(a), Some(b)) => (b - a).as_secs_f64(),

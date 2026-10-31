@@ -244,7 +244,7 @@ fn settings_navigation_and_general_section_persist_clamped_values(cx: &mut TestA
     })
     .unwrap();
     wait_until(cx, "stored", |_| {
-        stored(&fx).get("defaultConcurrency").is_some()
+        stored(&fx).contains_key("defaultConcurrency")
     });
     let map = stored(&fx);
     assert_eq!(map["defaultConcurrency"], "100");

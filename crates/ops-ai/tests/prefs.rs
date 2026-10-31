@@ -1,5 +1,8 @@
 //! AI preferences against a real (temporary) database and local mock servers.
 
+// The lock serialises the tests that share one database directory, so it is held for the whole test on purpose.
+#![allow(clippy::await_holding_lock, clippy::field_reassign_with_default)]
+
 use ops_ai::client::{
     ai_assess_action, apply_prefs_policy, get_ai_config, save_ai_config, AiActionDecision, AiConfig,
 };
@@ -523,6 +526,7 @@ async fn echo_model() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>)
     let url = format!("http://{}/v1", listener.local_addr().unwrap());
     let bodies = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let log = bodies.clone();
+    let ip_token = regex::Regex::new(r"\[OB_IP_\d+\]").unwrap();
     tokio::spawn(async move {
         loop {
             let Ok((mut sock, _)) = listener.accept().await else {
@@ -544,8 +548,7 @@ async fn echo_model() -> (String, std::sync::Arc<std::sync::Mutex<Vec<String>>>)
                 .map(|(_, b)| b.to_string())
                 .unwrap_or_default();
             log.lock().unwrap().push(body.clone());
-            let token = regex::Regex::new(r"\[OB_IP_\d+\]")
-                .unwrap()
+            let token = ip_token
                 .find(&body)
                 .map(|m| m.as_str().to_string())
                 .unwrap_or_else(|| "NONE".into());

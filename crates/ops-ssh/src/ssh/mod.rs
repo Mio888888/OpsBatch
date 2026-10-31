@@ -844,6 +844,12 @@ pub struct SshConnectionRegistry {
     shared_runtime: Arc<Runtime>,
 }
 
+impl Default for SshConnectionRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SshConnectionRegistry {
     pub fn new() -> Self {
         Self {

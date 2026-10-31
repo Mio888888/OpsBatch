@@ -11,6 +11,12 @@ pub struct LocalFsManager {
     roots: DashMap<String, PathBuf>,
 }
 
+impl Default for LocalFsManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LocalFsManager {
     pub fn new() -> Self {
         Self {

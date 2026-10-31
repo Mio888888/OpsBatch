@@ -26,7 +26,6 @@ impl PerfMonitor {
         let task = cx.spawn(async move |this, cx| loop {
             let snapshot = ops_core::rt::run(ops_core::system::get_local_performance_snapshot())
                 .await
-                .map_err(|e| e)
                 .and_then(|r| r);
             let alive = this
                 .update(cx, |this, cx| {

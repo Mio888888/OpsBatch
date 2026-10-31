@@ -307,6 +307,7 @@ pub fn preset_models(p: &ProviderConfig) -> Vec<String> {
 }
 
 /// Clamps `contextWindow` like `sanitizeContextWindow`: positive whole tokens or nothing.
+#[allow(clippy::result_unit_err)]
 pub fn sanitize_context_window(value: &str) -> Result<Option<u64>, ()> {
     let v = value.trim();
     if v.is_empty() {

@@ -1,30 +1,80 @@
 name: Release
 
-# Push a tag v<version> (the version in Cargo.toml) or run the workflow by hand to build installers for every
-# platform and publish them with a SHA256SUMS file. The in-app updater (crates/ops-core/src/update.rs) looks for
-# exactly these asset names:
-#   OpsBatch-<version>-macos-<aarch64|x86_64>.dmg
-#   OpsBatch-<version>-windows-<x86_64|aarch64>-setup.exe
-#   OpsBatch-<version>-linux-<x86_64|aarch64>.AppImage
-#   SHA256SUMS
+# Builds the installers for every platform. Nothing is published unless asked for:
+#
+#   push to 1.0 / main      builds and signs everything and keeps it as workflow artifacts (checks that releases work)
+#   push of a tag v<ver>    builds, signs and PUBLISHES the release (the tag must equal the version in Cargo.toml)
+#   run by hand + publish   the same, from the branch picked in "Run workflow"
+#
+# A release serves two updaters, which is what lets installed Tauri builds of OpsBatch move to this version:
+#   * the Tauri updater of the original app reads latest.json from releases/latest/download and installs
+#     OpsBatch-<ver>-macos-<arch>.app.tar.gz / -windows-x86_64-setup.exe / -linux-x86_64.AppImage after checking their .sig
+#   * the in-app updater of this build (crates/ops-core/src/update.rs) downloads OpsBatch-<ver>-<os>-<arch>.<dmg|setup.exe|AppImage>,
+#     SHA256SUMS and the .sig of the installer
+# Both verify the same minisign key, so the Tauri updater key secrets are reused (same names as the original repo):
+#   TAURI_UPDATER_PUBKEY, TAURI_UPDATER_PRIVATE_KEY, TAURI_UPDATER_PRIVATE_KEY_PASSWORD
+# The public key is compiled into the app as OPSBATCH_UPDATER_PUBKEY.
+#
+# To release: raise `version` in Cargo.toml (the Tauri updater only offers a version higher than the installed one),
+# merge, and push the tag v<version>.
 
 on:
   push:
+    branches: ["1.0", main]
     tags: ["v*"]
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Tag to publish (e.g. v0.1.0); builds only when empty"
-        required: false
+      publish:
+        description: "Publish v<version from Cargo.toml> as the latest release (needs the updater secrets)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') && !inputs.publish }}
+
 env:
-  # Switch to "real-vault" once the encrypted vault ships (TASKS M1-05); release builds without it are not production-ready.
-  OPSBATCH_FEATURES: ""
+  # Production builds keep the encrypted vault in the system keystore and the Tauri build's data directory.
+  OPSBATCH_FEATURES: real-vault
+  OPSBATCH_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY }}
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_UPDATER_PRIVATE_KEY_PASSWORD }}
 
 jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      tag: ${{ steps.plan.outputs.tag }}
+      publish: ${{ steps.plan.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: plan
+        env:
+          PUBLISH: ${{ startsWith(github.ref, 'refs/tags/v') || inputs.publish }}
+        run: |
+          set -eu
+          PUBLISH=${PUBLISH:-false}
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          tag="v$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
+          if [ "$PUBLISH" = true ]; then
+            if [ "${GITHUB_REF_TYPE}" = tag ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then
+              echo "::error::tag $GITHUB_REF_NAME does not match version $version in Cargo.toml (expected $tag)"
+              exit 1
+            fi
+            if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ] || [ -z "$OPSBATCH_UPDATER_PUBKEY" ]; then
+              echo "::error::publishing needs the TAURI_UPDATER_PUBKEY and TAURI_UPDATER_PRIVATE_KEY secrets: installed apps refuse unsigned updates"
+              exit 1
+            fi
+          fi
+          echo "building $tag, publish=$PUBLISH"
+
   test:
     runs-on: ubuntu-22.04
     steps:
@@ -39,14 +89,17 @@ jobs:
       - run: cargo test --workspace
 
   macos:
-    needs: test
+    needs: [plan, test]
     strategy:
+      fail-fast: false
       matrix:
         include:
           - runner: macos-14
             target: aarch64-apple-darwin
-          - runner: macos-13
+            arch: aarch64
+          - runner: macos-15-intel
             target: x86_64-apple-darwin
+            arch: x86_64
     runs-on: ${{ matrix.runner }}
     env:
       # secrets are not available to step-level `if`, so mirror the optional one into the job environment
@@ -57,6 +110,8 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
       - name: Import signing certificate
         if: ${{ env.MACOS_CERT_P12 != '' }}
         env:
@@ -69,7 +124,7 @@ jobs:
           security import cert.p12 -k build.keychain -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple: -s -k ci build.keychain
           rm cert.p12
-      - name: Build dmg
+      - name: Build app and dmg
         env:
           OPSBATCH_TARGET: ${{ matrix.target }}
           MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
@@ -77,14 +132,24 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: packaging/macos/build.sh
+      # The Tauri updater swaps the installed .app for the one inside this archive.
+      - name: Updater archive
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: COPYFILE_DISABLE=1 tar -C dist -czf "dist/OpsBatch-$VERSION-macos-${{ matrix.arch }}.app.tar.gz" OpsBatch.app
+      - name: Sign updates
+        run: scripts/sign-updates.sh dist/*.dmg dist/*.app.tar.gz
       - uses: actions/upload-artifact@v4
         with:
-          name: macos-${{ matrix.target }}
-          path: dist/*.dmg
+          name: macos-${{ matrix.arch }}
+          path: |
+            dist/*.dmg
+            dist/*.app.tar.gz
+            dist/*.sig
           if-no-files-found: error
 
   windows:
-    needs: test
+    needs: [plan, test]
     runs-on: windows-latest
     env:
       WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CODESIGN_CERT_BASE64 }}
@@ -105,14 +170,19 @@ jobs:
           WINDOWS_CODESIGN_CERT_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_CERT_PASSWORD }}
         shell: pwsh
         run: packaging/windows/build.ps1
+      - name: Sign updates
+        shell: bash
+        run: scripts/sign-updates.sh dist/*-setup.exe
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x86_64
-          path: dist/*-setup.exe
+          path: |
+            dist/*-setup.exe
+            dist/*.sig
           if-no-files-found: error
 
   linux:
-    needs: test
+    needs: [plan, test]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -122,7 +192,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
-            libxcb1-dev libvulkan-dev libasound2-dev libfontconfig1-dev libssl-dev libgtk-3-dev libxdo-dev libfuse2
+            libxcb1-dev libvulkan-dev libasound2-dev libfontconfig1-dev libssl-dev libgtk-3-dev libxdo-dev libfuse2 \
+            libdbus-1-dev pkg-config
       - name: Install appimagetool
         run: |
           curl -fsSL -o /usr/local/bin/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
@@ -131,29 +202,48 @@ jobs:
         run: packaging/linux/build.sh
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
+      - name: Sign updates
+        run: scripts/sign-updates.sh dist/*.AppImage
       - uses: actions/upload-artifact@v4
         with:
           name: linux-x86_64
           path: |
             dist/*.AppImage
             dist/*.deb
+            dist/*.sig
           if-no-files-found: error
 
   publish:
-    needs: [macos, windows, linux]
-    if: startsWith(github.ref, 'refs/tags/v') || inputs.tag != ''
+    needs: [plan, macos, windows, linux]
+    if: needs.plan.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ needs.plan.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-      - name: Checksums
-        run: scripts/checksums.sh dist
-      - name: Publish release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
+      - name: Checksums and manifest
         run: |
-          gh release create "$TAG" dist/* --title "OpsBatch $TAG" --generate-notes
+          set -eu
+          scripts/checksums.sh dist
+          scripts/latest-json.sh dist "$TAG" "$GITHUB_REPOSITORY"
+      # A release is created as a draft and published last, so releases/latest (and latest.json) never points at a
+      # release that is still missing assets. A published release that already has latest.json is never overwritten:
+      # raise the version instead.
+      - name: Publish release
+        run: |
+          set -eu
+          if gh release view "$TAG" --json isDraft,assets > release.json 2>/dev/null; then
+            if [ "$(jq -r .isDraft release.json)" = false ] && jq -e '.assets[] | select(.name == "latest.json")' release.json > /dev/null; then
+              echo "::error::release $TAG is already published; raise the version in Cargo.toml and tag again"
+              exit 1
+            fi
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --draft --target "$GITHUB_SHA" --title "OpsBatch $TAG" --generate-notes
+          fi
+          gh release edit "$TAG" --draft=false --latest

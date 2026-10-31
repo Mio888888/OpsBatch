@@ -602,6 +602,19 @@ fn call_plain(cx: &mut TestAppContext, port: u16, tool: &str, args: Value) -> Va
     wait_reply(cx, &reply).1
 }
 
+/// Permission bits of a file. The test that uses it needs a private sshd, which only exists on Unix machines (it is
+/// skipped elsewhere), but the file must still compile on Windows.
+#[cfg(unix)]
+fn mode_of(path: impl AsRef<std::path::Path>) -> u32 {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path).unwrap().permissions().mode() & 0o7777
+}
+
+#[cfg(not(unix))]
+fn mode_of(_: impl AsRef<std::path::Path>) -> u32 {
+    unreachable!("the sshd this test talks to only exists on Unix")
+}
+
 #[gpui_kit::test]
 fn sftp_forward_and_host_tools_work_against_a_real_server(cx: &mut TestAppContext) {
     let _s = serial();
@@ -1250,7 +1263,6 @@ fn transfers_permissions_forward_changes_and_vault_writes_work_against_a_real_se
     assert_eq!(v["result"]["isError"], true);
 
     // ---- permissions
-    use std::os::unix::fs::PermissionsExt;
     assert_eq!(
         call_plain(
             cx,
@@ -1260,10 +1272,7 @@ fn transfers_permissions_forward_changes_and_vault_writes_work_against_a_real_se
         )["result"]["isError"],
         false
     );
-    assert_eq!(
-        std::fs::metadata(&remote).unwrap().permissions().mode() & 0o7777,
-        0o600
-    );
+    assert_eq!(mode_of(&remote), 0o600);
     let v = call_plain(
         cx,
         port,
@@ -1291,10 +1300,7 @@ fn transfers_permissions_forward_changes_and_vault_writes_work_against_a_real_se
             text_of(&v)
         );
     }
-    assert_eq!(
-        std::fs::metadata(&remote).unwrap().permissions().mode() & 0o7777,
-        0o600
-    );
+    assert_eq!(mode_of(&remote), 0o600);
     set_mode(cx, PermissionMode::Auto);
 
     // ---- forward changes: update replaces, duplicate adds, delete removes; bad input leaves things alone

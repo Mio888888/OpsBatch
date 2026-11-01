@@ -501,9 +501,10 @@ fn sftp_dialogs_create_rename_delete_and_double_click_asks_for_the_editor(cx: &m
                 }),
             );
             panic!(
-                "created.txt never listed: on disk={} prompt busy={} dialog: {dialog} {state}",
+                "created.txt never listed: on disk={} prompt busy={} error={:?} dialog: {dialog} {state}",
                 work.join("created.txt").exists(),
-                cx.update(|cx| prompt.read(cx).busy())
+                cx.update(|cx| prompt.read(cx).busy()),
+                cx.update(|cx| prompt.read(cx).last_error().map(str::to_string))
             );
         }
         std::thread::sleep(std::time::Duration::from_millis(10));

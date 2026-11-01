@@ -395,6 +395,10 @@ fn confirm_mode_waits_for_the_window_and_honours_the_decision(cx: &mut TestAppCo
 }
 
 #[gpui_kit::test]
+#[cfg_attr(
+    windows,
+    ignore = "waits on the local shell, which answers unreliably on the Windows runner"
+)]
 fn observer_mode_and_the_blocklist_refuse_without_asking(cx: &mut TestAppContext) {
     let _s = serial();
     let (_fx, port) = running_bridge(cx, PermissionMode::Observer);

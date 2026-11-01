@@ -145,7 +145,7 @@ jobs:
         run: COPYFILE_DISABLE=1 tar -C dist -czf "dist/OpsBatch-$VERSION-macos-${{ matrix.arch }}.app.tar.gz" OpsBatch.app
       - name: Sign updates
         run: scripts/sign-updates.sh dist/*.dmg dist/*.app.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: macos-${{ matrix.arch }}
           path: |
@@ -182,7 +182,7 @@ jobs:
       - name: Sign updates
         shell: bash
         run: scripts/sign-updates.sh dist/*-setup.exe
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: windows-x86_64
           path: |
@@ -217,7 +217,7 @@ jobs:
           APPIMAGE_EXTRACT_AND_RUN: "1"
       - name: Sign updates
         run: scripts/sign-updates.sh dist/*.AppImage
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: linux-x86_64
           path: |

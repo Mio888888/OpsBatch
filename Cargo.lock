@@ -7182,7 +7182,7 @@ version = "1.0.0"
 dependencies = [
  "aes-gcm 0.10.3",
  "arboard",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "dashmap",
  "flume 0.11.1",
@@ -7220,7 +7220,7 @@ dependencies = [
 name = "ops-library"
 version = "1.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "git2",
  "hmac 0.12.1",
@@ -7269,7 +7269,7 @@ dependencies = [
 name = "ops-ssh"
 version = "1.0.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "chrono",
  "dashmap",
@@ -7340,7 +7340,7 @@ name = "opsbatch"
 version = "1.0.0"
 dependencies = [
  "alacritty_terminal",
- "base64 0.22.1",
+ "base64 0.23.1",
  "chrono",
  "env_logger",
  "flume 0.11.1",

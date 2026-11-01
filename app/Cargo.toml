@@ -42,7 +42,7 @@ futures.workspace = true
 uuid.workspace = true
 tokio.workspace = true
 regex = "1"
-base64 = "0.22"
+base64 = "0.23"
 chrono.workspace = true
 rodio = { version = "0.22", default-features = false, features = ["playback", "flac", "mp3", "mp4", "vorbis", "wav"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }

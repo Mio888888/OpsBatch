@@ -17,7 +17,7 @@ tokio.workspace = true
 futures.workspace = true
 flume.workspace = true
 rusqlite = { version = "0.31", features = ["bundled"] }
-reqwest = { version = "0.12", features = ["json", "blocking", "stream"] }
+reqwest = { version = "0.13", features = ["json", "blocking", "stream"] }
 futures-util = "0.3"
 regex = "1"
 fancy-regex = "0.20"

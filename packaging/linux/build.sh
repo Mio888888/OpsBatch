@@ -26,7 +26,63 @@ exec "$HERE/usr/bin/opsbatch" "$@"
 RUN
 chmod +x "$APPDIR/AppRun"
 
+# Libraries the AppImage leaves to the system: glibc and the loader (the binary needs the build host's glibc or newer
+# anyway), the GPU stack (it has to match the driver) and the X11 core, fontconfig and freetype (every desktop has them,
+# and a copy mixed with the system's configuration misbehaves). Everything else the binary links to travels along.
+is_system_lib() {
+  case "$1" in
+    linux-vdso.so.*|ld-linux*|libc.so.*|libm.so.*|libdl.so.*|libpthread.so.*|librt.so.*|libutil.so.*|libresolv.so.*) return 0 ;;
+    libanl.so.*|libnss_*|libgcc_s.so.*|libstdc++.so.*) return 0 ;;
+    libGL.so.*|libGLX.so.*|libGLdispatch.so.*|libEGL.so.*|libOpenGL.so.*|libGLESv2.so.*|libdrm.so.*|libgbm.so.*) return 0 ;;
+    libX11.so.*|libxcb.so.*|libXau.so.*|libXdmcp.so.*|libfontconfig.so.*|libfreetype.so.*) return 0 ;;
+  esac
+  return 1
+}
+
+# Copy the shared libraries the binary needs into $1/usr/lib and make the binary look there first. The binary is
+# patched with RPATH instead of the AppRun setting LD_LIBRARY_PATH, which every process started from the terminal
+# (ssh, the user's own programs) would inherit.
+bundle_libs() {
+  for tool in ldd patchelf ldconfig; do
+    command -v "$tool" >/dev/null 2>&1 || { echo "error: $tool is needed to bundle the libraries into the AppImage" >&2; exit 1; }
+  done
+  mkdir -p "$1/usr/lib"
+  libs="$(ldd "$1/usr/bin/opsbatch" | awk '$2 == "=>" && $3 ~ /^\// { print $3 }')"
+  # Loaded with dlopen at run time, so ldd does not list them.
+  for soname in libvulkan.so.1 libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1 libxkbcommon.so.0 libxkbcommon-x11.so.0; do
+    libs="$libs
+$(ldconfig -p | awk -v want="$soname" '$1 == want { print $NF; exit }')"
+  done
+  libs="$(echo "$libs" | sort -u)"
+  while read -r lib; do
+    [ -n "$lib" ] || continue
+    is_system_lib "$(basename "$lib")" && continue
+    cp -L "$lib" "$1/usr/lib/"
+  done <<EOF
+$libs
+EOF
+  patchelf --force-rpath --set-rpath '$ORIGIN/../lib' "$1/usr/bin/opsbatch"
+  # Every library the binary links to must now come from the AppDir or be one the system is expected to have.
+  problems=""
+  resolved="$(ldd "$1/usr/bin/opsbatch")"
+  while read -r name arrow path _; do
+    case "$name" in linux-vdso.so.*|/*|"") continue ;; esac
+    case "$path" in "$1"/*) continue ;; esac
+    is_system_lib "$name" && [ "$arrow" = "=>" ] && [ "$path" != "not" ] && continue
+    problems="$problems $name"
+  done <<EOF
+$resolved
+EOF
+  if [ -n "$problems" ]; then
+    echo "error: not bundled in the AppImage, and not provided by every system:$problems" >&2
+    exit 1
+  fi
+  echo "bundled $(ls "$1/usr/lib" | wc -l | tr -d ' ') libraries:" >&2
+  ls "$1/usr/lib" >&2
+}
+
 if command -v appimagetool >/dev/null 2>&1; then
+  bundle_libs "$APPDIR"
   ARCH="$ARCH" appimagetool "$APPDIR" "$DIST/OpsBatch-$VERSION-linux-$ARCH.AppImage"
   echo "$DIST/OpsBatch-$VERSION-linux-$ARCH.AppImage"
 else

@@ -7155,7 +7155,7 @@ dependencies = [
 
 [[package]]
 name = "ops-ai"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "chrono",
  "dashmap",
@@ -7176,7 +7176,7 @@ dependencies = [
 
 [[package]]
 name = "ops-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "aes-gcm 0.10.3",
  "arboard",
@@ -7208,7 +7208,7 @@ dependencies = [
 
 [[package]]
 name = "ops-i18n"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "serde_json",
  "sys-locale",
@@ -7216,7 +7216,7 @@ dependencies = [
 
 [[package]]
 name = "ops-library"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -7237,7 +7237,7 @@ dependencies = [
 
 [[package]]
 name = "ops-rdp"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "arboard",
  "bytes",
@@ -7265,7 +7265,7 @@ dependencies = [
 
 [[package]]
 name = "ops-ssh"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "base64 0.23.1",
  "bytes",
@@ -7293,7 +7293,7 @@ dependencies = [
 
 [[package]]
 name = "ops-terminal"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "ops-core",
  "regex",
@@ -7302,7 +7302,7 @@ dependencies = [
 
 [[package]]
 name = "ops-vnc"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "aes 0.8.4",
  "anyhow",
@@ -7322,7 +7322,7 @@ dependencies = [
 
 [[package]]
 name = "ops-workflow"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "chrono",
  "ops-core",
@@ -7335,7 +7335,7 @@ dependencies = [
 
 [[package]]
 name = "opsbatch"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "alacritty_terminal",
  "base64 0.23.1",
@@ -9933,7 +9933,7 @@ dependencies = [
 
 [[package]]
 name = "spike-editor"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "gpui-kit",
  "syntect",
@@ -9942,7 +9942,7 @@ dependencies = [
 
 [[package]]
 name = "spike-rdp"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "ironrdp",
  "ironrdp-dvc",
@@ -9956,7 +9956,7 @@ dependencies = [
 
 [[package]]
 name = "spike-rdp-gpu"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "flume 0.11.1",
  "gpui-kit",
@@ -9966,7 +9966,7 @@ dependencies = [
 
 [[package]]
 name = "spike-terminal"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "alacritty_terminal",
  "flume 0.11.1",
@@ -9977,7 +9977,7 @@ dependencies = [
 
 [[package]]
 name = "spike-vnc"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "aes 0.8.4",
  "anyhow",
@@ -9991,7 +9991,7 @@ dependencies = [
 
 [[package]]
 name = "spike-window"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "gpui-kit",
  "tray-icon",

@@ -463,14 +463,42 @@ fn sftp_dialogs_create_rename_delete_and_double_click_asks_for_the_editor(cx: &m
         assert_ne!(w.find("prompt-ok").disabled(), Some(true), "name entered");
         w.click("prompt-ok", cx);
     });
-    wait_until(cx, "file created", |cx| {
+    // On failure say what the panel and the disk looked like: this only ever failed on one CI image.
+    let listed = |cx: &mut TestAppContext| {
         cx.update(|cx| {
             st.read(cx)
                 .remote_entries
                 .iter()
                 .any(|e| e.name == "created.txt")
         })
-    });
+    };
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        cx.run_until_parked();
+        if listed(cx) {
+            break;
+        }
+        if std::time::Instant::now() > deadline {
+            let (state, dialog_open) = (
+                cx.update(|cx| {
+                    let s = st.read(cx);
+                    format!(
+                        "path={:?} loading={} error={:?} entries={:?}",
+                        s.remote_path,
+                        s.remote_loading,
+                        s.remote_error,
+                        s.remote_entries.iter().map(|e| &e.name).collect::<Vec<_>>()
+                    )
+                }),
+                win(cx, &fx, |w, _| w.try_find("text-prompt").is_some()),
+            );
+            panic!(
+                "created.txt never listed: on disk={} dialog still open={dialog_open} {state}",
+                work.join("created.txt").exists()
+            );
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
     assert!(work.join("created.txt").exists());
 
     // Rename dialog is prefilled with the old name.

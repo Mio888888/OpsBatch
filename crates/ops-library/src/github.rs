@@ -594,8 +594,12 @@ mod git_cli_tests {
         );
 
         assert!(result.errors.is_empty(), "{:?}", result.errors);
+        // item ids hash the path as the platform spells it, so the label keeps the platform's separator too
         assert_eq!(
-            vec!["script: shell/ecs-benchmark_cn.meta.json"],
+            vec![format!(
+                "script: shell{}ecs-benchmark_cn.meta.json",
+                std::path::MAIN_SEPARATOR
+            )],
             result.added
         );
 

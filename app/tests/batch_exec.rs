@@ -234,15 +234,21 @@ fn executes_on_selected_hosts_retries_failures_keeps_history_and_replays_recordi
         cx.executor()
             .advance_clock(std::time::Duration::from_millis(100));
         cx.run_until_parked();
-        if cx.update(|cx| player.read(cx).position() == player.read(cx).event_count()) {
+        if cx.update(|cx| {
+            let p = player.read(cx);
+            p.event_count() > 0 && p.position() == p.event_count()
+        }) {
             break;
         }
     }
     cx.update(|cx| {
+        let p = player.read(cx);
         assert_eq!(
-            player.read(cx).position(),
-            player.read(cx).event_count(),
-            "playback reached the end"
+            p.position(),
+            p.event_count(),
+            "playback reached the end (recordings: {}, output: {:?})",
+            p.recordings().len(),
+            p.output()
         )
     });
     cx.update(|cx| assert!(player.read(cx).output().contains("BX42")));

@@ -3518,7 +3518,7 @@ dependencies = [
  "tree-sitter-sequel",
  "tree-sitter-toml-ng",
  "tree-sitter-yaml",
- "two-face",
+ "two-face 0.4.5",
  "unicode-segmentation",
  "unicode-width",
  "uuid",
@@ -9937,7 +9937,7 @@ version = "1.0.1"
 dependencies = [
  "gpui-kit",
  "syntect",
- "two-face",
+ "two-face 0.5.2+bat-0.26.1",
 ]
 
 [[package]]
@@ -11315,6 +11315,17 @@ name = "two-face"
 version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39e51b6e60e545cfdae5a4639ff423818f52372211a8d9a3e892b4b0761f76b2"
+dependencies = [
+ "serde",
+ "serde_derive",
+ "syntect",
+]
+
+[[package]]
+name = "two-face"
+version = "0.5.2+bat-0.26.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "915be7adc2ff6f4338acbf71f3eda0a146f46003b992a1669c674308610efdac"
 dependencies = [
  "serde",
  "serde_derive",

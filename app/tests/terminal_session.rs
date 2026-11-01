@@ -33,6 +33,7 @@ fn type_line(cx: &mut TestAppContext, line: &str) {
 }
 
 #[gpui_kit::test]
+#[cfg_attr(windows, ignore = "types POSIX shell syntax into the local shell")]
 fn local_shell_tab_connects_and_runs_commands(cx: &mut TestAppContext) {
     let _s = serial();
     let _fx = common::setup(cx, |_| {});
@@ -52,6 +53,7 @@ fn local_shell_tab_connects_and_runs_commands(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+#[cfg_attr(windows, ignore = "types POSIX shell syntax into the local shell")]
 fn tracked_execute_command_returns_exit_code_and_clean_output(cx: &mut TestAppContext) {
     let _s = serial();
     let _fx = common::setup(cx, |_| {});
@@ -94,6 +96,7 @@ fn tracked_execute_command_returns_exit_code_and_clean_output(cx: &mut TestAppCo
 }
 
 #[gpui_kit::test]
+#[cfg_attr(windows, ignore = "types POSIX shell syntax into the local shell")]
 fn dangerous_command_is_blocked_until_confirmed(cx: &mut TestAppContext) {
     let _s = serial();
     let dir = std::env::temp_dir().join(format!("opsbatch-danger-{}", uuid::Uuid::new_v4()));
@@ -317,6 +320,7 @@ fn closing_tabs_by_mode_picks_the_right_neighbour(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+#[cfg_attr(windows, ignore = "types POSIX shell syntax into the local shell")]
 fn opsbatch_bg_runs_detached_and_reports_pid_and_log(cx: &mut TestAppContext) {
     let _s = serial();
     let _fx = common::setup(cx, |_| {});

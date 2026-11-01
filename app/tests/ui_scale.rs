@@ -17,6 +17,11 @@ fn fixed_pixel_widths_follow_the_interface_scale(cx: &mut TestAppContext) {
         .unwrap()
     };
     common::open_sidebar(cx, &fx, 0);
+    // Windows starts at 115%; the point here is how the width follows the setting
+    cx.update(|cx| {
+        opsbatch_app::scale::set_percent(100);
+        cx.refresh_windows();
+    });
     assert_eq!(width(cx, &fx), 380.0, "100%: the asset panel is 380px wide");
     cx.update(|cx| {
         opsbatch_app::scale::set_percent(125);

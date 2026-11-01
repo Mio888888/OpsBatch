@@ -243,8 +243,13 @@ fn settings_navigation_and_general_section_persist_clamped_values(cx: &mut TestA
         });
     })
     .unwrap();
+    // the keys are written one after the other, so wait for the last of them
     wait_until(cx, "stored", |_| {
-        stored(&fx).contains_key("defaultConcurrency")
+        let m = stored(&fx);
+        m.get("minimizeToTray").is_some_and(|v| v == "false")
+            && m.contains_key("defaultConcurrency")
+            && m.contains_key("defaultTimeout")
+            && m.contains_key("logRetentionDays")
     });
     let map = stored(&fx);
     assert_eq!(map["defaultConcurrency"], "100");

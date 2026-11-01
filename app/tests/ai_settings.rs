@@ -906,6 +906,7 @@ fn external_mcp_settings_validate_and_generate_http_snippets(cx: &mut TestAppCon
 // ---------------------------------------------------------------------------
 
 #[gpui_kit::test]
+#[cfg_attr(windows, ignore = "types POSIX shell syntax into the local shell")]
 fn agent_clis_are_detected_and_the_default_agent_follows(cx: &mut TestAppContext) {
     let _s = serial();
     let (fx, view) = open(cx);

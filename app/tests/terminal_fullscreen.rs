@@ -241,6 +241,7 @@ fn clicking_a_url_in_the_output_opens_it_but_dragging_or_clicking_elsewhere_does
 }
 
 #[gpui_kit::test]
+#[cfg_attr(windows, ignore = "types POSIX shell syntax into the local shell")]
 fn a_terminal_multiplexer_draws_its_windows_and_detaches(cx: &mut TestAppContext) {
     // GNU screen stands in for tmux (not installed on this machine): same redraw, prefix key and window handling.
     let _s = serial();

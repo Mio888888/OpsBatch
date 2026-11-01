@@ -213,6 +213,7 @@ fn the_bridge_authenticates_lists_tools_and_describes_the_environment(cx: &mut T
 }
 
 #[gpui_kit::test]
+#[cfg_attr(windows, ignore = "types POSIX shell syntax into the local shell")]
 fn auto_mode_runs_commands_in_the_terminal_and_the_window_shows_the_server(
     cx: &mut TestAppContext,
 ) {
@@ -281,6 +282,7 @@ fn auto_mode_runs_commands_in_the_terminal_and_the_window_shows_the_server(
 }
 
 #[gpui_kit::test]
+#[cfg_attr(windows, ignore = "types POSIX shell syntax into the local shell")]
 fn confirm_mode_waits_for_the_window_and_honours_the_decision(cx: &mut TestAppContext) {
     let _s = serial();
     let (fx, port) = running_bridge(cx, PermissionMode::Confirm);
@@ -508,6 +510,7 @@ fn the_server_follows_the_settings_and_keeps_a_discovery_file(cx: &mut TestAppCo
 }
 
 #[gpui_kit::test]
+#[cfg_attr(windows, ignore = "types POSIX shell syntax into the local shell")]
 fn the_real_stdio_launcher_talks_to_the_running_app(cx: &mut TestAppContext) {
     use std::io::{BufRead, BufReader};
     use std::process::{Command, Stdio};
@@ -1705,6 +1708,7 @@ fn transfers_permissions_forward_changes_and_vault_writes_work_against_a_real_se
 }
 
 #[gpui_kit::test]
+#[cfg_attr(windows, ignore = "types POSIX shell syntax into the local shell")]
 fn answering_an_approval_does_not_move_the_records(cx: &mut TestAppContext) {
     let _s = serial();
     let (_fx, port) = running_bridge(cx, PermissionMode::Confirm);
@@ -2126,6 +2130,7 @@ fn library_scripts_run_on_hosts_and_the_run_can_be_followed_and_stopped(cx: &mut
 }
 
 #[gpui_kit::test]
+#[cfg_attr(windows, ignore = "types POSIX shell syntax into the local shell")]
 fn output_without_a_final_newline_is_kept(cx: &mut TestAppContext) {
     let _s = serial();
     let (_fx, port) = running_bridge(cx, PermissionMode::Auto);

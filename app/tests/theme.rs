@@ -82,10 +82,12 @@ fn switching_to_a_light_theme_and_accent_repaints_and_persists(cx: &mut TestAppC
     // The save runs on the background runtime.
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
+        // the settings are written key by key, so a read can see only some of the new values
         let saved = ops_core::rt::block_on(ThemeSettings::load(&ctx.db));
-        if saved.accent_color_id == "rose" {
-            assert_eq!(saved.terminal_theme_id, "github-light");
-            assert_eq!(saved.terminal_theme_tone, ThemeTone::Light);
+        if saved.accent_color_id == "rose"
+            && saved.terminal_theme_id == "github-light"
+            && saved.terminal_theme_tone == ThemeTone::Light
+        {
             break;
         }
         assert!(Instant::now() < deadline, "settings were not persisted");

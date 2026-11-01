@@ -73,6 +73,11 @@ impl TextPrompt {
         &self.input
     }
 
+    /// True while the submitted text is being processed.
+    pub fn busy(&self) -> bool {
+        self.busy
+    }
+
     pub fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.input.read(cx).value().trim().to_string();
         if self.busy || text.is_empty() {

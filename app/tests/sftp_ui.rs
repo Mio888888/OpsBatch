@@ -479,7 +479,7 @@ fn sftp_dialogs_create_rename_delete_and_double_click_asks_for_the_editor(cx: &m
             break;
         }
         if std::time::Instant::now() > deadline {
-            let (state, dialog_open) = (
+            let (state, dialog) = (
                 cx.update(|cx| {
                     let s = st.read(cx);
                     format!(
@@ -490,11 +490,20 @@ fn sftp_dialogs_create_rename_delete_and_double_click_asks_for_the_editor(cx: &m
                         s.remote_entries.iter().map(|e| &e.name).collect::<Vec<_>>()
                     )
                 }),
-                win(cx, &fx, |w, _| w.try_find("text-prompt").is_some()),
+                win(cx, &fx, |w, cx| {
+                    w.render_frame(cx);
+                    format!(
+                        "open={} ok button={:?} window={:?}",
+                        w.try_find("text-prompt").is_some(),
+                        w.try_find("prompt-ok").map(|b| b.bounds()),
+                        w.viewport_size()
+                    )
+                }),
             );
             panic!(
-                "created.txt never listed: on disk={} dialog still open={dialog_open} {state}",
-                work.join("created.txt").exists()
+                "created.txt never listed: on disk={} prompt busy={} dialog: {dialog} {state}",
+                work.join("created.txt").exists(),
+                cx.update(|cx| prompt.read(cx).busy())
             );
         }
         std::thread::sleep(std::time::Duration::from_millis(10));

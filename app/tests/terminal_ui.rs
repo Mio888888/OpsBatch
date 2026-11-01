@@ -118,6 +118,7 @@ fn empty_page_offers_a_local_terminal_and_tabs_appear_connecting_then_connected(
 }
 
 #[gpui_kit::test]
+#[cfg_attr(windows, ignore = "types POSIX shell syntax into the local shell")]
 fn keyboard_ime_and_resize_reach_the_shell(cx: &mut TestAppContext) {
     let _s = serial();
     let fx = common::setup(cx, |_| {});
@@ -173,6 +174,7 @@ fn keyboard_ime_and_resize_reach_the_shell(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+#[cfg_attr(windows, ignore = "types POSIX shell syntax into the local shell")]
 fn paste_uses_bracketed_mode_only_when_requested_and_copy_reads_the_selection(
     cx: &mut TestAppContext,
 ) {
@@ -514,6 +516,7 @@ fn remote_tab_shows_monitor_and_all_bottom_tabs_and_auth_failure_can_be_repaired
 }
 
 #[gpui_kit::test]
+#[cfg_attr(windows, ignore = "types POSIX shell syntax into the local shell")]
 fn mouse_selects_text_wheel_scrolls_history_and_tabs_survive_window_recreation(
     cx: &mut TestAppContext,
 ) {

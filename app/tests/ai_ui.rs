@@ -286,6 +286,7 @@ fn pending_with_assessment(cx: &mut TestAppContext, sid: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 #[gpui_kit::test]
+#[cfg_attr(windows, ignore = "types POSIX shell syntax into the local shell")]
 fn chat_streams_a_plan_runs_the_approved_command_and_follows_up(cx: &mut TestAppContext) {
     let _s = serial();
     let (fx, mock, _tp, panel, sid) = ai_fixture(cx);
@@ -627,6 +628,7 @@ fn executed(cx: &mut TestAppContext, sid: &str) -> bool {
 }
 
 #[gpui_kit::test]
+#[cfg_attr(windows, ignore = "types POSIX shell syntax into the local shell")]
 fn auto_mode_runs_commands_without_a_click(cx: &mut TestAppContext) {
     let _s = serial();
     let (fx, _mock, _tp, panel, sid) = ai_fixture(cx);
@@ -649,6 +651,7 @@ fn auto_mode_runs_commands_without_a_click(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+#[cfg_attr(windows, ignore = "types POSIX shell syntax into the local shell")]
 fn confirm_mode_waits_for_the_click_and_a_matching_grant_skips_it(cx: &mut TestAppContext) {
     let _s = serial();
     let (fx, _mock, _tp, panel, sid) = ai_fixture(cx);

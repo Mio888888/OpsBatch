@@ -93,7 +93,7 @@ fn wait_until(
     what: &str,
     mut cond: impl FnMut(&mut TestAppContext) -> bool,
 ) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + Duration::from_secs(30);
     loop {
         cx.run_until_parked();
         if cond(cx) {

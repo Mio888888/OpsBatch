@@ -704,7 +704,9 @@ fn runs_from_the_list_through_ssh_with_branches_confirmation_and_templates(
     win(cx, &fx, |w, cx| {
         w.render_frame(cx);
         assert!(w.try_find("wf-run-dialog").is_some() && w.try_find("wf-confirm").is_some());
-        w.click("wf-confirm-ok", cx);
+    });
+    common::click_until(cx, &fx, "wf-confirm-ok", |cx| {
+        page.read_with(cx, |p, app| p.run().read(app).pending_confirm().is_none())
     });
     wait_until(cx, "finished", |cx| {
         page.read_with(cx, |p, app| !p.run().read(app).running)

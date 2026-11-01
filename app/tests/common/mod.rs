@@ -57,7 +57,11 @@ pub fn setup(cx: &mut TestAppContext, seed: impl FnOnce(&ops_core::Core)) -> Fix
         init_globals(
             c2,
             ops_i18n::LanguageMode::ZhCn,
-            ThemeSettings::default(),
+            // Windows starts at 115%; the tests lay things out for 100% like the other platforms
+            ThemeSettings {
+                ui_scale: 100,
+                ..ThemeSettings::default()
+            },
             cx,
         )
     });

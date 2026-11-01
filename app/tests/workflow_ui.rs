@@ -138,8 +138,13 @@ fn the_page_starts_empty_and_creating_a_workflow_opens_the_editor(cx: &mut TestA
     cx.run_until_parked();
     assert!(workflows(&fx).is_empty());
     win(cx, &fx, |w, cx| {
+        w.render_frame(cx);
         w.input("日常巡检", cx);
-        w.click("wf-create-ok", cx);
+        w.render_frame(cx);
+    });
+    // OK is disabled until the name has been drawn once; press it again if the first press went nowhere
+    common::click_until(cx, &fx, "wf-create-ok", |cx| {
+        win(cx, &fx, |w, _| w.try_find("wf-create-dialog").is_none())
     });
     wait_until(cx, "editor open", |cx| {
         page.read_with(cx, |p, _| p.editor().is_some())

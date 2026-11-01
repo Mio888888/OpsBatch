@@ -112,21 +112,21 @@ pub fn wait_until(
 pub fn click_until(
     cx: &mut TestAppContext,
     fx: &Fixture,
-    id: &'static str,
+    id: impl Into<gpui_kit::ElementId> + Clone,
     mut taken: impl FnMut(&mut TestAppContext) -> bool,
 ) {
     use gpui_kit::test::TestWindowExt;
     for attempt in 0..20 {
         cx.update_window(fx.handle.into(), |_, w, cx| {
             w.render_frame(cx);
-            w.click(id, cx);
+            w.click(id.clone(), cx);
         })
         .unwrap();
         cx.run_until_parked();
         if taken(cx) {
             return;
         }
-        assert!(attempt < 19, "clicking {id} never had an effect");
+        assert!(attempt < 19, "the click never had an effect");
         std::thread::sleep(Duration::from_millis(100));
     }
 }

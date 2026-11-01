@@ -257,18 +257,30 @@ fn proxy_and_jump_chain_are_persisted_from_the_advanced_tab(cx: &mut TestAppCont
             HostDialog::open_with_handle(store.clone(), None, None, window, cx)
         })
         .unwrap();
+    let ph = cx.update(|cx| dialog.read(cx).inputs.proxy_host.clone());
     cx.update_window(fx.handle.into(), |_, window, cx| {
         let i = &dialog.read(cx).inputs;
-        let (name, ip, ph) = (i.name.clone(), i.ip.clone(), i.proxy_host.clone());
+        let (name, ip) = (i.name.clone(), i.ip.clone());
         set_text(cx, window, &name, "inner");
         set_text(cx, window, &ip, "10.1.1.1");
         window.render_frame(cx);
         window.click("host-tab-advanced", cx);
         window.render_frame(cx);
-        window.click("proxy-enabled", cx);
+    })
+    .unwrap();
+    // Each control is pressed until the dialog shows its effect: a click can go nowhere on a loaded CI machine.
+    common::click_until(cx, &fx, "proxy-enabled", |cx| {
+        cx.update(|cx| dialog.read(cx).values().proxy_enabled)
+    });
+    cx.update_window(fx.handle.into(), |_, window, cx| {
         window.render_frame(cx);
         set_text(cx, window, &ph, " proxy.internal ");
-        window.click(("jump", 0usize), cx);
+    })
+    .unwrap();
+    common::click_until(cx, &fx, ("jump", 0usize), |cx| {
+        cx.update(|cx| !dialog.read(cx).values().jump_chain.is_empty())
+    });
+    cx.update_window(fx.handle.into(), |_, window, cx| {
         window.render_frame(cx);
         dialog.update(cx, |d, cx| d.submit(window, cx));
     })

@@ -21,8 +21,12 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
 } finally { Pop-Location }
 
+# Authenticode is opt-in: without a certificate configured there is nothing to sign with.
+$signing = [bool]($env:WINDOWS_CODESIGN_CERT_PATH -or $env:WINDOWS_CODESIGN_CERT_THUMBPRINT)
+if (-not $signing) { Write-Warning 'Windows Authenticode signing skipped: set WINDOWS_CODESIGN_CERT_PATH or WINDOWS_CODESIGN_CERT_THUMBPRINT to sign release artifacts.' }
+
 $exe = Join-Path $root 'target\release\opsbatch.exe'
-& (Join-Path $PSScriptRoot 'sign.ps1') $exe
+if ($signing) { & (Join-Path $PSScriptRoot 'sign.ps1') $exe }
 
 $iscc = (Get-Command iscc.exe -ErrorAction SilentlyContinue).Source
 if (-not $iscc) { $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe' }
@@ -31,5 +35,5 @@ if (-not (Test-Path $iscc)) { throw 'ISCC.exe (Inno Setup 6) not found' }
 if ($LASTEXITCODE -ne 0) { throw 'iscc failed' }
 
 $installer = Join-Path $dist "OpsBatch-$version-windows-$arch-setup.exe"
-& (Join-Path $PSScriptRoot 'sign.ps1') $installer
+if ($signing) { & (Join-Path $PSScriptRoot 'sign.ps1') $installer }
 Write-Output $installer

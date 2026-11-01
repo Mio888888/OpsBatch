@@ -82,7 +82,7 @@ $resolvedSignTool = Resolve-SignTool -ConfiguredPath $SignTool
 $targets = @(Resolve-SignTargets -InputPaths $Path)
 
 if ($targets.Count -eq 0) {
-  throw 'No .exe or .msi targets found to sign.'
+  throw "No .exe or .msi targets found to sign (path='$($Path -join ';')', certificate path='$CertificatePath', thumbprint='$CertificateThumbprint')."
 }
 
 $signArgs = @('sign', '/fd', $DigestAlgorithm, '/tr', $TimestampUrl, '/td', $DigestAlgorithm)

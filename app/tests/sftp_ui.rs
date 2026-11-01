@@ -455,6 +455,12 @@ fn sftp_dialogs_create_rename_delete_and_double_click_asks_for_the_editor(cx: &m
             "created.txt",
             "typing reaches the dialog field"
         );
+    });
+    // Let the field's change reach the dialog and redraw it before pressing OK.
+    cx.run_until_parked();
+    win(cx, &fx, |w, cx| {
+        w.render_frame(cx);
+        assert_ne!(w.find("prompt-ok").disabled(), Some(true), "name entered");
         w.click("prompt-ok", cx);
     });
     wait_until(cx, "file created", |cx| {

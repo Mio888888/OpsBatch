@@ -83,9 +83,10 @@ fn empty_page_offers_a_local_terminal_and_tabs_appear_connecting_then_connected(
         assert!(w.try_find("terminal-reopen-local").is_some());
         assert!(w.try_find("terminal-tab-bar").is_none());
     });
-    win(cx, &fx, |w, cx| w.click("terminal-reopen-local", cx));
-    cx.run_until_parked();
+    // Click and draw without letting the executor run: a local shell comes up within milliseconds, so after a
+    // `run_until_parked` the tab may already be connected and the connecting card gone.
     win(cx, &fx, |w, cx| {
+        w.click("terminal-reopen-local", cx);
         w.render_frame(cx);
         assert!(
             w.try_find(("terminal-tab", 0usize)).is_some(),

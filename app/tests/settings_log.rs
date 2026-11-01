@@ -538,10 +538,15 @@ fn settings_embeds_ai_and_library_sections(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn animations_stop_when_reduce_motion_is_on_or_the_os_asks_for_it(cx: &mut TestAppContext) {
-    use opsbatch_app::workbench::motion;
+    use opsbatch_app::workbench::motion::{self, OsMotion};
     let _s = serial();
     let fx = common::setup(cx, |_| {});
-    cx.update(|cx| assert!(!motion::reduced(cx)));
+    // What the machine running the tests says about motion is read in the background and may already be in
+    // (a CI runner can have "reduce motion" switched on), so pin it before looking at the setting.
+    cx.update(|cx| {
+        cx.global_mut::<OsMotion>().reduce = false;
+        assert!(!motion::reduced(cx));
+    });
     // the main window renders (and animates) page switches without trouble
     for mode in ["mode-github", "mode-workflow", "mode-terminal"] {
         cx.update_window(fx.handle.into(), |_, w, cx| {
@@ -554,9 +559,12 @@ fn animations_stop_when_reduce_motion_is_on_or_the_os_asks_for_it(cx: &mut TestA
             .advance_clock(std::time::Duration::from_millis(300));
     }
     cx.update(|cx| {
+        cx.global_mut::<OsMotion>().reduce = false;
         opsbatch_app::theme::update(cx, |s| s.reduce_motion = true);
         assert!(motion::reduced(cx), "the setting turns motion off");
         opsbatch_app::theme::update(cx, |s| s.reduce_motion = false);
         assert!(!motion::reduced(cx));
+        cx.global_mut::<OsMotion>().reduce = true;
+        assert!(motion::reduced(cx), "so does the operating system");
     });
 }

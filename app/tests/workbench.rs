@@ -297,13 +297,17 @@ fn asset_panel_lists_recent_connections_above_the_tree_and_persists_them(cx: &mu
 
     // The list survives a reload from the database.
     let ctx = fx.ctx.clone();
+    // each recorded host is saved on its own, so wait for the last save, not for the key to appear
+    let expected = [alpha.clone(), beta.clone()];
     wait_until(cx, "persisted", |_| {
-        let ctx = ctx.clone();
+        let (ctx, expected) = (ctx.clone(), expected.clone());
         ops_core::rt::block_on(async move {
             ops_core::settings::get_general_settings(&ctx.db)
                 .await
                 .unwrap()
-                .contains_key("recentHosts")
+                .get("recentHosts")
+                .and_then(|v| serde_json::from_str::<Vec<String>>(v).ok())
+                .is_some_and(|v| v == expected)
         })
     });
     cx.update(|cx| {

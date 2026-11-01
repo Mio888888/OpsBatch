@@ -19,6 +19,6 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 aes = "0.8"
 des = "0.8"
 md-5 = "0.10"
-num-bigint = "0.4"
+num-bigint = "0.5"
 rand = "0.8"
 flate2 = "1"

@@ -17,6 +17,7 @@ pub type SubmitFn = Rc<dyn Fn(String, &mut Window, &mut App) -> Task<Result<(), 
 pub struct TextPrompt {
     input: Entity<InputState>,
     busy: bool,
+    last_error: Option<String>,
     on_submit: SubmitFn,
     _sub: Subscription,
 }
@@ -53,6 +54,7 @@ impl TextPrompt {
             Self {
                 input,
                 busy: false,
+                last_error: None,
                 on_submit,
                 _sub: sub,
             }
@@ -78,6 +80,11 @@ impl TextPrompt {
         self.busy
     }
 
+    /// Why the last submit failed (the dialog stays open then).
+    pub fn last_error(&self) -> Option<&str> {
+        self.last_error.as_deref()
+    }
+
     pub fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.input.read(cx).value().trim().to_string();
         if self.busy || text.is_empty() {
@@ -92,7 +99,10 @@ impl TextPrompt {
                 this.busy = false;
                 match result {
                     Ok(()) => window.close_dialog(cx),
-                    Err(e) => toast::error(window, cx, t!("common.operationFailed", error = e)),
+                    Err(e) => {
+                        toast::error(window, cx, t!("common.operationFailed", error = e.clone()));
+                        this.last_error = Some(e);
+                    }
                 }
                 cx.notify();
             });

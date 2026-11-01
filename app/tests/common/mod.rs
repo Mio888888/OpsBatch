@@ -107,6 +107,30 @@ pub fn wait_until(
     }
 }
 
+/// Click `id`, and click it again until `taken` reports that the click had its effect. A click on a dialog button
+/// right after the dialog opened sometimes goes nowhere on a loaded CI machine.
+pub fn click_until(
+    cx: &mut TestAppContext,
+    fx: &Fixture,
+    id: impl Into<gpui_kit::ElementId> + Clone,
+    mut taken: impl FnMut(&mut TestAppContext) -> bool,
+) {
+    use gpui_kit::test::TestWindowExt;
+    for attempt in 0..20 {
+        cx.update_window(fx.handle.into(), |_, w, cx| {
+            w.render_frame(cx);
+            w.click(id.clone(), cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        if taken(cx) {
+            return;
+        }
+        assert!(attempt < 19, "the click never had an effect");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 pub fn assets(cx: &mut TestAppContext) -> Entity<AssetsStore> {
     cx.update(|cx| cx.global::<UiState>().assets.clone())
 }

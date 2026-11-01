@@ -458,10 +458,9 @@ fn sftp_dialogs_create_rename_delete_and_double_click_asks_for_the_editor(cx: &m
     });
     // Let the field's change reach the dialog and redraw it before pressing OK.
     cx.run_until_parked();
-    win(cx, &fx, |w, cx| {
-        w.render_frame(cx);
-        assert_ne!(w.find("prompt-ok").disabled(), Some(true), "name entered");
-        w.click("prompt-ok", cx);
+    common::click_until(cx, &fx, "prompt-ok", |cx| {
+        cx.update(|cx| prompt.read(cx).busy())
+            || win(cx, &fx, |w, _| w.try_find("text-prompt").is_none())
     });
     // On failure say what the panel and the disk looked like: this only ever failed on one CI image.
     let listed = |cx: &mut TestAppContext| {
@@ -501,9 +500,10 @@ fn sftp_dialogs_create_rename_delete_and_double_click_asks_for_the_editor(cx: &m
                 }),
             );
             panic!(
-                "created.txt never listed: on disk={} prompt busy={} dialog: {dialog} {state}",
+                "created.txt never listed: on disk={} prompt busy={} error={:?} dialog: {dialog} {state}",
                 work.join("created.txt").exists(),
-                cx.update(|cx| prompt.read(cx).busy())
+                cx.update(|cx| prompt.read(cx).busy()),
+                cx.update(|cx| prompt.read(cx).last_error().map(str::to_string))
             );
         }
         std::thread::sleep(std::time::Duration::from_millis(10));

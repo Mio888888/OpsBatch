@@ -16,10 +16,10 @@ tokio.workspace = true
 regex = "1"
 chrono.workspace = true
 rusqlite = { version = "0.31", features = ["bundled"] }
-base64 = "0.22"
+base64 = "0.23"
 hmac = "0.12"
 sha2 = "0.10"
 reqwest = { version = "0.12", features = ["json", "blocking"] }
-git2 = { version = "0.20", features = ["vendored-libgit2", "vendored-openssl"] }
+git2 = { version = "0.21", features = ["vendored-libgit2", "vendored-openssl"] }
 r2d2 = "0.8.10"
 r2d2_sqlite = "0.24"

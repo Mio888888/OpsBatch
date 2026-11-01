@@ -222,11 +222,14 @@ fn commands_docker_and_scripts_pages_browse_filter_add_edit_and_delete(cx: &mut 
         })
     });
     // Two versions of the old content were recorded (on opening the editor and on saving).
-    let versions = ops_core::rt::block_on(ops_library::library::list_script_versions(
-        &cx.update(|cx| opsbatch_app::services::ctx(cx)).db,
-        "s1".into(),
-    ))
-    .unwrap();
+    // (the store shows the save before the version rows are written)
+    let db = cx.update(|cx| opsbatch_app::services::ctx(cx)).db.clone();
+    let list = || {
+        ops_core::rt::block_on(ops_library::library::list_script_versions(&db, "s1".into()))
+            .unwrap()
+    };
+    wait_until(cx, "script versions recorded", |_| !list().is_empty());
+    let versions = list();
     assert!(
         !versions.is_empty() && versions.iter().all(|v| v.content == "echo backup"),
         "{versions:?}"

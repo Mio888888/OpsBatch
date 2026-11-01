@@ -1,5 +1,8 @@
 //! Application theme: persisted `ThemeSettings` + their projection onto gpui-component's global `Theme`.
 
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+
 use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::{App, Global, Hsla, Rgba, WindowAppearance};
 use ops_core::theme::{parse_css_color, ResolvedTheme, Rgba8, ThemeSettings};
@@ -7,6 +10,15 @@ use ops_core::theme::{parse_css_color, ResolvedTheme, Rgba8, ThemeSettings};
 pub struct AppTheme {
     pub settings: ThemeSettings,
     pub resolved: ResolvedTheme,
+    saves: Arc<SaveOrder>,
+}
+
+/// Keeps the saves of consecutive changes in order: each save runs on the runtime's threads, so without this an older
+/// snapshot can reach the database after a newer one and overwrite it.
+#[derive(Default)]
+struct SaveOrder {
+    latest: AtomicU64,
+    one_at_a_time: tokio::sync::Mutex<()>,
 }
 
 impl Global for AppTheme {}
@@ -37,7 +49,11 @@ fn os_prefers_dark(cx: &App) -> bool {
 
 pub fn init(settings: ThemeSettings, cx: &mut App) {
     let resolved = settings.resolve(os_prefers_dark(cx));
-    cx.set_global(AppTheme { settings, resolved });
+    cx.set_global(AppTheme {
+        settings,
+        resolved,
+        saves: Arc::default(),
+    });
     apply(cx);
 }
 
@@ -146,15 +162,21 @@ pub fn current(cx: &App) -> &AppTheme {
 /// Change settings, re-resolve, repaint everything and persist.
 pub fn update(cx: &mut App, edit: impl FnOnce(&mut ThemeSettings)) {
     let os_dark = os_prefers_dark(cx);
-    let settings = {
+    let (settings, saves, seq) = {
         let t = cx.global_mut::<AppTheme>();
         edit(&mut t.settings);
         t.resolved = t.settings.resolve(os_dark);
-        t.settings.clone()
+        let seq = t.saves.latest.fetch_add(1, Ordering::SeqCst) + 1;
+        (t.settings.clone(), t.saves.clone(), seq)
     };
     apply(cx);
     let ctx = crate::services::ctx(cx);
     ops_core::rt::spawn(async move {
+        let _turn = saves.one_at_a_time.lock().await;
+        // a newer change is already waiting and holds everything this one does
+        if saves.latest.load(Ordering::SeqCst) != seq {
+            return;
+        }
         if let Err(error) = settings.save(&ctx.db).await {
             log::warn!("could not save theme settings: {error}");
         }

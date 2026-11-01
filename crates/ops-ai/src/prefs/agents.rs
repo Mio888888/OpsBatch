@@ -1000,9 +1000,11 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_cli_finds_a_real_binary_and_rejects_a_missing_one() {
-        let info = resolve_cli("codex", "/bin/sh").await;
+        let this_test = std::env::current_exe().unwrap();
+        let this_test = this_test.to_str().unwrap();
+        let info = resolve_cli("codex", this_test).await;
         assert!(info.available);
-        assert_eq!(info.path.as_deref(), Some("/bin/sh"));
+        assert_eq!(info.path.as_deref(), Some(this_test));
         assert!(!resolve_cli("codex", "/definitely/not/here").await.available);
     }
 }

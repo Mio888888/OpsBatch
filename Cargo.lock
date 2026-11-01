@@ -7313,7 +7313,7 @@ dependencies = [
  "num-bigint 0.5.1",
  "ops-core",
  "ops-ssh",
- "rand 0.8.8",
+ "rand 0.10.3",
  "rusqlite",
  "serde",
  "serde_json",
@@ -9985,7 +9985,7 @@ dependencies = [
  "flate2",
  "md-5 0.10.6",
  "num-bigint 0.5.1",
- "rand 0.8.8",
+ "rand 0.10.3",
  "tokio",
 ]
 

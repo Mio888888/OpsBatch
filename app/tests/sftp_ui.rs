@@ -458,11 +458,23 @@ fn sftp_dialogs_create_rename_delete_and_double_click_asks_for_the_editor(cx: &m
     });
     // Let the field's change reach the dialog and redraw it before pressing OK.
     cx.run_until_parked();
-    win(cx, &fx, |w, cx| {
-        w.render_frame(cx);
-        assert_ne!(w.find("prompt-ok").disabled(), Some(true), "name entered");
-        w.click("prompt-ok", cx);
-    });
+    // A click that lands while the dialog is still settling can go nowhere (seen on one CI image): press again until
+    // the prompt takes the name.
+    for attempt in 0..20 {
+        win(cx, &fx, |w, cx| {
+            w.render_frame(cx);
+            assert_ne!(w.find("prompt-ok").disabled(), Some(true), "name entered");
+            w.click("prompt-ok", cx);
+        });
+        cx.run_until_parked();
+        let taken = cx.update(|cx| prompt.read(cx).busy())
+            || win(cx, &fx, |w, _| w.try_find("text-prompt").is_none());
+        if taken {
+            break;
+        }
+        assert!(attempt < 19, "the prompt never took the name");
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
     // On failure say what the panel and the disk looked like: this only ever failed on one CI image.
     let listed = |cx: &mut TestAppContext| {
         cx.update(|cx| {

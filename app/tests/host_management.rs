@@ -252,6 +252,8 @@ fn proxy_and_jump_chain_are_persisted_from_the_advanced_tab(cx: &mut TestAppCont
     let bastion = cx.update(|cx| store.read(cx).hosts[0].id.clone());
     let dialog = cx
         .update_window(fx.handle.into(), |_, window, cx| {
+            // the advanced tab is long and the Windows fonts make it longer: give it room so every control is clickable
+            window.resize(gpui_kit::size(gpui_kit::px(1280.), gpui_kit::px(1600.)));
             HostDialog::open_with_handle(store.clone(), None, None, window, cx)
         })
         .unwrap();

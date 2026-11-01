@@ -17,7 +17,7 @@ serde_json.workspace = true
 flume.workspace = true
 rusqlite = { version = "0.31", features = ["bundled"] }
 aes = "0.8"
-des = "0.8"
+des = "0.9"
 md-5 = "0.10"
 num-bigint = "0.5"
 rand = "0.8"

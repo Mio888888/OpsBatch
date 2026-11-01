@@ -2109,15 +2109,6 @@ dependencies = [
 
 [[package]]
 name = "des"
-version = "0.8.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ffdd80ce8ce993de27e9f063a444a4d53ce8e8db4c1f00cc03af5ad5a9867a1e"
-dependencies = [
- "cipher 0.4.4",
-]
-
-[[package]]
-name = "des"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "916a94e407b54f9034d71dd748234cd1e516ced6284009906ae246f177eafe5a"
@@ -7306,7 +7297,7 @@ version = "1.0.1"
 dependencies = [
  "aes 0.8.4",
  "anyhow",
- "des 0.8.1",
+ "des",
  "flate2",
  "flume 0.11.1",
  "md-5 0.10.6",
@@ -7768,7 +7759,7 @@ dependencies = [
  "cbc 0.2.1",
  "cipher 0.5.2",
  "crypto-bigint",
- "des 0.9.0",
+ "des",
  "hmac 0.13.0",
  "inout 0.2.5",
  "oid",
@@ -9981,7 +9972,7 @@ version = "1.0.1"
 dependencies = [
  "aes 0.8.4",
  "anyhow",
- "des 0.8.1",
+ "des",
  "flate2",
  "md-5 0.10.6",
  "num-bigint 0.5.1",
@@ -10064,7 +10055,7 @@ dependencies = [
  "cipher 0.5.2",
  "ctr 0.10.1",
  "ctutils",
- "des 0.9.0",
+ "des",
  "poly1305",
  "ssh-encoding",
  "zeroize",

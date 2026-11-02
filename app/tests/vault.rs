@@ -99,6 +99,20 @@ fn request(cx: &mut TestAppContext, fx: &Fixture) -> futures::channel::oneshot::
     win(cx, fx, vault::request_unlock)
 }
 
+/// The answer to a pending unlock request, waited for: the fake reports `unlocked` before the answer has reached the
+/// receiver, so reading it right after the unlock sometimes finds nothing yet.
+fn answered(
+    cx: &mut TestAppContext,
+    rx: &mut futures::channel::oneshot::Receiver<bool>,
+) -> Option<bool> {
+    let mut answer = None;
+    wait_until(cx, "the answer to the unlock request", |_| {
+        answer = answer.or(rx.try_recv().ok().flatten());
+        answer.is_some()
+    });
+    answer
+}
+
 fn dialog_shown(cx: &mut TestAppContext, fx: &Fixture) -> bool {
     win(cx, fx, |w, cx| {
         w.render_frame(cx);
@@ -126,7 +140,7 @@ fn a_key_in_the_system_keychain_unlocks_without_asking(cx: &mut TestAppContext) 
     wait_until(cx, "unlocked", |_| {
         fake.is_unlocked() && ran.load(Ordering::SeqCst)
     });
-    assert_eq!(rx.try_recv().ok().flatten(), Some(true));
+    assert_eq!(answered(cx, &mut rx), Some(true));
     assert_eq!(
         fake.migrations.load(Ordering::SeqCst),
         1,
@@ -208,7 +222,7 @@ fn without_a_keychain_key_the_dialog_asks_for_the_startup_password(cx: &mut Test
     });
     wait_until(cx, "unlocked", |_| fake.is_unlocked());
     cx.run_until_parked();
-    assert_eq!(rx.try_recv().ok().flatten(), Some(true));
+    assert_eq!(answered(cx, &mut rx), Some(true));
     assert_eq!(fake.migrations.load(Ordering::SeqCst), 1);
     assert_eq!(
         *fake.attempts.lock().unwrap(),
@@ -288,7 +302,7 @@ fn an_unusable_keychain_still_offers_the_startup_password_with_the_reason(cx: &m
     });
     wait_until(cx, "unlocked", |_| fake.is_unlocked());
     cx.run_until_parked();
-    assert_eq!(rx.try_recv().ok().flatten(), Some(true));
+    assert_eq!(answered(cx, &mut rx), Some(true));
 }
 
 #[gpui_kit::test]
@@ -333,7 +347,7 @@ fn an_error_a_password_cannot_fix_offers_a_retry_instead_of_spinning(cx: &mut Te
     });
     wait_until(cx, "unlocked", |_| fake.is_unlocked());
     cx.run_until_parked();
-    assert_eq!(rx.try_recv().ok().flatten(), Some(true));
+    assert_eq!(answered(cx, &mut rx), Some(true));
     assert_eq!(fake.attempts.lock().unwrap().len(), 3);
 }
 
@@ -366,10 +380,7 @@ fn every_caller_shares_one_dialog_and_one_unlock(cx: &mut TestAppContext) {
     wait_until(cx, "unlocked", |_| fake.is_unlocked());
     cx.run_until_parked();
     assert_eq!(
-        (
-            first.try_recv().ok().flatten(),
-            second.try_recv().ok().flatten()
-        ),
+        (answered(cx, &mut first), answered(cx, &mut second)),
         (Some(true), Some(true))
     );
     assert_eq!(fake.migrations.load(Ordering::SeqCst), 1);

@@ -66,6 +66,9 @@ pub fn window_options(kind: WindowKind, title: &str, cx: &App) -> WindowOptions 
             },
             ..TitleBar::title_bar_options()
         }),
+        // X11 WM_CLASS / Wayland app id: how a desktop environment matches the window to opsbatch.desktop
+        // (StartupWMClass=opsbatch) for its launcher icon and grouping.
+        app_id: Some("opsbatch".to_string()),
         inactive_frame_interval: if kind.keeps_full_frame_rate_when_inactive() {
             None
         } else {

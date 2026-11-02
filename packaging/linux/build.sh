@@ -48,10 +48,14 @@ bundle_libs() {
   done
   mkdir -p "$1/usr/lib"
   libs="$(ldd "$1/usr/bin/opsbatch" | awk '$2 == "=>" && $3 ~ /^\// { print $3 }')"
-  # Loaded with dlopen at run time, so ldd does not list them.
-  for soname in libvulkan.so.1 libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1 libxkbcommon.so.0 libxkbcommon-x11.so.0; do
+  # Loaded with dlopen at run time, so ldd does not list them; their own dependencies travel along too.
+  for soname in libvulkan.so.1 libwayland-client.so.0 libwayland-cursor.so.0 libwayland-egl.so.1 libxkbcommon.so.0 \
+    libxkbcommon-x11.so.0 libayatana-appindicator3.so.1; do
+    found="$(ldconfig -p | awk -v want="$soname" '$1 == want { print $NF; exit }')"
+    [ -n "$found" ] || { echo "error: $soname is not installed on the build host, the AppImage would lack it" >&2; exit 1; }
     libs="$libs
-$(ldconfig -p | awk -v want="$soname" '$1 == want { print $NF; exit }')"
+$found
+$(ldd "$found" | awk '$2 == "=>" && $3 ~ /^\// { print $3 }')"
   done
   libs="$(echo "$libs" | sort -u)"
   while read -r lib; do
@@ -103,7 +107,7 @@ Section: admin
 Priority: optional
 Architecture: $DEB_ARCH
 Maintainer: mio
-Depends: libc6, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libvulkan1, libfontconfig1, libasound2 | libasound2t64
+Depends: libc6, libgtk-3-0 | libgtk-3-0t64, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libvulkan1, libfontconfig1, libasound2 | libasound2t64, libayatana-appindicator3-1 | libappindicator3-1
 Description: OpsBatch - batch operations workbench
  SSH terminals, RDP/VNC, batch commands, script libraries, file transfer and workflows in one desktop app.
 CTL

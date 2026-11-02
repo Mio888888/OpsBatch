@@ -42,9 +42,18 @@ pub fn init(cx: &mut App, show_main: fn(&mut App)) {
     if let Some(icon) = icon() {
         builder = builder.with_icon(icon);
     }
-    let Ok(tray) = builder.build() else {
-        log::warn!("system tray unavailable");
-        return;
+    // On Linux the tray library loads libayatana-appindicator3 when the icon is built and panics when the system does
+    // not have it; an app without a tray is better than an app that does not start.
+    let tray = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| builder.build())) {
+        Ok(Ok(tray)) => tray,
+        Ok(Err(e)) => {
+            log::warn!("system tray unavailable: {e}");
+            return;
+        }
+        Err(_) => {
+            log::warn!("system tray unavailable: its library could not be loaded");
+            return;
+        }
     };
     cx.set_global(TrayHolder {
         _tray: tray,

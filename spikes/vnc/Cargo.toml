@@ -7,9 +7,9 @@ publish.workspace = true
 [dependencies]
 tokio = { workspace = true }
 anyhow = { workspace = true }
-aes = "0.8"
-des = "0.8"
+aes = "0.9"
+des = "0.9"
 md-5 = "0.10"
 num-bigint = "0.5"
-rand = "0.8"
+rand = "0.10"
 flate2 = "1"

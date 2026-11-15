@@ -1,12 +1,12 @@
 //! RFB authentication primitives: classic VNC (DES challenge) and Apple Remote Desktop (type 30, DH + AES-128-ECB).
 
 #[cfg(test)]
-use aes::cipher::BlockDecrypt;
-use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
+use aes::cipher::BlockCipherDecrypt;
+use aes::cipher::{BlockCipherEncrypt, KeyInit};
 use anyhow::{bail, Result};
 use md5::{Digest, Md5};
 use num_bigint::BigUint;
-use rand::RngCore;
+use rand::Rng;
 
 /// RFB VNC authentication: DES-ECB over the 16-byte challenge, key = password (8 bytes, zero padded)
 /// with the bits of every key byte reversed.
@@ -15,10 +15,10 @@ pub fn vnc_auth_response(password: &str, challenge: &[u8; 16]) -> [u8; 16] {
     for (i, b) in password.bytes().take(8).enumerate() {
         key[i] = b.reverse_bits();
     }
-    let cipher = des::Des::new(GenericArray::from_slice(&key));
+    let cipher = des::Des::new(&key.into());
     let mut out = *challenge;
     for chunk in out.as_chunks_mut::<8>().0 {
-        cipher.encrypt_block(GenericArray::from_mut_slice(chunk.as_mut_slice()));
+        cipher.encrypt_block(chunk.into());
     }
     out
 }
@@ -39,7 +39,7 @@ fn pad_be(value: &BigUint, len: usize) -> Vec<u8> {
 
 fn fill_field(dst: &mut [u8], text: &str) {
     // Fixed 64-byte field: NUL-terminated text, remainder random (as noVNC / Apple clients do).
-    rand::thread_rng().fill_bytes(dst);
+    rand::rng().fill_bytes(dst);
     let bytes = text.as_bytes();
     let n = bytes.len().min(dst.len() - 1);
     dst[..n].copy_from_slice(&bytes[..n]);
@@ -61,7 +61,7 @@ pub fn ard_client_response(
     let server_pub = BigUint::from_bytes_be(&hello.server_public);
 
     let mut priv_bytes = vec![0u8; key_len];
-    rand::thread_rng().fill_bytes(&mut priv_bytes);
+    rand::rng().fill_bytes(&mut priv_bytes);
     let private = BigUint::from_bytes_be(&priv_bytes);
 
     let client_public = pad_be(&g.modpow(&private, &p), key_len);
@@ -71,9 +71,9 @@ pub fn ard_client_response(
     let mut creds = [0u8; 128];
     fill_field(&mut creds[..64], username);
     fill_field(&mut creds[64..], password);
-    let cipher = aes::Aes128::new(GenericArray::from_slice(&aes_key));
+    let cipher = aes::Aes128::new(&aes_key.into());
     for block in creds.as_chunks_mut::<16>().0 {
-        cipher.encrypt_block(GenericArray::from_mut_slice(block.as_mut_slice()));
+        cipher.encrypt_block(block.into());
     }
     Ok((creds.to_vec(), client_public))
 }
@@ -92,10 +92,10 @@ pub fn ard_server_decrypt(
         prime.len(),
     );
     let aes_key: [u8; 16] = Md5::digest(&shared).into();
-    let cipher = aes::Aes128::new(GenericArray::from_slice(&aes_key));
+    let cipher = aes::Aes128::new(&aes_key.into());
     let mut buf = encrypted.to_vec();
     for block in buf.as_chunks_mut::<16>().0 {
-        cipher.decrypt_block(GenericArray::from_mut_slice(block.as_mut_slice()));
+        cipher.decrypt_block(block.into());
     }
     let cstr = |b: &[u8]| {
         let end = b.iter().position(|&c| c == 0).unwrap_or(b.len());
@@ -119,6 +119,16 @@ mod tests {
         assert_eq!(a, b);
         assert_ne!(a, c);
         assert_ne!(a, challenge);
+    }
+
+    #[test]
+    fn vnc_response_matches_reference_des_vector() {
+        // Reference computed with `openssl enc -des-ecb -nopad` over the bit-reversed key "secret".
+        let expected = [
+            0x02, 0xb0, 0x48, 0xd0, 0x34, 0x8e, 0x64, 0x76, 0x02, 0xb0, 0x48, 0xd0, 0x34, 0x8e,
+            0x64, 0x76,
+        ];
+        assert_eq!(vnc_auth_response("secret", &[7u8; 16]), expected);
     }
 
     #[test]

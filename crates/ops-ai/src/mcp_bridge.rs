@@ -645,7 +645,7 @@ async fn serve_connection(
                     out.push(r);
                 }
             }
-            (!out.is_empty()).then(|| Value::Array(out))
+            (!out.is_empty()).then_some(Value::Array(out))
         }
         m => handle_rpc(m, &calls).await,
     };

@@ -31,7 +31,7 @@ sha2 = "0.10"
 hmac = "0.12"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
 arboard = { version = "3.6", default-features = false }
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.13", features = ["json"] }
 keyring = { version = "3", optional = true, features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 aes-gcm = { version = "0.10", optional = true }
 base64 = { version = "0.23", optional = true }
